@@ -13,12 +13,18 @@ export type ChatsStackParamList = {
   ConversationDetail: { conversationId: string };
 };
 
+export type SettingsStackParamList = {
+  SettingsHome: undefined;
+  Notifications: undefined;
+  Wallet: undefined;
+};
+
 export type MainTabParamList = {
   ChatsTab: NavigatorScreenParams<ChatsStackParamList>;
   ContactsTab: undefined;
   DashboardTab: undefined;
   CallsTab: undefined;
-  SettingsTab: undefined;
+  SettingsTab: NavigatorScreenParams<SettingsStackParamList>;
 };
 
 declare global {

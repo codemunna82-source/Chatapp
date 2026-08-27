@@ -41,3 +41,8 @@ export async function markNotificationRead(
   if (!Types.ObjectId.isValid(id)) return null;
   return Notification.findOneAndUpdate({ _id: id, tenantId, userId }, { $set: { readAt: new Date() } }, { new: true });
 }
+
+export async function markAllNotificationsRead(tenantId: string, userId: string): Promise<number> {
+  const result = await Notification.updateMany({ tenantId, userId, readAt: null }, { $set: { readAt: new Date() } });
+  return result.modifiedCount;
+}

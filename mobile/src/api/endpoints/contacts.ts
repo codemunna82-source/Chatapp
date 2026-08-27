@@ -17,7 +17,18 @@ export async function getContact(id: string): Promise<Contact> {
   return res.data.data;
 }
 
-export async function createContact(input: { phone: string; name?: string }): Promise<Contact> {
+export async function createContact(input: { phone: string; name?: string; tags?: string[] }): Promise<Contact> {
   const res = await apiClient.post<ApiSuccess<Contact>>('/contacts', input);
+  return res.data.data;
+}
+
+export interface UpdateContactInput {
+  id: string;
+  name?: string;
+  tags?: string[];
+}
+
+export async function updateContact({ id, ...patch }: UpdateContactInput): Promise<Contact> {
+  const res = await apiClient.patch<ApiSuccess<Contact>>(`/contacts/${id}`, patch);
   return res.data.data;
 }

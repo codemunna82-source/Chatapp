@@ -16,6 +16,10 @@ import { contactRouter } from './modules/contacts/contact.routes';
 import { conversationRouter } from './modules/conversations/conversation.routes';
 import { mediaRouter } from './modules/media/media.routes';
 import { messageTemplateRouter } from './modules/templates/messageTemplate.routes';
+import { walletRouter } from './modules/wallet/wallet.routes';
+import { notificationRouter } from './modules/notifications/notification.routes';
+import { subscriptionRouter } from './modules/subscriptions/subscription.routes';
+import { dashboardRouter } from './modules/dashboard/dashboard.routes';
 
 export function createApp(): Express {
   const app = express();
@@ -63,6 +67,10 @@ export function createApp(): Express {
   app.use('/api/conversations', conversationRouter);
   app.use('/api/media', mediaRouter);
   app.use('/api/templates', messageTemplateRouter);
+  app.use('/api/wallet', walletRouter);
+  app.use('/api/notifications', notificationRouter);
+  app.use('/api/subscription', subscriptionRouter);
+  app.use('/api/dashboard', dashboardRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

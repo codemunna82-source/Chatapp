@@ -27,3 +27,13 @@ export function useCreateContact() {
     },
   });
 }
+
+export function useUpdateContact() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: contactsApi.updateContact,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['contacts'] });
+    },
+  });
+}

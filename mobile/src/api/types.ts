@@ -118,3 +118,56 @@ export interface UploadedMedia {
   sizeBytes: number;
   status: 'UPLOADING' | 'READY' | 'FAILED';
 }
+
+export interface Wallet {
+  id: string;
+  tenantId: string;
+  balance: number;
+  currency: string;
+}
+
+export interface WalletTransaction {
+  id: string;
+  type: 'CREDIT' | 'DEBIT';
+  amount: number;
+  reason: string;
+  referenceId?: string;
+  createdAt: string;
+}
+
+export type NotificationType =
+  | 'MESSAGE_RECEIVED'
+  | 'MESSAGE_FAILED'
+  | 'SUBSCRIPTION_EXPIRING'
+  | 'SUBSCRIPTION_EXPIRED'
+  | 'ACCOUNT_DISABLED'
+  | 'CALL_MISSED'
+  | 'SYSTEM';
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data?: { conversationId?: string; [key: string]: unknown };
+  readAt?: string;
+  createdAt: string;
+}
+
+export type SubscriptionStatus = 'ACTIVE' | 'EXPIRING' | 'EXPIRED' | 'SUSPENDED';
+
+export interface Subscription {
+  id: string;
+  plan: string;
+  validFrom: string;
+  validUntil: string;
+  autoRenew: boolean;
+  status: SubscriptionStatus;
+}
+
+export interface DashboardSummary {
+  contactsTotal: number;
+  conversations: { open: number; archived: number; unreadTotal: number };
+  messages: { sentTotal: number; receivedTotal: number; failedTotal: number };
+  messagesByDay: { date: string; sent: number; received: number }[];
+}

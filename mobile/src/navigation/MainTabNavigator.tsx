@@ -4,7 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import type { MainTabParamList } from './types';
 import { ChatsStackNavigator } from './ChatsStackNavigator';
 import { PlaceholderScreen } from '../components/PlaceholderScreen';
-import { SettingsScreen } from '../screens/settings/SettingsScreen';
+import { SettingsStackNavigator } from './SettingsStackNavigator';
+import { ContactsScreen } from '../screens/contacts/ContactsScreen';
+import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
 import { useTheme } from '../theme/ThemeProvider';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -35,12 +37,8 @@ export function MainTabNavigator() {
       })}
     >
       <Tab.Screen name="ChatsTab" component={ChatsStackNavigator} options={{ title: 'Chats' }} />
-      <Tab.Screen name="ContactsTab" options={{ title: 'Contacts' }}>
-        {() => <PlaceholderScreen title="Contacts" note="Contact management arrives in Phase 7." />}
-      </Tab.Screen>
-      <Tab.Screen name="DashboardTab" options={{ title: 'Dashboard' }}>
-        {() => <PlaceholderScreen title="Dashboard" note="Analytics arrive in Phase 8." />}
-      </Tab.Screen>
+      <Tab.Screen name="ContactsTab" component={ContactsScreen} options={{ title: 'Contacts' }} />
+      <Tab.Screen name="DashboardTab" component={DashboardScreen} options={{ title: 'Dashboard' }} />
       <Tab.Screen name="CallsTab" options={{ title: 'Calls' }}>
         {() => (
           <PlaceholderScreen
@@ -49,7 +47,7 @@ export function MainTabNavigator() {
           />
         )}
       </Tab.Screen>
-      <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ title: 'Settings' }} />
+      <Tab.Screen name="SettingsTab" component={SettingsStackNavigator} options={{ title: 'Settings' }} />
     </Tab.Navigator>
   );
 }

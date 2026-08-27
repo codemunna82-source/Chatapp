@@ -9,4 +9,9 @@ export const queryKeys = {
   messages: (conversationId: string) => ['messages', conversationId] as const,
   contacts: (params: Omit<ListContactsParams, 'cursor'>) => ['contacts', params] as const,
   templates: ['templates'] as const,
+  wallet: ['wallet'] as const,
+  walletTransactions: ['walletTransactions'] as const,
+  notifications: (unreadOnly?: boolean) => ['notifications', { unreadOnly: unreadOnly ?? false }] as const,
+  subscription: ['subscription'] as const,
+  dashboard: ['dashboard'] as const,
 };

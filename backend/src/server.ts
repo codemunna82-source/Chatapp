@@ -5,6 +5,11 @@ import { env } from './config/env';
 import { logger } from './lib/logger';
 import { isRedisConfigured, closeRedisConnection } from './queues/connection';
 import { startWebhookWorker, stopWebhookWorker } from './queues/webhook.queue';
+import {
+  startSubscriptionExpiryWorker,
+  stopSubscriptionExpiryWorker,
+  scheduleSubscriptionExpirySweep,
+} from './queues/subscriptionExpiry.queue';
 import { startSocketServer, stopSocketServer } from './sockets/socketServer';
 
 async function main(): Promise<void> {
@@ -13,8 +18,12 @@ async function main(): Promise<void> {
   if (isRedisConfigured()) {
     startWebhookWorker();
     logger.info('Webhook processing worker started (BullMQ + Redis)');
+    startSubscriptionExpiryWorker();
+    await scheduleSubscriptionExpirySweep();
+    logger.info('Subscription expiry sweep worker started (hourly, BullMQ + Redis)');
   } else {
     logger.warn('REDIS_URL not configured — webhook deliveries will be processed inline, not queued');
+    logger.warn('REDIS_URL not configured — subscription expiry sweep will not run (auth middleware stays authoritative regardless)');
   }
 
   const app = createApp();
@@ -31,7 +40,7 @@ async function main(): Promise<void> {
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'Shutting down');
     httpServer.close(() => {
-      Promise.all([stopSocketServer(), stopWebhookWorker(), closeRedisConnection()])
+      Promise.all([stopSocketServer(), stopWebhookWorker(), stopSubscriptionExpiryWorker(), closeRedisConnection()])
         .catch((err) => logger.error({ err }, 'Error during shutdown'))
         .finally(() => process.exit(0));
     });

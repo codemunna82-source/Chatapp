@@ -130,6 +130,33 @@ export const openApiSpec = {
     '/templates': {
       get: { summary: 'List approved WhatsApp templates for the caller\'s tenant', responses: { '200': { description: 'OK' } } },
     },
+    '/wallet': {
+      get: { summary: 'Get the tenant\'s wallet balance (MASTER_ADMIN only)', responses: { '200': { description: 'OK' } } },
+    },
+    '/wallet/transactions': {
+      get: { summary: 'List the tenant\'s wallet ledger entries, cursor-paginated (MASTER_ADMIN only)', responses: { '200': { description: 'OK' } } },
+    },
+    '/notifications': {
+      get: { summary: 'List the caller\'s own notifications, cursor-paginated, optional unreadOnly filter', responses: { '200': { description: 'OK' } } },
+    },
+    '/notifications/read-all': {
+      post: { summary: 'Mark all of the caller\'s unread notifications as read', responses: { '200': { description: 'OK' } } },
+    },
+    '/notifications/{id}/read': {
+      patch: { summary: 'Mark one notification as read', responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
+    },
+    '/subscription': {
+      get: {
+        summary: 'Get the tenant\'s current subscription plan and live-computed status (MASTER_ADMIN only)',
+        responses: { '200': { description: 'OK' }, '404': { description: 'No subscription record exists' } },
+      },
+    },
+    '/dashboard': {
+      get: {
+        summary: 'Aggregated tenant analytics — contact/conversation/message counts, a 14-day message time series, wallet balance, subscription status (ANALYTICS_VIEW)',
+        responses: { '200': { description: 'OK' } },
+      },
+    },
     '/health': { get: { summary: 'Liveness probe', security: [], responses: { '200': { description: 'OK' } } } },
     '/ready': { get: { summary: 'Readiness probe', security: [], responses: { '200': { description: 'OK' }, '503': { description: 'Not ready' } } } },
   },
