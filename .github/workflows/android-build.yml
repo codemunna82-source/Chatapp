@@ -17,6 +17,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Safeguard: a hung Gradle/runner step otherwise runs until GitHub's own
+    # 6-hour default job timeout — this catches it far sooner. Bumped from
+    # this workflow's own experience: a hang was force-cancelled manually
+    # after the "Assemble debug APK" step ran well past its normal ~5-6min.
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: mobile
@@ -55,6 +60,7 @@ jobs:
 
       - name: Assemble debug APK
         working-directory: mobile/android
+        timeout-minutes: 15
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK artifact
