@@ -1,0 +1,95 @@
+import { Types } from 'mongoose';
+import { Message, type MessageDoc, type MessageStatus, type MessageType, type MessageDirection } from './message.model';
+
+export interface CreateMessageInput {
+  tenantId: string;
+  conversationId: string;
+  senderId?: string;
+  recipientPhone: string;
+  direction: MessageDirection;
+  type: MessageType;
+  text?: string;
+  mediaId?: string;
+  metaMessageId?: string;
+  replyToMessageId?: string;
+  status?: MessageStatus;
+}
+
+export async function createMessage(input: CreateMessageInput): Promise<MessageDoc> {
+  return Message.create(input);
+}
+
+export async function findMessageByIdAndTenant(id: string, tenantId: string): Promise<MessageDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Message.findOne({ _id: id, tenantId });
+}
+
+/**
+ * `metaMessageId` (Meta's wamid) is globally unique on its own, but every
+ * lookup still filters by tenantId — the pattern every tenant-owned query
+ * in this codebase follows (spec §13), and a cheap extra guard against a
+ * webhook ever being processed against the wrong tenant.
+ */
+export async function findMessageByMetaIdAndTenant(
+  metaMessageId: string,
+  tenantId: string,
+): Promise<MessageDoc | null> {
+  return Message.findOne({ metaMessageId, tenantId });
+}
+
+export interface ListMessagesOptions {
+  cursor?: string; // opaque cursor = _id of the oldest message already loaded
+  limit?: number;
+}
+
+/**
+ * Newest-first page of a conversation's history. The chat screen renders
+ * newest at the bottom and loads older messages upward (spec §19) by
+ * requesting the next page with the previous page's oldest `_id` as cursor
+ * — the full history is never fetched or held in memory at once.
+ */
+export async function listMessagesByConversation(
+  tenantId: string,
+  conversationId: string,
+  opts: ListMessagesOptions = {},
+): Promise<{ items: MessageDoc[]; nextCursor: string | null }> {
+  const limit = Math.min(opts.limit ?? 30, 100);
+  const filter: Record<string, unknown> = { tenantId, conversationId };
+  if (opts.cursor && Types.ObjectId.isValid(opts.cursor)) {
+    filter._id = { $lt: new Types.ObjectId(opts.cursor) };
+  }
+
+  const items = await Message.find(filter)
+    .sort({ _id: -1 })
+    .limit(limit + 1);
+  const hasMore = items.length > limit;
+  const page = hasMore ? items.slice(0, limit) : items;
+  return { items: page, nextCursor: hasMore ? String(page[page.length - 1]!._id) : null };
+}
+
+export async function updateMessageStatusByMetaId(
+  metaMessageId: string,
+  tenantId: string,
+  status: MessageStatus,
+  error?: unknown,
+): Promise<MessageDoc | null> {
+  return Message.findOneAndUpdate(
+    { metaMessageId, tenantId },
+    { $set: { status, ...(error !== undefined ? { error } : {}) } },
+    { new: true },
+  );
+}
+
+export async function attachMetaMessageId(
+  id: string,
+  tenantId: string,
+  metaMessageId: string,
+): Promise<MessageDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Message.findOneAndUpdate({ _id: id, tenantId }, { $set: { metaMessageId, status: 'SENT' } }, { new: true });
+}
+
+export async function markMessageFailed(id: string, tenantId: string, error: unknown): Promise<MessageDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Message.findOneAndUpdate({ _id: id, tenantId }, { $set: { status: 'FAILED', error } }, { new: true });
+}
