@@ -28,6 +28,8 @@ export const logger = pino({
       'META_ACCESS_TOKEN',
       'META_VERIFY_TOKEN',
       'metaAccessToken',
+      'CLOUDINARY_URL',
+      'cloudinaryUrl',
     ],
     censor: '[REDACTED]',
   },

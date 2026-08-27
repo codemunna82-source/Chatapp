@@ -105,6 +105,16 @@ idempotent: if you already ran this once (e.g. before setting
 recognizes the admin account already exists and only backfills the demo
 chat data that's still missing.
 
+## 3b. (Optional) Enable Cloudinary for profile pictures + media caching
+
+Without this, avatar upload returns a clear "not configured" error and
+WhatsApp media always re-fetches from Meta on every view — both work fine
+without it, this just makes them faster/more durable. To enable: Render
+dashboard → your backend service → **Environment** → add `CLOUDINARY_URL`
+set to exactly the value shown on your Cloudinary dashboard under "API
+Environment variable" (`cloudinary://<api_key>:<api_secret>@<cloud_name>`).
+Saving redeploys automatically — no seed re-run or other step needed.
+
 ## 4. Point the Android app at it
 
 Once you have a real `https://<your-service>.onrender.com` URL, tell me —

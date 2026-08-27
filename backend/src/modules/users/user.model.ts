@@ -26,14 +26,15 @@ const userSchema = new Schema(
     validUntil: { type: Date, required: true },
     lastLoginAt: { type: Date },
     displayName: { type: String, trim: true },
-    // Stored inline rather than in an external bucket — there's no object
-    // storage configured for this project (ARCHITECTURE.md never specced
-    // one), and profile photos are small/capped (see avatar.validation.ts)
-    // so this stays well within a reasonable document size. select: false
-    // keeps this off every ordinary user fetch/list — only the dedicated
-    // GET .../avatar route asks for it explicitly.
-    avatarData: { type: Buffer, select: false },
+    // Cloudinary-hosted (see integrations/cloudinary.ts) — the bytes
+    // themselves are never stored inline on this document. avatarUrl is
+    // select: false anyway (only the dedicated GET .../avatar route needs
+    // it) so it's never handed to a client directly; that route fetches
+    // the bytes from Cloudinary server-side and proxies them, same
+    // access-token/URL boundary as the WhatsApp media proxy.
+    avatarUrl: { type: String, select: false },
     avatarContentType: { type: String, select: false },
+    avatarCloudinaryPublicId: { type: String, select: false },
     avatarUpdatedAt: { type: Date },
   },
   { timestamps: true },

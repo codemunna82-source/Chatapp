@@ -62,6 +62,10 @@ services:
         value: v21.0
       - key: META_MOCK_MODE
         value: "true"
+      # Optional — object storage for avatars + a persistent WhatsApp media
+      # cache (see .env.example). Format: cloudinary://<key>:<secret>@<cloud_name>.
+      - key: CLOUDINARY_URL
+        sync: false
       - key: RATE_LIMIT_WINDOW_MS
         value: "60000"
       - key: RATE_LIMIT_MAX

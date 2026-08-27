@@ -14,7 +14,14 @@ const mediaSchema = new Schema(
     mimeType: { type: String, required: true },
     sizeBytes: { type: Number, required: true },
     sha256: { type: String, required: true },
-    storageRef: { type: String, required: true }, // our own object storage key/URL
+    // Our own object-storage cache of this file's bytes: `pending:<sha256>`
+    // until cached, `meta:<metaMediaId>` for inbound media not yet cached,
+    // or a real https:// Cloudinary URL once cached (see integrations/cloudinary.ts
+    // and media.service.ts's cache-on-read / cache-on-upload logic).
+    storageRef: { type: String, required: true },
+    // Only set once storageRef holds a real Cloudinary URL — needed to
+    // delete/manage the asset later.
+    cloudinaryPublicId: { type: String },
     status: { type: String, enum: MEDIA_STATUSES, default: 'UPLOADING', required: true },
   },
   { timestamps: true },

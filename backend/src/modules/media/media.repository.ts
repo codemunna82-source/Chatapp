@@ -33,3 +33,13 @@ export async function markMediaReady(id: string, tenantId: string, metaMediaId: 
 export async function findMediaBySha256(tenantId: string, sha256: string): Promise<MediaDoc | null> {
   return Media.findOne({ tenantId, sha256, status: 'READY' });
 }
+
+/** Records a Cloudinary cache hit — see media.service.ts's cache-on-read/cache-on-upload logic. */
+export async function setMediaCloudinaryRef(
+  id: string,
+  tenantId: string,
+  storageRef: string,
+  cloudinaryPublicId: string,
+): Promise<MediaDoc | null> {
+  return Media.findOneAndUpdate({ _id: id, tenantId }, { $set: { storageRef, cloudinaryPublicId } }, { new: true });
+}

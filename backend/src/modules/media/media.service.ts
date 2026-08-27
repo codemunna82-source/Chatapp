@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
 import { ApiError } from '../../lib/ApiError';
+import { logger } from '../../lib/logger';
 import { recordAudit } from '../audit/auditLog.service';
 import { validateMediaFile } from './media.validation';
-import { createMedia, markMediaReady, findMediaBySha256, findMediaByIdAndTenant } from './media.repository';
+import { createMedia, markMediaReady, findMediaBySha256, findMediaByIdAndTenant, setMediaCloudinaryRef } from './media.repository';
 import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
 import { getMetaGateway } from '../../integrations/meta';
+import { isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer } from '../../integrations/cloudinary';
 import type { MediaDoc } from './media.model';
 
 export interface UploadMediaInput {
@@ -14,6 +16,10 @@ export interface UploadMediaInput {
   buffer: Buffer;
   mimeType: string;
   filename?: string;
+}
+
+function cloudinaryFolderFor(tenantId: string): string {
+  return `voxo/${tenantId}/media`;
 }
 
 export async function uploadMediaForTenant(input: UploadMediaInput): Promise<MediaDoc> {
@@ -57,6 +63,23 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
       targetId: media._id,
       metadata: { mimeType: input.mimeType, sizeBytes: input.buffer.length },
     });
+
+    // Cache to Cloudinary while the buffer is already in hand — never lets
+    // a Cloudinary hiccup fail the upload, since the Meta upload above is
+    // what actually matters for being able to send the message at all.
+    if (isCloudinaryConfigured()) {
+      try {
+        const cached = await uploadBufferToCloudinary(input.buffer, {
+          folder: cloudinaryFolderFor(input.tenantId),
+          resourceType: 'auto',
+        });
+        const withRef = await setMediaCloudinaryRef(String(media._id), input.tenantId, cached.url, cached.publicId);
+        return withRef ?? ready ?? media;
+      } catch (err) {
+        logger.warn({ err, mediaId: String(media._id) }, 'Cloudinary cache-write failed for outbound media upload');
+      }
+    }
+
     return ready ?? media;
   } catch (err) {
     media.status = 'FAILED';
@@ -66,11 +89,13 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
 }
 
 /**
- * Proxies media bytes from Meta — the access token needed to fetch them
- * must never reach Android (architecture doc §4), so this backend fetches
- * on the client's behalf and streams the result back. Retrieval is
- * deliberately on-demand rather than eager (see webhook.service.ts's
- * comment on inbound media) — no local object storage required.
+ * Serves media bytes without ever handing the client a Meta or Cloudinary
+ * URL/token directly (architecture doc §4). Checks the Cloudinary cache
+ * first — real durability win, since Meta's own media ids/links expire
+ * after ~30 days and re-fetching from Meta on every view is otherwise
+ * unavoidable. Falls back to Meta (the original behavior) on a cache miss
+ * or a Cloudinary error, and opportunistically writes the cache afterward
+ * so the next read is fast — that write never blocks or fails this response.
  */
 export async function getMediaBytesForTenant(
   tenantId: string,
@@ -84,10 +109,26 @@ export async function getMediaBytesForTenant(
     throw ApiError.badRequest('MEDIA_NOT_READY', 'This media has not finished uploading yet');
   }
 
+  if (media.storageRef.startsWith('https://')) {
+    try {
+      const buffer = await fetchCloudinaryBuffer(media.storageRef);
+      return { buffer, mimeType: media.mimeType };
+    } catch (err) {
+      logger.warn({ err, mediaId }, 'Cloudinary fetch failed for cached media — falling back to Meta');
+    }
+  }
+
   const credentials = await resolveMetaCredentialsForPhoneNumber(tenantId, String(media.whatsappPhoneNumberId));
   const gateway = getMetaGateway();
   const location = await gateway.retrieveMedia(credentials, media.metaMediaId);
   const buffer = await gateway.downloadMediaBinary(credentials, location.url);
+  const mimeType = location.mimeType || media.mimeType;
 
-  return { buffer, mimeType: location.mimeType || media.mimeType };
+  if (isCloudinaryConfigured()) {
+    uploadBufferToCloudinary(buffer, { folder: cloudinaryFolderFor(tenantId), resourceType: 'auto' })
+      .then((cached) => setMediaCloudinaryRef(String(media._id), tenantId, cached.url, cached.publicId))
+      .catch((err) => logger.warn({ err, mediaId }, 'Cloudinary cache-write failed for inbound media fetch'));
+  }
+
+  return { buffer, mimeType };
 }

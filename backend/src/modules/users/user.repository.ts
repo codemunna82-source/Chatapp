@@ -97,25 +97,27 @@ export async function countUsersByTenantAndEmail(email: string): Promise<number>
 export async function setUserAvatar(
   id: string,
   tenantId: string,
-  data: Buffer,
+  avatarUrl: string,
   contentType: string,
+  cloudinaryPublicId: string,
 ): Promise<UserDoc | null> {
   if (!Types.ObjectId.isValid(id)) return null;
   return User.findOneAndUpdate(
     { _id: id, tenantId },
-    { $set: { avatarData: data, avatarContentType: contentType, avatarUpdatedAt: new Date() } },
+    { $set: { avatarUrl, avatarContentType: contentType, avatarCloudinaryPublicId: cloudinaryPublicId, avatarUpdatedAt: new Date() } },
     { new: true },
   );
 }
 
-export interface AvatarBytes {
-  data: Buffer;
+export interface AvatarRef {
+  url: string;
   contentType: string;
+  cloudinaryPublicId?: string;
 }
 
-export async function findUserAvatarByIdAndTenant(id: string, tenantId: string): Promise<AvatarBytes | null> {
+export async function findUserAvatarRefByIdAndTenant(id: string, tenantId: string): Promise<AvatarRef | null> {
   if (!Types.ObjectId.isValid(id)) return null;
-  const user = await User.findOne({ _id: id, tenantId }).select('+avatarData +avatarContentType');
-  if (!user || !user.avatarData || !user.avatarContentType) return null;
-  return { data: user.avatarData as unknown as Buffer, contentType: user.avatarContentType };
+  const user = await User.findOne({ _id: id, tenantId }).select('+avatarUrl +avatarContentType +avatarCloudinaryPublicId');
+  if (!user || !user.avatarUrl || !user.avatarContentType) return null;
+  return { url: user.avatarUrl, contentType: user.avatarContentType, cloudinaryPublicId: user.avatarCloudinaryPublicId ?? undefined };
 }

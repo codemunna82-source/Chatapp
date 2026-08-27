@@ -2,6 +2,7 @@ import { ApiError } from '../../lib/ApiError';
 import { hashPassword } from '../../lib/password';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './user.repository';
+import { isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer, deleteCloudinaryAsset } from '../../integrations/cloudinary';
 import type { UserDoc } from './user.model';
 import type { z } from 'zod';
 import type { createUserSchema, updateUserSchema, listUsersQuerySchema } from './user.validation';
@@ -118,10 +119,9 @@ export async function updateUserForTenant(
   return toPublicUser(user);
 }
 
-// Small ceiling, deliberately — the image is stored inline on the User
-// document (see user.model.ts avatarData), not in an external bucket,
-// so this keeps every profile photo well within a reasonable document
-// size instead of needing a resize/compress pipeline server-side.
+// Small ceiling, deliberately — keeps upload/proxy latency low even though
+// the bytes now live in Cloudinary (see integrations/cloudinary.ts) rather
+// than inline on the User document.
 export const AVATAR_MAX_SIZE_BYTES = 1.5 * 1024 * 1024;
 export const AVATAR_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
@@ -143,11 +143,32 @@ export async function updateOwnAvatar(
       `Image is ${(data.length / (1024 * 1024)).toFixed(1)}MB — must be under ${AVATAR_MAX_SIZE_BYTES / (1024 * 1024)}MB`,
     );
   }
+  if (!isCloudinaryConfigured()) {
+    throw ApiError.internal(
+      'CLOUDINARY_NOT_CONFIGURED',
+      'Profile picture storage is not configured on this server (CLOUDINARY_URL is unset)',
+    );
+  }
 
-  const user = await repo.setUserAvatar(userId, tenantId, data, contentType);
+  const previous = await repo.findUserAvatarRefByIdAndTenant(userId, tenantId);
+
+  const uploaded = await uploadBufferToCloudinary(data, {
+    folder: `voxo/${tenantId}/avatars`,
+    resourceType: 'image',
+  });
+
+  const user = await repo.setUserAvatar(userId, tenantId, uploaded.url, contentType, uploaded.publicId);
   if (!user) {
     throw ApiError.notFound('USER_NOT_FOUND', 'User not found');
   }
+
+  // Best-effort: drop the previous photo now that the new one is live.
+  // Never blocks the response — an orphaned old asset isn't worth failing
+  // a successful avatar update over.
+  if (previous?.cloudinaryPublicId) {
+    void deleteCloudinaryAsset(previous.cloudinaryPublicId, 'image');
+  }
+
   return toPublicUser(user);
 }
 
@@ -155,11 +176,12 @@ export async function getUserAvatarForTenant(
   tenantId: string,
   id: string,
 ): Promise<{ data: Buffer; contentType: string }> {
-  const avatar = await repo.findUserAvatarByIdAndTenant(id, tenantId);
+  const avatar = await repo.findUserAvatarRefByIdAndTenant(id, tenantId);
   if (!avatar) {
     throw ApiError.notFound('AVATAR_NOT_FOUND', 'No profile picture set');
   }
-  return avatar;
+  const data = await fetchCloudinaryBuffer(avatar.url);
+  return { data, contentType: avatar.contentType };
 }
 
 /** DELETE /api/users/:id is implemented as a soft-disable — see user.repository.ts. */

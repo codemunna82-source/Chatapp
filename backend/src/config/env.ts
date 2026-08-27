@@ -35,6 +35,13 @@ const envSchema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
 
+  // Optional — object storage for avatars and a persistent cache of
+  // WhatsApp media (which Meta's own media ids/links expire after ~30
+  // days). Format: cloudinary://<api_key>:<api_secret>@<cloud_name>
+  // (exactly what Cloudinary's dashboard hands you). Every feature that
+  // touches this degrades gracefully when unset — see integrations/cloudinary.ts.
+  CLOUDINARY_URL: z.string().optional(),
+
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
 
