@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, type NativeSyntheticEvent, type TextInputSelectionChangeEventData } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -288,14 +288,8 @@ export function Composer({
       return;
     }
     try {
-      // sendRecording is only ever invoked from an event handler (a
-      // Pressable's onPress, or runOnJS(sendRecording) from the gesture's
-      // onEnd worklet below) — never during render — so a fresh timestamp
-      // here is safe. eslint-plugin-react-hooks' purity check can't trace
-      // through the .onEnd() registration to see that it's deferred.
       const uploaded = await uploadMedia.mutateAsync({
         whatsappPhoneNumberId,
-        // eslint-disable-next-line react-hooks/purity
         file: { uri, name: `voice-${Date.now()}.m4a`, mimeType: 'audio/mp4' },
       });
       sendMessage.mutate({ type: 'audio', mediaId: uploaded.id, replyToMessageId });
@@ -308,43 +302,84 @@ export function Composer({
     }
   };
 
+  // The gesture's worklet callbacks (below) always need the LATEST version
+  // of these handlers, but the Gesture object itself must stay referentially
+  // stable across renders — recreating it on every one of the ~100ms
+  // recorderState-driven re-renders during an active hold would tear down
+  // and reconfigure the native gesture recognizer mid-touch, which is what
+  // broke start/stop/animation in the first build of this feature. A plain
+  // ref mirrors the current handlers (updated every render, a normal JS
+  // assignment — no cross-thread concerns since it's only ever read from
+  // plain JS-thread dispatcher functions below, never from worklet code
+  // directly), and the dispatchers themselves are the stable, memoized
+  // things the gesture's runOnJS calls actually reference.
+  const handlersRef = useRef({ startRecording, handleLock, discardRecording, sendRecording });
+  useEffect(() => {
+    handlersRef.current = { startRecording, handleLock, discardRecording, sendRecording };
+  });
+
+  const dispatchStart = useCallback(() => handlersRef.current.startRecording(), []);
+  const dispatchLock = useCallback(() => handlersRef.current.handleLock(), []);
+  const dispatchCancel = useCallback(() => handlersRef.current.discardRecording(), []);
+  const dispatchSend = useCallback(() => handlersRef.current.sendRecording(), []);
+
   // Press-and-hold to record, swipe left to cancel, swipe up to lock —
   // spec §10. onBegin fires the instant the finger touches down (before the
   // gesture is even "recognized"), which is what makes the recording feel
-  // instantaneous rather than starting after a deliberate drag.
-  const micGesture = Gesture.Pan()
-    .minDistance(0)
-    .onBegin(() => {
-      runOnJS(startRecording)();
-    })
-    .onUpdate((e) => {
-      // Mutating shared values inside a gesture worklet is the documented
-      // Reanimated/Gesture Handler pattern for driving UI-thread-driven
-      // feedback from a drag — not a real React state mutation.
-      // eslint-plugin-react-hooks' immutability check doesn't yet recognize
-      // this pattern inside .onUpdate()/.onEnd() worklets.
-      /* eslint-disable react-hooks/immutability */
-      micTranslateX.value = Math.min(0, e.translationX);
-      micTranslateY.value = Math.min(0, e.translationY);
-      /* eslint-enable react-hooks/immutability */
-      if (lockedSV.value === 0 && e.translationY < LOCK_THRESHOLD_Y) {
-        lockedSV.value = 1;
-        runOnJS(handleLock)();
-      }
-    })
-    .onEnd((e) => {
-      if (lockedSV.value === 0) {
-        if (e.translationX < CANCEL_THRESHOLD_X) {
-          runOnJS(discardRecording)();
-        } else {
-          runOnJS(sendRecording)();
-        }
-      }
-      /* eslint-disable react-hooks/immutability */
-      micTranslateX.value = withTiming(0);
-      micTranslateY.value = withTiming(0);
-      /* eslint-enable react-hooks/immutability */
-    });
+  // instantaneous rather than starting after a deliberate drag. Memoized
+  // with stable deps only (see handlersRef above) so this is the same
+  // Gesture instance for the whole component lifetime — critical for the
+  // in-progress touch to survive the frequent re-renders a live recording
+  // causes (see the comment above handlersRef for why recreating this per
+  // render broke recording in the first version of this feature).
+  //
+  // eslint-plugin-react-hooks' "refs" check flags every runOnJS(dispatchX)
+  // call below as "may read a ref during render", because dispatchStart /
+  // dispatchLock / dispatchCancel / dispatchSend transitively read
+  // handlersRef.current — but they only do that when actually invoked as
+  // gesture callbacks (touch-driven), never during this render. The whole
+  // point of routing through these stable dispatchers is to keep this
+  // useMemo's dependency array free of anything that changes every render;
+  // the static check can't trace that the ref read is deferred behind them.
+  /* eslint-disable react-hooks/refs */
+  const micGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .minDistance(0)
+        .onBegin(() => {
+          runOnJS(dispatchStart)();
+        })
+        .onUpdate((e) => {
+          // Mutating shared values inside a gesture worklet is the
+          // documented Reanimated/Gesture Handler pattern for driving
+          // UI-thread feedback from a drag — not a real React state
+          // mutation. eslint-plugin-react-hooks' immutability check
+          // doesn't yet recognize this pattern inside worklets.
+          /* eslint-disable react-hooks/immutability */
+          micTranslateX.value = Math.min(0, e.translationX);
+          micTranslateY.value = Math.min(0, e.translationY);
+          if (lockedSV.value === 0 && e.translationY < LOCK_THRESHOLD_Y) {
+            lockedSV.value = 1;
+            runOnJS(dispatchLock)();
+          }
+          /* eslint-enable react-hooks/immutability */
+        })
+        .onEnd((e) => {
+          if (lockedSV.value === 0) {
+            if (e.translationX < CANCEL_THRESHOLD_X) {
+              runOnJS(dispatchCancel)();
+            } else {
+              runOnJS(dispatchSend)();
+            }
+          }
+          /* eslint-disable react-hooks/immutability */
+          micTranslateX.value = withTiming(0);
+          micTranslateY.value = withTiming(0);
+          /* eslint-enable react-hooks/immutability */
+        }),
+    [dispatchStart, dispatchLock, dispatchCancel, dispatchSend, micTranslateX, micTranslateY, lockedSV],
+  );
+  /* eslint-enable react-hooks/refs */
 
   // Spec §18: outside the 24h window, only an approved template may be
   // sent — enforced server-side regardless, but the composer shouldn't
@@ -372,7 +407,9 @@ export function Composer({
 
   const rowBase = [styles.row, shadow.sm, { backgroundColor: colors.surfaceElevated, borderTopColor: colors.divider, padding: spacing.sm }];
 
-  // Sending the recorded clip (upload in flight).
+  // Sending the recorded clip (upload in flight) — the gesture has already
+  // fully ended by this point (this only happens after onEnd fired), so
+  // it's safe for this to be a separate tree from the gesture-holding one.
   if (voiceBusy) {
     return (
       <View style={rowBase}>
@@ -384,7 +421,10 @@ export function Composer({
     );
   }
 
-  // Locked recording — hands-free: pause/resume, delete, send.
+  // Locked recording — hands-free: pause/resume, delete, send. Also safe as
+  // a separate tree: once locked, this composer no longer cares about
+  // further updates from that gesture instance (onEnd's cancel/send branch
+  // is gated on !locked), so losing it here doesn't drop any functionality.
   if (isLocked && recorderState.isRecording) {
     return (
       <View style={rowBase}>
@@ -413,68 +453,67 @@ export function Composer({
     );
   }
 
-  // Holding the mic, not yet locked — timer/waveform + slide-to-cancel and
-  // slide-up-to-lock hints. Releasing here sends unless dragged past the
-  // cancel threshold; a very short tap-release still records and sends a
-  // brief clip, matching the familiar app's own tap-release behavior.
-  if (recorderState.isRecording && !isLocked) {
-    return (
-      <View style={rowBase}>
-        {voiceError ? (
-          <Text style={[typography.caption, { color: colors.danger }]}>{voiceError}</Text>
-        ) : (
-          <>
-            <View style={[styles.recordingRow, { marginHorizontal: spacing.sm }]}>
-              <View style={[styles.recordingDot, { backgroundColor: colors.danger }]} />
-              <Text style={[typography.bodyMedium, { color: colors.textPrimary, marginRight: spacing.sm }]}>
-                {formatDuration(recorderState.durationMillis / 1000)}
-              </Text>
-              <RecordingWaveform metering={recorderState.metering} color={colors.primary} />
-              <Ionicons name="chevron-back" size={14} color={colors.textTertiary} />
-              <Text style={[typography.caption, { color: colors.textTertiary }]}> Slide to cancel</Text>
-            </View>
-            <View style={styles.actionSlot}>
-              <Animated.View style={[styles.lockHint, lockHintStyle]}>
-                <Ionicons name="lock-closed-outline" size={16} color={colors.primary} />
-                <Ionicons name="chevron-up-outline" size={12} color={colors.primary} />
-              </Animated.View>
-              <GestureDetector gesture={micGesture}>
-                <Animated.View style={[styles.sendButton, { backgroundColor: colors.primary, borderRadius: radius.full }, micAnimatedStyle]}>
-                  <Ionicons name="mic" size={18} color={colors.textOnPrimary} />
-                </Animated.View>
-              </GestureDetector>
-            </View>
-          </>
-        )}
-      </View>
-    );
-  }
+  // Idle and "holding the mic, not yet locked" share ONE tree below — the
+  // GestureDetector must stay mounted continuously across that specific
+  // transition, since it's the exact same physical touch: starting the
+  // recording (via onBegin) causes recorderState.isRecording to flip true
+  // a moment later, and if that swapped in a *different* JSX subtree here,
+  // the gesture's underlying native view would be torn down mid-touch —
+  // orphaning it, so onUpdate/onEnd would never fire again (no drag
+  // animation, no cancel, no lock, no send-on-release). Only the content
+  // *around* the gesture button differs between the two states.
+  const isHolding = recorderState.isRecording && !isLocked;
 
   return (
     <View style={rowBase}>
-      <Pressable onPress={() => setEmojiPickerVisible(true)} hitSlop={8} style={styles.emojiButton} accessibilityLabel="Choose an emoji">
-        <Text style={styles.emojiGlyph}>😊</Text>
-      </Pressable>
+      {isHolding ? (
+        <View style={[styles.recordingRow, { marginHorizontal: spacing.sm }]}>
+          <View style={[styles.recordingDot, { backgroundColor: colors.danger }]} />
+          <Text style={[typography.bodyMedium, { color: colors.textPrimary, marginRight: spacing.sm }]}>
+            {formatDuration(recorderState.durationMillis / 1000)}
+          </Text>
+          <RecordingWaveform metering={recorderState.metering} color={colors.primary} />
+          <Ionicons name="chevron-back" size={14} color={colors.textTertiary} />
+          <Text style={[typography.caption, { color: colors.textTertiary }]}> Slide to cancel</Text>
+        </View>
+      ) : (
+        <>
+          <Pressable onPress={() => setEmojiPickerVisible(true)} hitSlop={8} style={styles.emojiButton} accessibilityLabel="Choose an emoji">
+            <Text style={styles.emojiGlyph}>😊</Text>
+          </Pressable>
 
-      <View style={[styles.pill, { backgroundColor: colors.surfaceAlt, borderRadius: radius.xl, paddingLeft: spacing.md }]}>
-        <TextInput
-          value={text}
-          onChangeText={handleChangeText}
-          onSelectionChange={handleSelectionChange}
-          placeholder="Message"
-          placeholderTextColor={colors.textTertiary}
-          multiline
-          style={[styles.input, typography.body, { color: colors.textPrimary }]}
-        />
-        <Pressable onPress={onAttach} hitSlop={8} style={styles.pillIcon} accessibilityLabel="Add attachment">
-          <Ionicons name="attach-outline" size={21} color={colors.textSecondary} />
-        </Pressable>
-        <Pressable onPress={pickFromCameraQuick} disabled={cameraBusy} hitSlop={8} style={styles.pillIcon} accessibilityLabel="Take a photo">
-          <Ionicons name="camera-outline" size={20} color={colors.textSecondary} />
-        </Pressable>
-      </View>
+          <View style={[styles.pill, { backgroundColor: colors.surfaceAlt, borderRadius: radius.xl, paddingLeft: spacing.md }]}>
+            <TextInput
+              value={text}
+              onChangeText={handleChangeText}
+              onSelectionChange={handleSelectionChange}
+              placeholder="Message"
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              style={[styles.input, typography.body, { color: colors.textPrimary }]}
+            />
+            <Pressable onPress={onAttach} hitSlop={8} style={styles.pillIcon} accessibilityLabel="Add attachment">
+              <Ionicons name="attach-outline" size={21} color={colors.textSecondary} />
+            </Pressable>
+            <Pressable onPress={pickFromCameraQuick} disabled={cameraBusy} hitSlop={8} style={styles.pillIcon} accessibilityLabel="Take a photo">
+              <Ionicons name="camera-outline" size={20} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+        </>
+      )}
 
       <View style={styles.actionSlot}>
+        {isHolding ? (
+          <Animated.View style={[styles.lockHint, lockHintStyle]} pointerEvents="none">
+            <Ionicons name="lock-closed-outline" size={16} color={colors.primary} />
+            <Ionicons name="chevron-up-outline" size={12} color={colors.primary} />
+          </Animated.View>
+        ) : null}
+
+        {/* This layer — and the GestureDetector inside it — must be the
+            SAME element across the idle↔holding transition above; it is
+            unconditionally rendered here (not inside the isHolding ternary)
+            specifically so React never unmounts it mid-touch. */}
         <Animated.View style={[styles.actionSlotLayer, micAnimatedStyle]} pointerEvents={canSend ? 'none' : 'auto'}>
           <GestureDetector gesture={micGesture}>
             <Animated.View style={[styles.sendButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}>
@@ -495,9 +534,14 @@ export function Composer({
         </Animated.View>
       </View>
 
-      {cameraError || voiceError ? (
+      {!isHolding && (cameraError || voiceError) ? (
         <Text style={[typography.caption, { color: colors.danger, position: 'absolute', top: -18, left: spacing.md }]} numberOfLines={1}>
           {cameraError || voiceError}
+        </Text>
+      ) : null}
+      {isHolding && voiceError ? (
+        <Text style={[typography.caption, { color: colors.danger, position: 'absolute', top: -18, left: spacing.md }]} numberOfLines={1}>
+          {voiceError}
         </Text>
       ) : null}
 

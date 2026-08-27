@@ -107,6 +107,7 @@ export function EmojiPicker({ visible, onClose, onSelect }: EmojiPickerProps) {
           key={activeCategory + (query.trim() ? 'search' : '')}
           keyExtractor={(item: EmojiEntry, index: number) => `${item.char}-${index}`}
           numColumns={NUM_COLUMNS}
+          style={styles.grid}
           contentContainerStyle={{ paddingHorizontal: spacing.sm, paddingBottom: spacing.lg }}
           renderItem={({ item }: { item: EmojiEntry }) => (
             <Pressable onPress={() => handlePick(item.char)} style={styles.emojiCell}>
@@ -120,6 +121,7 @@ export function EmojiPicker({ visible, onClose, onSelect }: EmojiPickerProps) {
 }
 
 const styles = StyleSheet.create({
+  grid: { flex: 1 },
   searchRow: { flexDirection: 'row', alignItems: 'center' },
   tabRow: { flexDirection: 'row', justifyContent: 'space-between' },
   tab: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },

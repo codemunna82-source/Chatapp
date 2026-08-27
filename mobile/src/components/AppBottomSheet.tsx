@@ -48,6 +48,7 @@ export const AppBottomSheet = forwardRef<BottomSheetModal, AppBottomSheetProps>(
       ref={ref}
       snapPoints={points}
       enableDynamicSizing={!points}
+      enablePanDownToClose
       backdropComponent={renderBackdrop}
       onDismiss={onDismiss}
       onChange={onChange}
