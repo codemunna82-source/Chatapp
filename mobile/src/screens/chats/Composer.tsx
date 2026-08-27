@@ -496,7 +496,7 @@ export function Composer({
               <Ionicons name="attach-outline" size={21} color={colors.textSecondary} />
             </Pressable>
             <Pressable onPress={pickFromCameraQuick} disabled={cameraBusy} hitSlop={8} style={styles.pillIcon} accessibilityLabel="Take a photo">
-              <Ionicons name="camera-outline" size={20} color={colors.textSecondary} />
+              <Ionicons name="camera-outline" size={20} color={colors.primary} />
             </Pressable>
           </View>
         </>

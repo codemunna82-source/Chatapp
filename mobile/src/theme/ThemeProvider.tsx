@@ -16,7 +16,19 @@ export interface Theme {
 
 const ThemeContext = createContext<Theme | null>(null);
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
+interface ThemeProviderProps {
+  children: React.ReactNode;
+  /**
+   * Overrides the resolved color tokens for this subtree only, ignoring
+   * the light/dark/system preference entirely — everything outside a
+   * nested provider still reads the normal preference-driven theme
+   * unaffected. Used to give one screen (e.g. a fixed-design conversation
+   * screen) a permanent look regardless of Settings. See chatRedTheme.ts.
+   */
+  colors?: ColorTokens;
+}
+
+export function ThemeProvider({ children, colors: colorsOverride }: ThemeProviderProps) {
   const systemScheme = useColorScheme();
   const preference = useThemePreferenceStore((s) => s.preference);
   // 'system' (the default) follows the OS setting, same as before this
@@ -25,14 +37,16 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const theme = useMemo<Theme>(
     () => ({
-      scheme,
-      colors: scheme === 'dark' ? darkColors : lightColors,
+      // An overridden subtree is always dark-styled (status bar, etc.)
+      // regardless of the app's own scheme — it has its own fixed palette.
+      scheme: colorsOverride ? 'dark' : scheme,
+      colors: colorsOverride ?? (scheme === 'dark' ? darkColors : lightColors),
       spacing,
       radius,
       shadow,
       typography,
     }),
-    [scheme],
+    [scheme, colorsOverride],
   );
 
   return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>;

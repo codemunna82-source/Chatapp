@@ -8,7 +8,7 @@ import { Screen } from '../../components/Screen';
 import { LoadingIndicator } from '../../components/LoadingIndicator';
 import { InlineBanner } from '../../components/InlineBanner';
 import { MessageBubble } from './MessageBubble';
-import { ChatWallpaper } from './ChatWallpaper';
+import { CircuitWallpaper } from './CircuitWallpaper';
 import { DateSeparator } from './DateSeparator';
 import { TypingIndicator } from './TypingIndicator';
 import { Composer } from './Composer';
@@ -24,7 +24,8 @@ import { useSocketEvent } from '../../sockets/useSocketEvent';
 import { emitConversationRead } from '../../sockets/actions';
 import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage } from '../../api/client';
-import { useTheme } from '../../theme/ThemeProvider';
+import { ThemeProvider } from '../../theme/ThemeProvider';
+import { chatRedColors, chatHeaderBackground } from '../../theme/chatRedTheme';
 import { dayKey } from '../../utils/formatTime';
 import type { ChatsStackParamList } from '../../navigation/types';
 import type { Message } from '../../api/types';
@@ -53,7 +54,6 @@ const TYPING_AUTO_CLEAR_MS = 6000;
 
 export function ConversationDetailScreen({ route, navigation }: Props) {
   const { conversationId } = route.params;
-  const { colors } = useTheme();
   const queryClient = useQueryClient();
 
   useConversationRoom(conversationId);
@@ -76,15 +76,23 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   useEffect(() => {
     navigation.setOptions({
       title: conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Conversation',
+      // Fixed dark+crimson header for this screen specifically (matches the
+      // requested reference design) — hardcoded rather than theme-driven
+      // since headerStyle/headerTintColor render through React Navigation's
+      // own header, outside the nested <ThemeProvider colors={chatRedColors}>
+      // wrap below (that only covers this component's own returned JSX).
+      headerStyle: { backgroundColor: chatHeaderBackground },
+      headerTintColor: '#FFFFFF',
+      headerTitleStyle: { color: '#FFFFFF' },
       headerRight: () =>
         contactId ? (
           <Pressable onPress={() => placeCall(contactId)} disabled={callPending} hitSlop={8} style={{ marginRight: 4 }}>
-            <Ionicons name="call-outline" size={22} color={callPending ? colors.textSecondary : colors.primary} />
+            <Ionicons name="call-outline" size={22} color={callPending ? 'rgba(255,255,255,0.5)' : '#FFFFFF'} />
           </Pressable>
         ) : null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- placeCall is a stable closure from usePlaceCall; including it would re-run this on every render
-  }, [navigation, conversationQuery.data, contactId, callPending, colors.primary, colors.textSecondary]);
+  }, [navigation, conversationQuery.data, contactId, callPending]);
 
   useEffect(() => {
     emitConversationRead(conversationId);
@@ -157,94 +165,99 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   }
 
   return (
-    <Screen padded={false}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
-        <View style={styles.flex}>
-          <ChatWallpaper />
-          {callError ? (
-            <View style={styles.callErrorWrap}>
-              <InlineBanner message={callError} />
-            </View>
-          ) : null}
-          <FlashList
-            data={renderItems}
-            inverted
-            keyExtractor={(item: RenderItem) => item.id}
-            renderItem={({ item }: { item: RenderItem }) =>
-              item.kind === 'separator' ? (
-                <DateSeparator iso={item.iso} />
-              ) : (
-                <MessageBubble
-                  message={item.message}
-                  replyTarget={item.message.replyToMessageId ? view.messageById.get(item.message.replyToMessageId) : undefined}
-                  reactions={view.reactionsByTarget.get(item.message.id)}
-                  onLongPress={() => setActionTarget(item.message)}
-                  onRetry={() => handleRetry(item.message)}
-                />
-              )
-            }
-            onEndReached={() => {
-              if (messagesQuery.hasNextPage && !messagesQuery.isFetchingNextPage) {
-                messagesQuery.fetchNextPage();
+    // Fixed dark+crimson look for this screen — see chatRedTheme.ts. Scoped
+    // to this subtree only: every other screen keeps following Settings'
+    // light/dark/system preference untouched.
+    <ThemeProvider colors={chatRedColors}>
+      <Screen padded={false}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        >
+          <View style={styles.flex}>
+            <CircuitWallpaper />
+            {callError ? (
+              <View style={styles.callErrorWrap}>
+                <InlineBanner message={callError} />
+              </View>
+            ) : null}
+            <FlashList
+              data={renderItems}
+              inverted
+              keyExtractor={(item: RenderItem) => item.id}
+              renderItem={({ item }: { item: RenderItem }) =>
+                item.kind === 'separator' ? (
+                  <DateSeparator iso={item.iso} />
+                ) : (
+                  <MessageBubble
+                    message={item.message}
+                    replyTarget={item.message.replyToMessageId ? view.messageById.get(item.message.replyToMessageId) : undefined}
+                    reactions={view.reactionsByTarget.get(item.message.id)}
+                    onLongPress={() => setActionTarget(item.message)}
+                    onRetry={() => handleRetry(item.message)}
+                  />
+                )
               }
-            }}
-            onEndReachedThreshold={0.5}
-            ListHeaderComponent={isTyping ? <TypingIndicator /> : null}
-            contentContainerStyle={styles.listContent}
-          />
+              onEndReached={() => {
+                if (messagesQuery.hasNextPage && !messagesQuery.isFetchingNextPage) {
+                  messagesQuery.fetchNextPage();
+                }
+              }}
+              onEndReachedThreshold={0.5}
+              ListHeaderComponent={isTyping ? <TypingIndicator /> : null}
+              contentContainerStyle={styles.listContent}
+            />
 
-          {replyingTo ? <ReplyPreviewBar target={replyingTo} onCancel={() => setReplyingTo(null)} /> : null}
+            {replyingTo ? <ReplyPreviewBar target={replyingTo} onCancel={() => setReplyingTo(null)} /> : null}
 
-          <Composer
-            conversationId={conversationId}
-            whatsappPhoneNumberId={conversation?.whatsappPhoneNumberId}
-            withinWindow={conversation?.withinCustomerServiceWindow ?? false}
-            sending={sendMessage.isPending}
-            onSendText={handleSendText}
-            onAttach={() => setAttachSheetOpen(true)}
-            onUseTemplate={() => setTemplateSheetOpen(true)}
-            replyToMessageId={replyingTo?.id}
-            onVoiceSent={() => setReplyingTo(null)}
-          />
-        </View>
-      </KeyboardAvoidingView>
+            <Composer
+              conversationId={conversationId}
+              whatsappPhoneNumberId={conversation?.whatsappPhoneNumberId}
+              withinWindow={conversation?.withinCustomerServiceWindow ?? false}
+              sending={sendMessage.isPending}
+              onSendText={handleSendText}
+              onAttach={() => setAttachSheetOpen(true)}
+              onUseTemplate={() => setTemplateSheetOpen(true)}
+              replyToMessageId={replyingTo?.id}
+              onVoiceSent={() => setReplyingTo(null)}
+            />
+          </View>
+        </KeyboardAvoidingView>
 
-      <MessageActionSheet
-        visible={Boolean(actionTarget)}
-        canReact={Boolean(actionTarget && canReactTo(actionTarget))}
-        onClose={() => setActionTarget(null)}
-        onReply={() => {
-          if (actionTarget) setReplyingTo(actionTarget);
-          setActionTarget(null);
-        }}
-        onReact={(emoji) => {
-          if (actionTarget) submitSend({ type: 'reaction', reactToMessageId: actionTarget.id, emoji });
-          setActionTarget(null);
-        }}
-      />
+        <MessageActionSheet
+          visible={Boolean(actionTarget)}
+          canReact={Boolean(actionTarget && canReactTo(actionTarget))}
+          onClose={() => setActionTarget(null)}
+          onReply={() => {
+            if (actionTarget) setReplyingTo(actionTarget);
+            setActionTarget(null);
+          }}
+          onReact={(emoji) => {
+            if (actionTarget) submitSend({ type: 'reaction', reactToMessageId: actionTarget.id, emoji });
+            setActionTarget(null);
+          }}
+        />
 
-      <AttachmentSheet
-        visible={attachSheetOpen}
-        whatsappPhoneNumberId={conversation?.whatsappPhoneNumberId}
-        replyToMessageId={replyingTo?.id}
-        onClose={() => setAttachSheetOpen(false)}
-        onSent={() => setReplyingTo(null)}
-        conversationId={conversationId}
-      />
+        <AttachmentSheet
+          visible={attachSheetOpen}
+          whatsappPhoneNumberId={conversation?.whatsappPhoneNumberId}
+          replyToMessageId={replyingTo?.id}
+          onClose={() => setAttachSheetOpen(false)}
+          onSent={() => setReplyingTo(null)}
+          conversationId={conversationId}
+        />
 
-      <TemplatePickerSheet
-        visible={templateSheetOpen}
-        onClose={() => setTemplateSheetOpen(false)}
-        onPick={(template) => {
-          submitSend({ type: 'template', templateName: template.name, languageCode: template.language });
-          setTemplateSheetOpen(false);
-        }}
-      />
-    </Screen>
+        <TemplatePickerSheet
+          visible={templateSheetOpen}
+          onClose={() => setTemplateSheetOpen(false)}
+          onPick={(template) => {
+            submitSend({ type: 'template', templateName: template.name, languageCode: template.language });
+            setTemplateSheetOpen(false);
+          }}
+        />
+      </Screen>
+    </ThemeProvider>
   );
 }
 
