@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
+import { Screen } from '../../components/Screen';
 import { EmptyState } from '../../components/EmptyState';
 import { CallLogItem } from './CallLogItem';
 import { NewCallSheet } from './NewCallSheet';
@@ -18,7 +19,7 @@ export function CallsScreen() {
   const showEmpty = !query.isLoading && calls.length === 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <Screen padded={false}>
       <View style={[styles.headerRow, { padding: spacing.md }]}>
         <Text style={[typography.heading, { color: colors.textPrimary }]}>Calls</Text>
       </View>
@@ -63,7 +64,7 @@ export function CallsScreen() {
       </Pressable>
 
       <NewCallSheet visible={sheetOpen} onClose={() => setSheetOpen(false)} />
-    </View>
+    </Screen>
   );
 }
 

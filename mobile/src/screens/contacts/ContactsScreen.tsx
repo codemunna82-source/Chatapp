@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
+import { Screen } from '../../components/Screen';
 import { SearchBar } from '../../components/SearchBar';
 import { SkeletonBlock } from '../../components/Skeleton';
 import { EmptyState } from '../../components/EmptyState';
@@ -13,7 +14,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import type { Contact } from '../../api/types';
 
 export function ContactsScreen() {
-  const { colors, spacing, radius } = useTheme();
+  const { colors, spacing, radius, typography } = useTheme();
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 300);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -35,18 +36,21 @@ export function ContactsScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <Screen padded={false}>
+      <View style={[styles.titleRow, { paddingHorizontal: spacing.md, paddingTop: spacing.sm }]}>
+        <Text style={[typography.heading, { color: colors.textPrimary, flex: 1 }]}>Contacts</Text>
+        <Pressable
+          onPress={openCreate}
+          hitSlop={8}
+          style={[styles.addButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}
+        >
+          <Ionicons name="add" size={22} color={colors.textOnPrimary} />
+        </Pressable>
+      </View>
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>
           <SearchBar value={search} onChangeText={setSearch} placeholder="Search contacts" />
         </View>
-        <Pressable
-          onPress={openCreate}
-          hitSlop={8}
-          style={[styles.addButton, { backgroundColor: colors.primary, borderRadius: radius.full, marginRight: spacing.md }]}
-        >
-          <Ionicons name="add" size={22} color={colors.textOnPrimary} />
-        </Pressable>
       </View>
 
       {showSkeleton ? (
@@ -81,11 +85,12 @@ export function ContactsScreen() {
       )}
 
       <ContactFormSheet visible={sheetOpen} contact={editingContact} onClose={() => setSheetOpen(false)} />
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  titleRow: { flexDirection: 'row', alignItems: 'center' },
   headerRow: { flexDirection: 'row', alignItems: 'center' },
   addButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
 });
