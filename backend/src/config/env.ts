@@ -1,0 +1,60 @@
+import 'dotenv/config';
+import { z } from 'zod';
+
+/**
+ * All process.env access in the codebase should go through this validated,
+ * typed object — never `process.env.X` directly elsewhere. Fails fast on
+ * boot if required configuration is missing or malformed.
+ */
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().int().positive().default(4000),
+
+  CORS_ORIGINS: z
+    .string()
+    .default('http://localhost:19006')
+    .transform((value) => value.split(',').map((origin) => origin.trim()).filter(Boolean)),
+
+  MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
+  REDIS_URL: z.string().min(1, 'REDIS_URL is required').optional(),
+
+  JWT_ACCESS_SECRET: z.string().min(16, 'JWT_ACCESS_SECRET must be at least 16 characters'),
+  JWT_REFRESH_SECRET: z.string().min(16, 'JWT_REFRESH_SECRET must be at least 16 characters'),
+  JWT_ACCESS_TTL: z.string().default('15m'),
+  JWT_REFRESH_TTL: z.string().default('30d'),
+
+  META_APP_ID: z.string().optional().default(''),
+  META_APP_SECRET: z.string().optional().default(''),
+  META_VERIFY_TOKEN: z.string().optional().default(''),
+  META_ACCESS_TOKEN: z.string().optional().default(''),
+  META_BUSINESS_ACCOUNT_ID: z.string().optional().default(''),
+  META_PHONE_NUMBER_ID: z.string().optional().default(''),
+  META_API_VERSION: z.string().default('v21.0'),
+  META_MOCK_MODE: z
+    .string()
+    .default('true')
+    .transform((v) => v === 'true'),
+
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
+
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+
+  SEED_TENANT_NAME: z.string().default('Demo Tenant'),
+  SEED_MASTER_ADMIN_EMAIL: z.string().email().default('admin@example.com'),
+  SEED_MASTER_ADMIN_PASSWORD: z.string().min(8).default('ChangeMe123!'),
+});
+
+export type Env = z.infer<typeof envSchema>;
+
+function loadEnv(): Env {
+  const parsed = envSchema.safeParse(process.env);
+  if (!parsed.success) {
+    // eslint-disable-next-line no-console
+    console.error('Invalid environment configuration:', parsed.error.flatten().fieldErrors);
+    throw new Error('Invalid environment configuration — see errors above.');
+  }
+  return parsed.data;
+}
+
+export const env = loadEnv();
