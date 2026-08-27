@@ -22,7 +22,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       foregroundImage: './assets/android-icon-foreground.png',
       backgroundImage: './assets/android-icon-background.png',
       monochromeImage: './assets/android-icon-monochrome.png',
-      backgroundColor: '#4C3FE0',
+      backgroundColor: '#26344D', // matches the new VOXO logo's navy backdrop
     },
     // Minimal permission set for what the app actually implements. Camera/
     // gallery access (Phase 7 media attachments) is granted by
@@ -41,7 +41,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       {
         image: './assets/splash-icon.png',
         resizeMode: 'contain',
-        backgroundColor: '#4C3FE0',
+        backgroundColor: '#26344D', // matches the new VOXO logo's navy backdrop
       },
     ],
     [
