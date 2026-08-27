@@ -25,3 +25,11 @@ app/src/main/java/inline/
 keystore.properties
 *.keystore
 *.jks
+
+# The debug keystore is the opposite case: it's Android's well-known,
+# publicly documented shared debug signing key (password "android", alias
+# "androiddebugkey" — see https://developer.android.com/studio/publish/app-signing#debug-mode),
+# not a secret, and it's what "*.keystore" above would otherwise exclude.
+# It IS committed so every clone (including CI) gets byte-identical debug
+# builds instead of `:app:validateSigningDebug` failing on a missing file.
+!app/debug.keystore
