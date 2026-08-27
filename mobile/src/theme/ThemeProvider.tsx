@@ -1,0 +1,41 @@
+import React, { createContext, useContext, useMemo } from 'react';
+import { useColorScheme } from 'react-native';
+import { lightColors, darkColors, type ColorTokens } from './colors';
+import { spacing, radius } from './spacing';
+import { typography } from './typography';
+
+export interface Theme {
+  scheme: 'light' | 'dark';
+  colors: ColorTokens;
+  spacing: typeof spacing;
+  radius: typeof radius;
+  typography: typeof typography;
+}
+
+const ThemeContext = createContext<Theme | null>(null);
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const systemScheme = useColorScheme();
+  const scheme = systemScheme === 'dark' ? 'dark' : 'light';
+
+  const theme = useMemo<Theme>(
+    () => ({
+      scheme,
+      colors: scheme === 'dark' ? darkColors : lightColors,
+      spacing,
+      radius,
+      typography,
+    }),
+    [scheme],
+  );
+
+  return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>;
+}
+
+export function useTheme(): Theme {
+  const theme = useContext(ThemeContext);
+  if (!theme) {
+    throw new Error('useTheme() must be called inside <ThemeProvider>');
+  }
+  return theme;
+}
