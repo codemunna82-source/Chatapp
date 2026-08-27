@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { TextField } from '../../components/TextField';
 import { Button } from '../../components/Button';
 import { InlineBanner } from '../../components/InlineBanner';
@@ -102,19 +102,25 @@ export function ContactFormSheet({ visible, contact, onClose }: ContactFormSheet
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={onClose}>
-        <Pressable
-          style={[styles.sheet, { backgroundColor: colors.background, borderRadius: radius.lg, padding: spacing.md }]}
-          onPress={(e) => e.stopPropagation()}
-        >
-          {visible ? <ContactFormBody contact={contact} onClose={onClose} /> : null}
+      {/* Plain RN Modal doesn't auto-resize for the keyboard the way the
+          main screen does — without this, typing into a lower field (e.g.
+          Tags) on a shorter device hides it behind the keyboard entirely. */}
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={onClose}>
+          <Pressable
+            style={[styles.sheet, { backgroundColor: colors.background, borderRadius: radius.lg, padding: spacing.md }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {visible ? <ContactFormBody contact={contact} onClose={onClose} /> : null}
+          </Pressable>
         </Pressable>
-      </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   backdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   sheet: { width: '100%', maxHeight: '85%' },
   actions: { flexDirection: 'row', marginTop: 8 },

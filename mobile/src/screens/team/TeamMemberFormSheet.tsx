@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TextField } from '../../components/TextField';
 import { Button } from '../../components/Button';
@@ -209,19 +209,26 @@ export function TeamMemberFormSheet({ visible, member, onClose }: TeamMemberForm
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={onClose}>
-        <Pressable
-          style={[styles.sheet, { backgroundColor: colors.background, borderRadius: radius.lg, padding: spacing.md }]}
-          onPress={(e) => e.stopPropagation()}
-        >
-          {visible ? <TeamMemberFormBody member={member} onClose={onClose} /> : null}
+      {/* Plain RN Modal doesn't auto-resize for the keyboard the way the
+          main screen does — this form is long (email/password/name/date/
+          role/permissions), so without this, several fields end up hidden
+          behind the keyboard on a shorter device. */}
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={onClose}>
+          <Pressable
+            style={[styles.sheet, { backgroundColor: colors.background, borderRadius: radius.lg, padding: spacing.md }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {visible ? <TeamMemberFormBody member={member} onClose={onClose} /> : null}
+          </Pressable>
         </Pressable>
-      </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   backdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   sheet: { width: '100%', maxHeight: '88%' },
   actions: { flexDirection: 'row', marginTop: 8, marginBottom: 12 },

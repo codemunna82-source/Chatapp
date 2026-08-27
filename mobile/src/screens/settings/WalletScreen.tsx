@@ -61,6 +61,7 @@ export function WalletScreen() {
           }
         }}
         onEndReachedThreshold={0.5}
+        contentContainerStyle={{ paddingBottom: spacing.lg }}
         ListEmptyComponent={
           !transactions.isLoading ? (
             <Text style={[typography.body, { color: colors.textSecondary, padding: spacing.md }]}>No transactions yet.</Text>
