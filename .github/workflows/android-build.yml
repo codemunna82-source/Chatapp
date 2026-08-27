@@ -17,10 +17,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Safeguard: a hung Gradle/runner step otherwise runs until GitHub's own
-    # 6-hour default job timeout — this catches it far sooner. Bumped from
-    # this workflow's own experience: a hang was force-cancelled manually
-    # after the "Assemble debug APK" step ran well past its normal ~5-6min.
+    # Safeguard so a genuinely stuck run doesn't tie up a runner until
+    # GitHub's own 6-hour default job timeout.
     timeout-minutes: 25
     defaults:
       run:
@@ -61,7 +59,15 @@ jobs:
       - name: Assemble debug APK
         working-directory: mobile/android
         timeout-minutes: 15
-        run: ./gradlew assembleDebug --no-daemon
+        # Restricts the native (Reanimated/Gesture Handler/app) CMake/ninja
+        # build to arm64-v8a only, instead of gradle.properties' default of
+        # all 4 ABIs. A prior run's logs showed this was never actually
+        # stuck — it was genuinely compiling native C++ for
+        # armeabi-v7a/arm64-v8a/x86/x86_64 in sequence and simply ran out of
+        # time. arm64-v8a alone covers virtually every real Android device;
+        # this only narrows what CI builds for a debug smoke artifact, not
+        # the app.config.ts / gradle.properties defaults everyone else uses.
+        run: ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
