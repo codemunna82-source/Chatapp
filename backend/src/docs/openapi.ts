@@ -84,6 +84,46 @@ export const openApiSpec = {
       patch: { summary: 'Update a user (role, permissions, validity, status)', responses: { '200': { description: 'OK' } } },
       delete: { summary: 'Disable a user (soft delete)', responses: { '200': { description: 'OK' } } },
     },
+    '/contacts': {
+      get: { summary: 'List contacts (cursor-paginated, optional search)', responses: { '200': { description: 'OK' } } },
+      post: { summary: 'Create a contact', responses: { '201': { description: 'Created' } } },
+    },
+    '/contacts/{id}': {
+      get: { summary: 'Get a contact by id', responses: { '200': { description: 'OK' } } },
+      patch: { summary: 'Update a contact', responses: { '200': { description: 'OK' } } },
+    },
+    '/conversations': {
+      get: {
+        summary: 'List conversations (pinned-first, cursor-paginated, optional search/status filter)',
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/conversations/{id}': {
+      get: { summary: 'Get a conversation by id', responses: { '200': { description: 'OK' } } },
+      patch: {
+        summary: 'Pin/unpin (CHAT_PIN) or archive a conversation',
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/conversations/{id}/messages': {
+      get: { summary: 'List a conversation\'s messages (cursor-paginated, newest first)', responses: { '200': { description: 'OK' } } },
+      post: {
+        summary: 'Send a message (text/template/image/video/audio/document) — enforces the 24h customer-service window server-side',
+        responses: {
+          '201': { description: 'Sent' },
+          '422': { description: 'Outside the 24h window and not a template — MESSAGE_TEMPLATE_REQUIRED', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/media/upload': {
+      post: {
+        summary: 'Upload a media file to Meta (multipart/form-data: file, whatsappPhoneNumberId)',
+        responses: { '201': { description: 'Uploaded' } },
+      },
+    },
+    '/templates': {
+      get: { summary: 'List approved WhatsApp templates for the caller\'s tenant', responses: { '200': { description: 'OK' } } },
+    },
     '/health': { get: { summary: 'Liveness probe', security: [], responses: { '200': { description: 'OK' } } } },
     '/ready': { get: { summary: 'Readiness probe', security: [], responses: { '200': { description: 'OK' }, '503': { description: 'Not ready' } } } },
   },

@@ -12,6 +12,10 @@ import { healthRouter } from './modules/health/health.routes';
 import { authRouter } from './modules/auth/auth.routes';
 import { userRouter } from './modules/users/user.routes';
 import { webhookRouter } from './modules/webhooks/webhook.routes';
+import { contactRouter } from './modules/contacts/contact.routes';
+import { conversationRouter } from './modules/conversations/conversation.routes';
+import { mediaRouter } from './modules/media/media.routes';
+import { messageTemplateRouter } from './modules/templates/messageTemplate.routes';
 
 export function createApp(): Express {
   const app = express();
@@ -55,6 +59,10 @@ export function createApp(): Express {
   app.use('/api', apiRateLimiter);
   app.use('/api/auth', authRouter);
   app.use('/api/users', userRouter);
+  app.use('/api/contacts', contactRouter);
+  app.use('/api/conversations', conversationRouter);
+  app.use('/api/media', mediaRouter);
+  app.use('/api/templates', messageTemplateRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

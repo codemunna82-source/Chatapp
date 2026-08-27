@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { Conversation, type ConversationDoc } from './conversation.model';
+import { Conversation, type ConversationDoc, type ConversationStatus } from './conversation.model';
 
 const CUSTOMER_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -25,6 +25,14 @@ export interface ListConversationsOptions {
   cursor?: string;
   limit?: number;
   pinnedOnly?: boolean;
+  /**
+   * Restricts the list to conversations for these contacts — used by the
+   * search flow (conversation.service.ts resolves matching contacts first,
+   * then passes their ids here), so this repository stays free of any
+   * cross-collection query logic of its own.
+   */
+  contactIds?: string[];
+  status?: ConversationStatus;
 }
 
 /**
@@ -40,6 +48,10 @@ export async function listConversationsByTenant(
   const limit = Math.min(opts.limit ?? 20, 100);
   const filter: Record<string, unknown> = { tenantId };
   if (opts.pinnedOnly) filter.pinned = true;
+  if (opts.status) filter.status = opts.status;
+  if (opts.contactIds) {
+    filter.contactId = { $in: opts.contactIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id)) };
+  }
   if (opts.cursor && Types.ObjectId.isValid(opts.cursor)) {
     filter._id = { $lt: new Types.ObjectId(opts.cursor) };
   }
@@ -62,6 +74,15 @@ export async function setConversationPinned(
     { $set: { pinned, pinnedAt: pinned ? new Date() : undefined } },
     { new: true },
   );
+}
+
+export async function setConversationStatus(
+  id: string,
+  tenantId: string,
+  status: ConversationStatus,
+): Promise<ConversationDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Conversation.findOneAndUpdate({ _id: id, tenantId }, { $set: { status } }, { new: true });
 }
 
 export async function markConversationRead(id: string, tenantId: string): Promise<ConversationDoc | null> {

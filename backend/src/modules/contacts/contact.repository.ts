@@ -18,6 +18,13 @@ export async function findContactByIdAndTenant(id: string, tenantId: string): Pr
   return Contact.findOne({ _id: id, tenantId });
 }
 
+/** Batch lookup for enriching a page of conversations/messages without an N+1 query per row. */
+export async function findContactsByIdsAndTenant(ids: string[], tenantId: string): Promise<ContactDoc[]> {
+  const validIds = ids.filter((id) => Types.ObjectId.isValid(id));
+  if (validIds.length === 0) return [];
+  return Contact.find({ _id: { $in: validIds }, tenantId });
+}
+
 export async function findContactByPhoneAndTenant(phone: string, tenantId: string): Promise<ContactDoc | null> {
   return Contact.findOne({ phone, tenantId });
 }

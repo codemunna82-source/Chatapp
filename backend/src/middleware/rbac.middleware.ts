@@ -2,7 +2,24 @@ import type { NextFunction, Request, Response } from 'express';
 import { ApiError } from '../lib/ApiError';
 import { getTenantContext } from './tenantContext.middleware';
 import type { Permission } from '../modules/users/permission';
+import type { AuthContext } from '../types/express';
 import type { UserRole } from '../lib/jwt';
+
+/**
+ * Same rule as requirePermission's middleware form, exposed as a plain
+ * function for routes whose required permission depends on the request
+ * body (e.g. sending a message needs CHAT_MEDIA only when type is a media
+ * type) — a static route-level middleware can't express that.
+ */
+export function hasPermission(auth: AuthContext, permission: Permission): boolean {
+  return auth.role === 'MASTER_ADMIN' || auth.permissions.includes(permission);
+}
+
+export function assertPermission(auth: AuthContext, permission: Permission): void {
+  if (!hasPermission(auth, permission)) {
+    throw ApiError.forbidden('PERMISSION_DENIED', `Missing required permission: ${permission}`);
+  }
+}
 
 /** Restricts a route to specific role(s). MASTER_ADMIN typically bypasses requirePermission entirely. */
 export function requireRole(...roles: UserRole[]) {
