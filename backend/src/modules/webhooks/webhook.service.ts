@@ -9,6 +9,7 @@ import { createMessage, updateMessageStatusByMetaId } from '../messages/message.
 import { createMedia } from '../media/media.repository';
 import type { MessageStatus } from '../messages/message.model';
 import { getRealtimeEmitter } from '../../realtime/events';
+import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
 
 const META_STATUS_MAP: Record<string, MessageStatus> = {
   sent: 'SENT',
@@ -59,11 +60,18 @@ async function handleIncomingMessage(
     status: 'DELIVERED',
   });
 
-  await recordInboundActivity(String(conversation._id), tenantId, item.text ?? `[${item.messageType}]`, item.timestamp);
+  const updatedConversation = await recordInboundActivity(
+    String(conversation._id),
+    tenantId,
+    item.text ?? `[${item.messageType}]`,
+    item.timestamp,
+  );
 
   const realtime = getRealtimeEmitter();
-  realtime.emitMessageNew(tenantId, String(conversation._id), String(message._id));
-  realtime.emitConversationUpdated(tenantId, String(conversation._id));
+  realtime.emitMessageNew(tenantId, toRealtimeMessage(message));
+  if (updatedConversation) {
+    realtime.emitConversationUpdated(tenantId, toRealtimeConversation(updatedConversation));
+  }
 }
 
 async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem): Promise<void> {

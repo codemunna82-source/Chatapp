@@ -6,6 +6,7 @@ import { findMediaByIdAndTenant } from '../media/media.repository';
 import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
 import { getMetaGateway, toMetaApiError, type SendableMediaType } from '../../integrations/meta';
 import { getRealtimeEmitter } from '../../realtime/events';
+import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
 import type { MessageDoc } from './message.model';
 
 /**
@@ -93,15 +94,17 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     const metaMessageId = await dispatch(gateway, credentials, contact.phone, input, replyToMetaMessageId);
 
     const sentMessage = await attachMetaMessageId(String(localMessage._id), input.tenantId, metaMessageId);
-    await recordOutboundActivity(
+    const updatedConversation = await recordOutboundActivity(
       input.conversationId,
       input.tenantId,
       input.text ?? input.caption ?? `[${input.type}]`,
     );
 
     const realtime = getRealtimeEmitter();
-    realtime.emitMessageNew(input.tenantId, input.conversationId, String(localMessage._id));
-    realtime.emitConversationUpdated(input.tenantId, input.conversationId);
+    realtime.emitMessageNew(input.tenantId, toRealtimeMessage(sentMessage ?? localMessage));
+    if (updatedConversation) {
+      realtime.emitConversationUpdated(input.tenantId, toRealtimeConversation(updatedConversation));
+    }
 
     return sentMessage ?? localMessage;
   } catch (err) {

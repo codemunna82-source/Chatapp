@@ -1,9 +1,11 @@
+import { createServer } from 'node:http';
 import { createApp } from './app';
 import { connectMongo } from './lib/mongoose';
 import { env } from './config/env';
 import { logger } from './lib/logger';
 import { isRedisConfigured, closeRedisConnection } from './queues/connection';
 import { startWebhookWorker, stopWebhookWorker } from './queues/webhook.queue';
+import { startSocketServer, stopSocketServer } from './sockets/socketServer';
 
 async function main(): Promise<void> {
   await connectMongo();
@@ -16,16 +18,20 @@ async function main(): Promise<void> {
   }
 
   const app = createApp();
-  const server = app.listen(env.PORT, () => {
-    logger.info({ port: env.PORT, env: env.NODE_ENV }, 'VOXO backend listening');
-  });
+  // A plain http.Server (not app.listen()'s implicit one) so Socket.IO can
+  // attach to the exact same server/port — REST and WebSocket traffic share
+  // one listener, per architecture doc §1.
+  const httpServer = createServer(app);
+  startSocketServer(httpServer);
 
-  // Socket.IO gateway attaches to this same HTTP server in Phase 4.
+  httpServer.listen(env.PORT, () => {
+    logger.info({ port: env.PORT, env: env.NODE_ENV }, 'VOXO backend listening (HTTP + Socket.IO)');
+  });
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'Shutting down');
-    server.close(() => {
-      Promise.all([stopWebhookWorker(), closeRedisConnection()])
+    httpServer.close(() => {
+      Promise.all([stopSocketServer(), stopWebhookWorker(), closeRedisConnection()])
         .catch((err) => logger.error({ err }, 'Error during shutdown'))
         .finally(() => process.exit(0));
     });
