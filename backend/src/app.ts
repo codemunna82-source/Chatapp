@@ -11,6 +11,7 @@ import { notFoundHandler } from './middleware/notFound.middleware';
 import { healthRouter } from './modules/health/health.routes';
 import { authRouter } from './modules/auth/auth.routes';
 import { userRouter } from './modules/users/user.routes';
+import { webhookRouter } from './modules/webhooks/webhook.routes';
 
 export function createApp(): Express {
   const app = express();
@@ -25,7 +26,17 @@ export function createApp(): Express {
       credentials: true,
     }),
   );
-  app.use(express.json({ limit: '2mb' }));
+  app.use(
+    express.json({
+      limit: '2mb',
+      // Captures the exact wire bytes onto req.rawBody — required to verify
+      // Meta's X-Hub-Signature-256 HMAC, which is computed over the raw
+      // body, not a re-serialized JSON.parse'd/stringify'd copy of it.
+      verify: (req, _res, buf) => {
+        (req as express.Request).rawBody = Buffer.from(buf);
+      },
+    }),
+  );
   app.use(express.urlencoded({ extended: true, limit: '2mb' }));
   app.use(requestLogger);
 
@@ -35,14 +46,15 @@ export function createApp(): Express {
 
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
+  // Meta webhook routes are mounted BEFORE the generic '/api' rate limiter
+  // and never behind requireAuth — Meta authenticates itself via the
+  // verify-token challenge (GET) and HMAC signature (POST), not a JWT, and
+  // carries its own deliberately-generous limiter (see webhook.routes.ts).
+  app.use('/api/webhooks', webhookRouter);
+
   app.use('/api', apiRateLimiter);
   app.use('/api/auth', authRouter);
   app.use('/api/users', userRouter);
-
-  // Meta webhook routes are added in Phase 3 (src/integrations/meta) and
-  // deliberately bypass JWT auth (Meta signs requests differently — see
-  // webhookVerifier.ts), so they are not mounted under the generic
-  // requireAuth-protected API surface above.
 
   app.use(notFoundHandler);
   app.use(errorHandler);

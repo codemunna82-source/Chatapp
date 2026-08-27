@@ -3,7 +3,13 @@ import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mong
 export const MESSAGE_DIRECTIONS = ['IN', 'OUT'] as const;
 export type MessageDirection = (typeof MESSAGE_DIRECTIONS)[number];
 
-/** Officially supported WhatsApp Cloud API message types (spec §20) — never extend with fake types. */
+/**
+ * Officially supported WhatsApp Cloud API message types (spec §20) — never
+ * extend with fake functionality. `sticker` and `unknown` are included
+ * because Meta can deliver them inbound (a sticker message, or a type we
+ * don't yet model) and ingestion must not crash on a real, documented
+ * payload shape; we don't claim to *send* either of these.
+ */
 export const MESSAGE_TYPES = [
   'text',
   'image',
@@ -15,6 +21,8 @@ export const MESSAGE_TYPES = [
   'reaction',
   'template',
   'interactive',
+  'sticker',
+  'unknown',
 ] as const;
 export type MessageType = (typeof MESSAGE_TYPES)[number];
 

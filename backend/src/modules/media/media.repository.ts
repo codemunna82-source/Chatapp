@@ -8,6 +8,8 @@ export interface CreateMediaInput {
   sha256: string;
   storageRef: string;
   status?: MediaStatus;
+  /** Known up-front for inbound (webhook-delivered) media; absent for a fresh outbound upload. */
+  metaMediaId?: string;
 }
 
 export async function createMedia(input: CreateMediaInput): Promise<MediaDoc> {

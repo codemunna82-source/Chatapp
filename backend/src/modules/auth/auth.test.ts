@@ -1,7 +1,9 @@
 import request from 'supertest';
 import { createApp } from '../../app';
 import { createTestTenant, createTestUser } from '../../../test/helpers';
+import { useMongoMemoryServer } from '../../../test/withMongo';
 
+useMongoMemoryServer();
 const app = createApp();
 
 describe('POST /api/auth/login', () => {

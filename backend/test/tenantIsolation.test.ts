@@ -2,7 +2,9 @@ import request from 'supertest';
 import { createApp } from '../src/app';
 import { createTestTenant, createTestUser } from './helpers';
 import { signAccessToken } from '../src/lib/jwt';
+import { useMongoMemoryServer } from './withMongo';
 
+useMongoMemoryServer();
 const app = createApp();
 
 /**
