@@ -5,6 +5,7 @@ import { formatMessageTime } from '../../utils/formatTime';
 import { MessageStatusIcon } from './MessageStatusIcon';
 import { MediaImage } from './MediaImage';
 import { MediaFileChip } from './MediaFileChip';
+import { AudioMessageBubble } from './AudioMessageBubble';
 import type { Message } from '../../api/types';
 import type { ReactionSummary } from './deriveConversationView';
 
@@ -27,7 +28,10 @@ function MessageContent({ message, textColor }: { message: Message; textColor: s
       </View>
     );
   }
-  if ((message.type === 'video' || message.type === 'audio' || message.type === 'document') && message.mediaId) {
+  if (message.type === 'audio' && message.mediaId) {
+    return <AudioMessageBubble mediaId={message.mediaId} tint={textColor} />;
+  }
+  if ((message.type === 'video' || message.type === 'document') && message.mediaId) {
     return <MediaFileChip mediaId={message.mediaId} type={message.type} />;
   }
   return <Text style={[typography.body, { color: textColor }]}>{message.text || `[${message.type}]`}</Text>;

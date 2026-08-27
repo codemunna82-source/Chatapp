@@ -10,7 +10,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import type { CallLog } from '../../api/types';
 
 export function CallsScreen() {
-  const { colors, spacing, radius, typography } = useTheme();
+  const { colors, spacing, radius, shadow, typography } = useTheme();
   const [sheetOpen, setSheetOpen] = useState(false);
   const query = useCallHistory();
   const calls = flattenCalls(query.data);
@@ -20,20 +20,14 @@ export function CallsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={[styles.headerRow, { padding: spacing.md }]}>
-        <Text style={[typography.heading, { color: colors.textPrimary, flex: 1 }]}>Calls</Text>
-        <Pressable
-          onPress={() => setSheetOpen(true)}
-          style={[styles.newCallButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}
-        >
-          <Ionicons name="call" size={18} color={colors.textOnPrimary} />
-        </Pressable>
+        <Text style={[typography.heading, { color: colors.textPrimary }]}>Calls</Text>
       </View>
 
       {showEmpty ? (
         <EmptyState
           icon="call-outline"
           title="No calls yet"
-          subtitle="Tap the call button above to start one — it opens the real WhatsApp app on this device."
+          subtitle="Tap the call button below to start one — it opens the real WhatsApp app on this device."
           actionLabel="Start a call"
           onAction={() => setSheetOpen(true)}
         />
@@ -42,6 +36,11 @@ export function CallsScreen() {
           data={calls}
           keyExtractor={(item: CallLog) => item.id}
           renderItem={({ item }: { item: CallLog }) => <CallLogItem call={item} />}
+          ListHeaderComponent={
+            <Text style={[typography.label, { color: colors.textSecondary, paddingHorizontal: spacing.md, paddingBottom: spacing.xs }]}>
+              Recent
+            </Text>
+          }
           refreshControl={
             <RefreshControl refreshing={query.isRefetching} onRefresh={() => query.refetch()} tintColor={colors.primary} />
           }
@@ -51,9 +50,17 @@ export function CallsScreen() {
             }
           }}
           onEndReachedThreshold={0.5}
-          contentContainerStyle={{ paddingBottom: spacing.lg }}
+          contentContainerStyle={{ paddingBottom: 88 }}
         />
       )}
+
+      <Pressable
+        onPress={() => setSheetOpen(true)}
+        style={[styles.fab, shadow.lg, { backgroundColor: colors.primary, borderRadius: radius.full, bottom: spacing.lg }]}
+        accessibilityLabel="Start a call"
+      >
+        <Ionicons name="call" size={22} color={colors.textOnPrimary} />
+      </Pressable>
 
       <NewCallSheet visible={sheetOpen} onClose={() => setSheetOpen(false)} />
     </View>
@@ -62,5 +69,5 @@ export function CallsScreen() {
 
 const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center' },
-  newCallButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  fab: { position: 'absolute', right: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
 });

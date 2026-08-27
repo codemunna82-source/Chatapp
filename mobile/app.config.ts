@@ -31,8 +31,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // notifications (and the exact-alarm/foreground-service permissions
     // that would come with them) were never built — Phase 8's Notifications
     // screen is an in-app REST inbox, not FCM — so still nothing to add for
-    // that. Never request a permission the app doesn't actually use.
-    permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
+    // that. RECORD_AUDIO + MODIFY_AUDIO_SETTINGS were added for the
+    // composer's real voice-message recorder (expo-audio) — background
+    // recording/playback are explicitly off below, so no foreground-service
+    // permissions are pulled in. Never request a permission the app
+    // doesn't actually use.
+    permissions: ['INTERNET', 'ACCESS_NETWORK_STATE', 'RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS'],
   },
   plugins: [
     'expo-secure-store',
@@ -49,9 +53,23 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // plugin — fixed in Phase 11 while regenerating the native project.
       // microphonePermission: false because the app only ever captures
       // still photos (AttachmentSheet's launchCameraAsync), never records
-      // video with audio, so RECORD_AUDIO would be an unused permission.
+      // video with audio through the picker itself — voice messages are
+      // recorded separately via expo-audio below.
       'expo-image-picker',
       { microphonePermission: false },
+    ],
+    [
+      // Composer voice messages (Phase 12). Background playback/recording
+      // are switched off on purpose: the app never plays/records past the
+      // conversation screen being open, so there's no need for the
+      // foreground-service + notification-control permissions/services
+      // this plugin would otherwise add.
+      'expo-audio',
+      {
+        microphonePermission: 'Allow VOXO to access your microphone to record voice messages.',
+        enableBackgroundPlayback: false,
+        enableBackgroundRecording: false,
+      },
     ],
   ],
   extra: {

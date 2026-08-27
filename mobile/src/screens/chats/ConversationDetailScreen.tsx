@@ -8,6 +8,7 @@ import { Screen } from '../../components/Screen';
 import { LoadingIndicator } from '../../components/LoadingIndicator';
 import { InlineBanner } from '../../components/InlineBanner';
 import { MessageBubble } from './MessageBubble';
+import { ChatWallpaper } from './ChatWallpaper';
 import { DateSeparator } from './DateSeparator';
 import { TypingIndicator } from './TypingIndicator';
 import { Composer } from './Composer';
@@ -162,7 +163,8 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        <View style={[styles.flex, { backgroundColor: colors.surface }]}>
+        <View style={styles.flex}>
+          <ChatWallpaper />
           {callError ? (
             <View style={styles.callErrorWrap}>
               <InlineBanner message={callError} />
@@ -199,11 +201,14 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
           <Composer
             conversationId={conversationId}
+            whatsappPhoneNumberId={conversation?.whatsappPhoneNumberId}
             withinWindow={conversation?.withinCustomerServiceWindow ?? false}
             sending={sendMessage.isPending}
             onSendText={handleSendText}
             onAttach={() => setAttachSheetOpen(true)}
             onUseTemplate={() => setTemplateSheetOpen(true)}
+            replyToMessageId={replyingTo?.id}
+            onVoiceSent={() => setReplyingTo(null)}
           />
         </View>
       </KeyboardAvoidingView>
