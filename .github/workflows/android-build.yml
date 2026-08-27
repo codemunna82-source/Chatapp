@@ -19,13 +19,13 @@ on:
   workflow_dispatch:
     inputs:
       api_url:
-        description: "Backend REST API base URL, reachable from the phone installing this APK (e.g. http://192.168.1.50:4000 for a backend on your PC, phone on the same Wi-Fi). Defaults to the Android emulator-only loopback alias, which will NOT work on a real device."
+        description: "Backend REST API base URL, reachable from the phone installing this APK. Defaults to the deployed Render backend (see DEPLOY.md) — override for a local backend on your PC's LAN IP instead, e.g. http://192.168.1.50:4000."
         required: false
-        default: "http://10.0.2.2:4000"
+        default: "https://chatapp-0orj.onrender.com"
       socket_url:
         description: "Socket.IO server URL — usually the same host as api_url."
         required: false
-        default: "http://10.0.2.2:4000"
+        default: "https://chatapp-0orj.onrender.com"
   push:
     branches:
       - claude/voxo-android-whatsapp-txghqq
@@ -59,15 +59,15 @@ jobs:
         # aren't set — a misconfigured build should crash loudly instead of
         # silently pointing nowhere — so a build with no .env crashes the
         # instant the app opens, before any screen renders. This step is
-        # what was missing. The default (10.0.2.2) only resolves inside the
-        # Android emulator; on a real phone the app will open past this, but
-        # network calls (login, etc.) will fail until you pass a real
-        # api_url/socket_url via workflow_dispatch — your backend's LAN IP
-        # if you're running it locally with the phone on the same Wi-Fi, or
-        # its real deployed URL once that exists.
+        # what was missing. Defaults to the deployed Render backend
+        # (DEPLOY.md) for both workflow_dispatch (its own input default) and
+        # plain push-triggered runs (github.event.inputs is empty there, so
+        # this literal fallback is what actually applies) — override via
+        # workflow_dispatch's api_url/socket_url inputs for a local backend
+        # on your PC's LAN IP instead.
         run: |
-          echo "EXPO_PUBLIC_API_URL=${{ github.event.inputs.api_url || 'http://10.0.2.2:4000' }}" >> .env
-          echo "EXPO_PUBLIC_SOCKET_URL=${{ github.event.inputs.socket_url || 'http://10.0.2.2:4000' }}" >> .env
+          echo "EXPO_PUBLIC_API_URL=${{ github.event.inputs.api_url || 'https://chatapp-0orj.onrender.com' }}" >> .env
+          echo "EXPO_PUBLIC_SOCKET_URL=${{ github.event.inputs.socket_url || 'https://chatapp-0orj.onrender.com' }}" >> .env
 
       - uses: actions/setup-java@v4
         with:
