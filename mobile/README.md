@@ -4,11 +4,11 @@ Android-only React Native (Expo) client. See the repo root `ARCHITECTURE.md` for
 
 ## Status
 
-Phase 6 scope: project setup, navigation shell, authentication (login/logout,
-secure token storage, silent refresh-on-401), theme, and a base set of
-reusable components. The Chats/Contacts/Dashboard/Calls tabs are wired into
-navigation but show placeholder screens — their real content lands in later
-phases (see the placeholder screens' own "coming in Phase N" notes).
+Through Phase 11: project setup, auth, chat (Socket.IO, media, reactions,
+templates), contacts, dashboard, wallet/subscription/notifications, team
+(RBAC) management, calling (real WhatsApp handoff via wa.me — see
+`ARCHITECTURE.md` §6), and the native Android build/signing setup — see
+`BUILD.md` for producing an actual APK.
 
 ## Requirements
 
@@ -39,14 +39,15 @@ npm run android   # starts Metro and opens on a connected device/emulator
 npm start          # Metro only, for an already-installed dev client
 ```
 
-The **first time**, you need a dev client installed on the device — this
-project doesn't yet commit a generated `android/` folder (that happens in
-Phase 11's release-build work), so until then run:
+The **first time**, you need a dev client installed on the device. The
+native `android/` project is already committed (see `BUILD.md`), so:
 
 ```bash
-npx expo prebuild --platform android
 npx expo run:android
 ```
+
+If you've changed `app.config.ts` since `android/` was last generated,
+regenerate it first: `npx expo prebuild --platform android --clean`.
 
 ## Checks
 

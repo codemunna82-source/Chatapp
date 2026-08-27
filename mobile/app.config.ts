@@ -24,11 +24,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       monochromeImage: './assets/android-icon-monochrome.png',
       backgroundColor: '#4C3FE0',
     },
-    // Minimal permission set for what Phase 6 actually implements. Media
-    // (camera/gallery/mic for attachments, Phase 7) and exact-alarm/
-    // foreground-service permissions (notifications, Phase 8) are added
-    // when those features land — never request a permission the app
-    // doesn't yet use.
+    // Minimal permission set for what the app actually implements. Camera/
+    // gallery access (Phase 7 media attachments) is granted by
+    // expo-image-picker's own manifest merge + the runtime permission
+    // prompts it makes at call time — it needs no entry here. Push
+    // notifications (and the exact-alarm/foreground-service permissions
+    // that would come with them) were never built — Phase 8's Notifications
+    // screen is an in-app REST inbox, not FCM — so still nothing to add for
+    // that. Never request a permission the app doesn't actually use.
     permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
   },
   plugins: [
@@ -40,6 +43,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         resizeMode: 'contain',
         backgroundColor: '#4C3FE0',
       },
+    ],
+    [
+      // Phase 7 added this dependency but never registered its config
+      // plugin — fixed in Phase 11 while regenerating the native project.
+      // microphonePermission: false because the app only ever captures
+      // still photos (AttachmentSheet's launchCameraAsync), never records
+      // video with audio, so RECORD_AUDIO would be an unused permission.
+      'expo-image-picker',
+      { microphonePermission: false },
     ],
   ],
   extra: {

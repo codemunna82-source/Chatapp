@@ -38,6 +38,12 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# generated native folders
+# iOS is out of scope for this Android-only app (ARCHITECTURE.md §8) — if
+# `expo prebuild` is ever run without --platform android, don't commit it.
 /ios
-/android
+
+# android/ IS committed as of Phase 11 (ARCHITECTURE.md §8) — its own
+# .gitignore, plus the root .gitignore, exclude the actual build
+# output/caches/secrets within it (build/, .gradle/, local.properties,
+# keystore.properties, *.keystore). Do not re-add a blanket /android rule
+# here.

@@ -1,0 +1,27 @@
+# OSX
+#
+.DS_Store
+
+# Android/IntelliJ
+#
+build/
+.idea
+.gradle
+local.properties
+*.iml
+*.hprof
+.cxx/
+
+# generated inline modules
+app/src/main/java/inline/
+
+# Bundle artifacts
+*.jsbundle
+
+# Release signing secrets — never commit a real keystore or its passwords
+# (ARCHITECTURE.md §8). keystore.properties.example is the committed
+# template; the real file (and the keystore it points to) stay local to
+# whoever runs the release build.
+keystore.properties
+*.keystore
+*.jks
