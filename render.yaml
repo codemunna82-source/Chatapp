@@ -1,0 +1,81 @@
+# Render Blueprint for VOXO's backend (ARCHITECTURE.md §12).
+#
+# NOT VERIFIED against Render's live docs — render.com is blocked by this
+# session's network egress policy, so this schema is written from prior
+# knowledge, not confirmed against Render's current reference. Render
+# validates a Blueprint before deploying and shows clear errors if any
+# field name here is wrong — if that happens, DEPLOY.md's manual dashboard
+# walkthrough covers the exact same setup with plain clicks, no YAML.
+#
+# Usage: Render dashboard → New → Blueprint → connect this repo → Render
+# reads this file → fill in the fields marked sync:false → Apply.
+services:
+  - type: web
+    name: voxo-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # No web/browser client exists yet (Android app only) — CORS mostly
+      # gates the /api-docs Swagger UI. Set to your admin origin(s) if you
+      # ever add one; * is fine until then.
+      - key: CORS_ORIGINS
+        value: "*"
+      # No managed MongoDB on Render — create a free MongoDB Atlas (M0)
+      # cluster and paste its connection string here after import.
+      - key: MONGODB_URI
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: voxo-redis
+          property: connectionString
+      # Render generates real random values for these — never a fabricated
+      # placeholder secret.
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: JWT_REFRESH_TTL
+        value: 30d
+      # Leave blank / META_MOCK_MODE=true until you have real Meta Cloud
+      # API credentials (ARCHITECTURE.md §4) — never fabricated here.
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_VERIFY_TOKEN
+        sync: false
+      - key: META_ACCESS_TOKEN
+        sync: false
+      - key: META_BUSINESS_ACCOUNT_ID
+        sync: false
+      - key: META_PHONE_NUMBER_ID
+        sync: false
+      - key: META_API_VERSION
+        value: v21.0
+      - key: META_MOCK_MODE
+        value: "true"
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "60000"
+      - key: RATE_LIMIT_MAX
+        value: "100"
+      - key: LOG_LEVEL
+        value: info
+      - key: SEED_TENANT_NAME
+        value: Demo Tenant
+      - key: SEED_MASTER_ADMIN_EMAIL
+        sync: false
+      - key: SEED_MASTER_ADMIN_PASSWORD
+        sync: false
+
+  - type: keyvalue
+    name: voxo-redis
+    plan: free
+    ipAllowList: []
