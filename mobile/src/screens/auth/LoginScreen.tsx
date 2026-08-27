@@ -10,6 +10,7 @@ import { InlineBanner } from '../../components/InlineBanner';
 import { useLogin } from '../../queries/useAuthMutations';
 import { getApiErrorMessage } from '../../api/client';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useAuthStore } from '../../store/authStore';
 
 const loginSchema = z.object({
   email: z.string().trim().min(1, 'Email is required').email('Enter a valid email'),
@@ -20,6 +21,7 @@ type LoginForm = z.infer<typeof loginSchema>;
 export function LoginScreen() {
   const { colors, spacing, typography } = useTheme();
   const login = useLogin();
+  const enterDemoMode = useAuthStore((s) => s.enterDemoMode);
   const {
     control,
     handleSubmit,
@@ -79,6 +81,18 @@ export function LoginScreen() {
 
         <View style={{ marginTop: spacing.sm }}>
           <Button label="Sign in" onPress={handleSubmit(onSubmit)} loading={login.isPending} testID="login-submit" />
+        </View>
+
+        <View style={{ marginTop: spacing.lg, alignItems: 'center' }}>
+          <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: spacing.xs, textAlign: 'center' }]}>
+            No backend to sign in against yet? Browse the app&apos;s screens without one.
+          </Text>
+          <Button
+            label="Continue without login (testing)"
+            variant="secondary"
+            onPress={enterDemoMode}
+            testID="login-demo-mode"
+          />
         </View>
       </KeyboardAvoidingView>
     </Screen>
