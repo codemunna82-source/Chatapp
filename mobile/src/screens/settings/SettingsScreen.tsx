@@ -109,6 +109,9 @@ export function SettingsScreen({ navigation }: Props) {
         {isMasterAdmin ? (
           <SettingsRow icon="wallet-outline" label="Wallet" onPress={() => navigation.navigate('Wallet')} />
         ) : null}
+        {isMasterAdmin ? (
+          <SettingsRow icon="people-outline" label="Team" onPress={() => navigation.navigate('Team')} />
+        ) : null}
       </View>
 
       <Button label="Sign out" variant="danger" onPress={() => logout.mutate()} loading={logout.isPending} testID="settings-logout" />

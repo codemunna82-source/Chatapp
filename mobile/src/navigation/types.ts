@@ -17,6 +17,7 @@ export type SettingsStackParamList = {
   SettingsHome: undefined;
   Notifications: undefined;
   Wallet: undefined;
+  Team: undefined;
 };
 
 export type MainTabParamList = {

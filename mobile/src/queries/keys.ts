@@ -15,4 +15,5 @@ export const queryKeys = {
   subscription: ['subscription'] as const,
   dashboard: ['dashboard'] as const,
   calls: ['calls'] as const,
+  team: (status?: string) => ['team', { status: status ?? null }] as const,
 };

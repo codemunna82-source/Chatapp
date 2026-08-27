@@ -14,18 +14,22 @@ export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 
 export type UserRole = 'MASTER_ADMIN' | 'SUB_USER';
 
-export type Permission =
-  | 'CHAT_READ'
-  | 'CHAT_SEND'
-  | 'CHAT_MEDIA'
-  | 'CHAT_TEMPLATE'
-  | 'CHAT_REACTION'
-  | 'CHAT_PIN'
-  | 'CALL_ACCESS'
-  | 'CALL_HISTORY'
-  | 'ANALYTICS_VIEW'
-  | 'PROFILE_VIEW'
-  | 'PROFILE_EDIT';
+/** Mirrors backend/src/modules/users/permission.ts exactly — keep both lists in sync by hand, there's no shared package between the two apps. */
+export const ALL_PERMISSIONS = [
+  'CHAT_READ',
+  'CHAT_SEND',
+  'CHAT_MEDIA',
+  'CHAT_TEMPLATE',
+  'CHAT_REACTION',
+  'CHAT_PIN',
+  'CALL_ACCESS',
+  'CALL_HISTORY',
+  'ANALYTICS_VIEW',
+  'PROFILE_VIEW',
+  'PROFILE_EDIT',
+] as const;
+
+export type Permission = (typeof ALL_PERMISSIONS)[number];
 
 export interface AuthUser {
   id: string;
@@ -192,4 +196,22 @@ export interface CallLog {
 export interface InitiateCallResult {
   call: CallLog;
   deepLink: string;
+}
+
+export type UserStatus = 'ACTIVE' | 'DISABLED';
+
+/** A sub-user (or the MASTER_ADMIN) in the caller's tenant — GET/POST/PATCH/DELETE /api/users, MASTER_ADMIN only. */
+export interface TeamMember {
+  id: string;
+  tenantId: string;
+  email: string;
+  role: UserRole;
+  permissions: Permission[];
+  status: UserStatus;
+  validFrom: string;
+  validUntil: string;
+  displayName?: string;
+  lastLoginAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
