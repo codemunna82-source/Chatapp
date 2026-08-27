@@ -153,8 +153,19 @@ export const openApiSpec = {
     },
     '/dashboard': {
       get: {
-        summary: 'Aggregated tenant analytics — contact/conversation/message counts, a 14-day message time series, wallet balance, subscription status (ANALYTICS_VIEW)',
+        summary: 'Aggregated tenant analytics — contact/conversation/message counts and a 14-day message time series (ANALYTICS_VIEW)',
         responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/calls': {
+      get: {
+        summary: 'List the tenant\'s call history, cursor-paginated (CALL_HISTORY)',
+        responses: { '200': { description: 'OK' } },
+      },
+      post: {
+        summary:
+          'Log a call and return a wa.me deep link to hand off into the real WhatsApp app for the actual call (CALL_ACCESS) — no third-party app, including this one, can start a live call inside WhatsApp itself',
+        responses: { '201': { description: 'Logged' }, '404': { description: 'Contact not found' } },
       },
     },
     '/health': { get: { summary: 'Liveness probe', security: [], responses: { '200': { description: 'OK' } } } },

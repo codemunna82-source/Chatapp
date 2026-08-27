@@ -3,10 +3,10 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import type { MainTabParamList } from './types';
 import { ChatsStackNavigator } from './ChatsStackNavigator';
-import { PlaceholderScreen } from '../components/PlaceholderScreen';
 import { SettingsStackNavigator } from './SettingsStackNavigator';
 import { ContactsScreen } from '../screens/contacts/ContactsScreen';
 import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
+import { CallsScreen } from '../screens/calls/CallsScreen';
 import { useTheme } from '../theme/ThemeProvider';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -39,14 +39,7 @@ export function MainTabNavigator() {
       <Tab.Screen name="ChatsTab" component={ChatsStackNavigator} options={{ title: 'Chats' }} />
       <Tab.Screen name="ContactsTab" component={ContactsScreen} options={{ title: 'Contacts' }} />
       <Tab.Screen name="DashboardTab" component={DashboardScreen} options={{ title: 'Dashboard' }} />
-      <Tab.Screen name="CallsTab" options={{ title: 'Calls' }}>
-        {() => (
-          <PlaceholderScreen
-            title="Calls"
-            note="Calling ships only if Meta's Business Calling API is confirmed available for your account — see ARCHITECTURE.md §6."
-          />
-        )}
-      </Tab.Screen>
+      <Tab.Screen name="CallsTab" component={CallsScreen} options={{ title: 'Calls' }} />
       <Tab.Screen name="SettingsTab" component={SettingsStackNavigator} options={{ title: 'Settings' }} />
     </Tab.Navigator>
   );

@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
+import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { Screen } from '../../components/Screen';
 import { LoadingIndicator } from '../../components/LoadingIndicator';
+import { InlineBanner } from '../../components/InlineBanner';
 import { MessageBubble } from './MessageBubble';
 import { DateSeparator } from './DateSeparator';
 import { TypingIndicator } from './TypingIndicator';
@@ -19,6 +21,8 @@ import { useMessages, flattenMessages, useSendMessage, removeMessageFromCache } 
 import { useConversationRoom } from '../../sockets/useConversationRoom';
 import { useSocketEvent } from '../../sockets/useSocketEvent';
 import { emitConversationRead } from '../../sockets/actions';
+import { usePlaceCall } from '../../queries/useCalls';
+import { getApiErrorMessage } from '../../api/client';
 import { useTheme } from '../../theme/ThemeProvider';
 import { dayKey } from '../../utils/formatTime';
 import type { ChatsStackParamList } from '../../navigation/types';
@@ -64,9 +68,22 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const [isTyping, setIsTyping] = useState(false);
   const typingClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const { placeCall, isPending: callPending, apiError: callApiError, linkError: callLinkError } = usePlaceCall();
+  const callError = callApiError ? getApiErrorMessage(callApiError, 'Could not start that call.') : callLinkError;
+  const contactId = conversationQuery.data?.contactId;
+
   useEffect(() => {
-    navigation.setOptions({ title: conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Conversation' });
-  }, [navigation, conversationQuery.data]);
+    navigation.setOptions({
+      title: conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Conversation',
+      headerRight: () =>
+        contactId ? (
+          <Pressable onPress={() => placeCall(contactId)} disabled={callPending} hitSlop={8} style={{ marginRight: 4 }}>
+            <Ionicons name="call-outline" size={22} color={callPending ? colors.textSecondary : colors.primary} />
+          </Pressable>
+        ) : null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- placeCall is a stable closure from usePlaceCall; including it would re-run this on every render
+  }, [navigation, conversationQuery.data, contactId, callPending, colors.primary, colors.textSecondary]);
 
   useEffect(() => {
     emitConversationRead(conversationId);
@@ -146,6 +163,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <View style={[styles.flex, { backgroundColor: colors.background }]}>
+          {callError ? (
+            <View style={styles.callErrorWrap}>
+              <InlineBanner message={callError} />
+            </View>
+          ) : null}
           <FlashList
             data={renderItems}
             inverted
@@ -222,4 +244,5 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  callErrorWrap: { paddingHorizontal: 16, paddingTop: 8 },
 });

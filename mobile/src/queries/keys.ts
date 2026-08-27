@@ -14,4 +14,5 @@ export const queryKeys = {
   notifications: (unreadOnly?: boolean) => ['notifications', { unreadOnly: unreadOnly ?? false }] as const,
   subscription: ['subscription'] as const,
   dashboard: ['dashboard'] as const,
+  calls: ['calls'] as const,
 };

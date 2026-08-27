@@ -20,6 +20,7 @@ import { walletRouter } from './modules/wallet/wallet.routes';
 import { notificationRouter } from './modules/notifications/notification.routes';
 import { subscriptionRouter } from './modules/subscriptions/subscription.routes';
 import { dashboardRouter } from './modules/dashboard/dashboard.routes';
+import { callRouter } from './modules/calls/call.routes';
 
 export function createApp(): Express {
   const app = express();
@@ -71,6 +72,7 @@ export function createApp(): Express {
   app.use('/api/notifications', notificationRouter);
   app.use('/api/subscription', subscriptionRouter);
   app.use('/api/dashboard', dashboardRouter);
+  app.use('/api/calls', callRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -171,3 +171,25 @@ export interface DashboardSummary {
   messages: { sentTotal: number; receivedTotal: number; failedTotal: number };
   messagesByDay: { date: string; sent: number; received: number }[];
 }
+
+export type CallDirection = 'INBOUND' | 'OUTBOUND';
+export type CallStatus = 'INITIATED' | 'RINGING' | 'ANSWERED' | 'COMPLETED' | 'MISSED' | 'FAILED';
+
+export interface CallLog {
+  id: string;
+  contactId: string;
+  contact?: Contact;
+  direction: CallDirection;
+  status: CallStatus;
+  duration: number;
+  startedAt?: string;
+  endedAt?: string;
+  provider?: string;
+  createdAt: string;
+}
+
+/** `deepLink` opens the real WhatsApp app on the contact's chat — see call.service.ts for why that's as far as any third-party app can go. */
+export interface InitiateCallResult {
+  call: CallLog;
+  deepLink: string;
+}
