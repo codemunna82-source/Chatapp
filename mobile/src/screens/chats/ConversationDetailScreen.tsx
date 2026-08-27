@@ -162,7 +162,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        <View style={[styles.flex, { backgroundColor: colors.background }]}>
+        <View style={[styles.flex, { backgroundColor: colors.surface }]}>
           {callError ? (
             <View style={styles.callErrorWrap}>
               <InlineBanner message={callError} />
@@ -192,6 +192,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
             }}
             onEndReachedThreshold={0.5}
             ListHeaderComponent={isTyping ? <TypingIndicator /> : null}
+            contentContainerStyle={styles.listContent}
           />
 
           {replyingTo ? <ReplyPreviewBar target={replyingTo} onCancel={() => setReplyingTo(null)} /> : null}
@@ -245,4 +246,5 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   callErrorWrap: { paddingHorizontal: 16, paddingTop: 8 },
+  listContent: { paddingVertical: 8 },
 });

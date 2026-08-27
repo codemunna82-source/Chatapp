@@ -1,5 +1,5 @@
 import React from 'react';
-import { KeyboardAvoidingView, Platform, Text, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Text, View } from 'react-native';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -18,7 +18,7 @@ const loginSchema = z.object({
 type LoginForm = z.infer<typeof loginSchema>;
 
 export function LoginScreen() {
-  const { colors, spacing, typography } = useTheme();
+  const { colors, spacing, radius, typography } = useTheme();
   const login = useLogin();
   const {
     control,
@@ -33,10 +33,25 @@ export function LoginScreen() {
   return (
     <Screen>
       <KeyboardAvoidingView behavior={Platform.OS === 'android' ? undefined : 'padding'} style={{ flex: 1, justifyContent: 'center' }}>
-        <Text style={[typography.title, { color: colors.textPrimary, marginBottom: spacing.xs }]}>VOXO</Text>
-        <Text style={[typography.body, { color: colors.textSecondary, marginBottom: spacing.xl }]}>
-          Sign in to your workspace
-        </Text>
+        <View style={{ alignItems: 'center', marginBottom: spacing.xl }}>
+          <View
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: radius.lg,
+              overflow: 'hidden',
+              marginBottom: spacing.md,
+              backgroundColor: colors.surfaceAlt,
+            }}
+          >
+            {/* The app's own icon, not a repeated text wordmark — a real brand mark on the one screen every user sees first. */}
+            <Image source={require('../../../assets/icon.png')} style={{ width: 64, height: 64 }} resizeMode="cover" />
+          </View>
+          <Text style={[typography.title, { color: colors.textPrimary }]}>Welcome back</Text>
+          <Text style={[typography.body, { color: colors.textSecondary, marginTop: spacing.xs }]}>
+            Sign in to your workspace
+          </Text>
+        </View>
 
         {login.isError ? <InlineBanner message={getApiErrorMessage(login.error)} /> : null}
 

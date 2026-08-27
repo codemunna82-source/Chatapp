@@ -10,11 +10,12 @@ interface InlineBannerProps {
 /** Inline error/warning/success banner — form-level API errors, expiry warnings, etc. */
 export function InlineBanner({ message, tone = 'danger' }: InlineBannerProps) {
   const { colors, spacing, radius, typography } = useTheme();
-  const background = tone === 'danger' ? colors.danger : tone === 'warning' ? colors.warning : colors.success;
+  const foreground = tone === 'danger' ? colors.danger : tone === 'warning' ? colors.warning : colors.success;
+  const background = tone === 'danger' ? colors.dangerMuted : tone === 'warning' ? colors.warningMuted : colors.successMuted;
 
   return (
-    <View style={[styles.base, { backgroundColor: `${background}22`, borderRadius: radius.sm, padding: spacing.sm, marginBottom: spacing.md }]}>
-      <Text style={[typography.caption, { color: background }]}>{message}</Text>
+    <View style={[styles.base, { backgroundColor: background, borderRadius: radius.md, padding: spacing.sm + 4, marginBottom: spacing.md }]}>
+      <Text style={[typography.caption, { color: foreground }]}>{message}</Text>
     </View>
   );
 }

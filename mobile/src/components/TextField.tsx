@@ -16,17 +16,17 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(({ label, error, 
       <Text style={[typography.label, { color: colors.textSecondary, marginBottom: spacing.xs }]}>{label}</Text>
       <TextInput
         ref={ref}
-        placeholderTextColor={colors.textSecondary}
+        placeholderTextColor={colors.textTertiary}
         style={[
           typography.body,
           styles.input,
           {
             color: colors.textPrimary,
-            backgroundColor: colors.surface,
-            borderColor: error ? colors.danger : colors.border,
-            borderRadius: radius.sm,
-            paddingHorizontal: spacing.sm + 4,
-            paddingVertical: spacing.sm,
+            backgroundColor: colors.surfaceAlt,
+            borderColor: error ? colors.danger : 'transparent',
+            borderRadius: radius.md,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.sm + 4,
           },
           style,
         ]}
@@ -41,5 +41,5 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(({ label, error, 
 TextField.displayName = 'TextField';
 
 const styles = StyleSheet.create({
-  input: { borderWidth: 1 },
+  input: { borderWidth: 1.5, minHeight: 48 },
 });

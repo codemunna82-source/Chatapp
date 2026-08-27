@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import { SearchBar } from '../../components/SearchBar';
 import { SkeletonBlock } from '../../components/Skeleton';
+import { EmptyState } from '../../components/EmptyState';
 import { ContactListItem } from './ContactListItem';
 import { ContactFormSheet } from './ContactFormSheet';
 import { useContacts, flattenContacts } from '../../queries/useContacts';
@@ -12,7 +13,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import type { Contact } from '../../api/types';
 
 export function ContactsScreen() {
-  const { colors, spacing, radius, typography } = useTheme();
+  const { colors, spacing, radius } = useTheme();
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 300);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -55,11 +56,12 @@ export function ContactsScreen() {
           ))}
         </View>
       ) : showEmpty ? (
-        <View style={styles.empty}>
-          <Text style={[typography.body, { color: colors.textSecondary }]}>
-            {debouncedSearch ? 'No contacts match your search.' : 'No contacts yet — tap + to add one.'}
-          </Text>
-        </View>
+        <EmptyState
+          icon={debouncedSearch ? 'search-outline' : 'people-outline'}
+          title={debouncedSearch ? 'No contacts match your search' : 'No contacts yet'}
+          subtitle={debouncedSearch ? 'Try a different name or number.' : 'Tap + above to add your first contact.'}
+          {...(!debouncedSearch ? { actionLabel: 'Add contact', onAction: openCreate } : {})}
+        />
       ) : (
         <FlashList
           data={contacts}
@@ -86,5 +88,4 @@ export function ContactsScreen() {
 const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center' },
   addButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
 });

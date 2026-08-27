@@ -3,6 +3,7 @@ import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/ThemeProvider';
+import { EmptyState } from '../../components/EmptyState';
 import {
   useNotifications,
   flattenNotifications,
@@ -67,9 +68,7 @@ export function NotificationsScreen() {
       ) : null}
 
       {query.isLoading ? null : notifications.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={[typography.body, { color: colors.textSecondary }]}>You&apos;re all caught up.</Text>
-        </View>
+        <EmptyState icon="checkmark-circle-outline" title="You're all caught up" subtitle="No notifications right now." />
       ) : (
         <FlashList
           data={notifications}
@@ -96,5 +95,4 @@ export function NotificationsScreen() {
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
   markAllRow: { alignItems: 'flex-end' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
 });

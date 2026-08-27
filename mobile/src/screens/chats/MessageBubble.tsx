@@ -16,9 +16,8 @@ interface MessageBubbleProps {
   onRetry: () => void;
 }
 
-function MessageContent({ message }: { message: Message }) {
-  const { colors, typography } = useTheme();
-  const textColor = message.direction === 'OUT' ? colors.textOnPrimary : colors.textPrimary;
+function MessageContent({ message, textColor }: { message: Message; textColor: string }) {
+  const { typography } = useTheme();
 
   if (message.type === 'image' && message.mediaId) {
     return (
@@ -37,22 +36,38 @@ function MessageContent({ message }: { message: Message }) {
 export function MessageBubble({ message, replyTarget, reactions, onLongPress, onRetry }: MessageBubbleProps) {
   const { colors, spacing, radius, typography } = useTheme();
   const isOut = message.direction === 'OUT';
-  const bubbleColor = isOut ? colors.primary : colors.surface;
+  const bubbleColor = isOut ? colors.bubbleSent : colors.bubbleReceived;
+  const textColor = isOut ? colors.bubbleSentText : colors.bubbleReceivedText;
+  const isFailed = message.status === 'FAILED';
 
   const activeReactions = reactions ? [reactions.IN, reactions.OUT].filter((e): e is string => Boolean(e)) : [];
+
+  // A soft "tail" corner (WhatsApp/iMessage-style, without copying either's
+  // exact bubble shape) — the corner nearest the sender's own side of the
+  // screen is pinched in, giving each bubble a subtle directional read even
+  // at a glance, before the alignment itself registers.
+  const bubbleRadius = {
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    borderBottomLeftRadius: isOut ? radius.lg : radius.sm,
+    borderBottomRightRadius: isOut ? radius.sm : radius.lg,
+  };
 
   return (
     <View style={[styles.row, { justifyContent: isOut ? 'flex-end' : 'flex-start', paddingHorizontal: spacing.md }]}>
       <Pressable
         onLongPress={onLongPress}
-        onPress={message.status === 'FAILED' ? onRetry : undefined}
+        onPress={isFailed ? onRetry : undefined}
         style={[
           styles.bubble,
+          bubbleRadius,
           {
             backgroundColor: bubbleColor,
-            borderRadius: radius.md,
-            padding: spacing.sm,
+            paddingHorizontal: spacing.sm + 4,
+            paddingVertical: spacing.xs + 4,
             marginVertical: 2,
+            borderWidth: isFailed ? 1 : 0,
+            borderColor: colors.danger,
           },
         ]}
       >
@@ -60,19 +75,22 @@ export function MessageBubble({ message, replyTarget, reactions, onLongPress, on
           <View
             style={[
               styles.replyBlock,
-              { borderLeftColor: isOut ? colors.textOnPrimary : colors.primary, marginBottom: spacing.xs },
+              { borderLeftColor: isOut ? colors.bubbleSentText : colors.primary, marginBottom: spacing.xs },
             ]}
           >
-            <Text style={[typography.caption, { color: isOut ? colors.textOnPrimary : colors.textSecondary }]} numberOfLines={1}>
+            <Text style={[typography.caption, { color: isOut ? colors.bubbleSentText : colors.textSecondary, opacity: 0.85 }]} numberOfLines={1}>
               {replyTarget.text || `[${replyTarget.type}]`}
             </Text>
           </View>
         ) : null}
 
-        <MessageContent message={message} />
+        <MessageContent message={message} textColor={textColor} />
 
         <View style={styles.footer}>
-          <Text style={[typography.caption, { color: isOut ? colors.textOnPrimary : colors.textSecondary, opacity: 0.8 }]}>
+          {isFailed ? (
+            <Text style={[typography.caption, { color: colors.danger, marginRight: 4 }]}>Failed · tap to retry</Text>
+          ) : null}
+          <Text style={[typography.caption, { color: textColor, opacity: 0.7 }]}>
             {formatMessageTime(message.createdAt)}
           </Text>
           {isOut ? (
@@ -83,7 +101,13 @@ export function MessageBubble({ message, replyTarget, reactions, onLongPress, on
         </View>
 
         {activeReactions.length > 0 ? (
-          <View style={[styles.reactions, { backgroundColor: colors.background, borderColor: colors.border }]}>
+          <View
+            style={[
+              styles.reactions,
+              { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+              styles.reactionsShadow,
+            ]}
+          >
             <Text style={styles.reactionText}>{activeReactions.join(' ')}</Text>
           </View>
         ) : null}
@@ -103,7 +127,15 @@ const styles = StyleSheet.create({
     right: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,
-    paddingHorizontal: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  reactionsShadow: {
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   reactionText: { fontSize: 12 },
 });

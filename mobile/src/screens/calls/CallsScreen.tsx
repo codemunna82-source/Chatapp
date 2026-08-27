@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
+import { EmptyState } from '../../components/EmptyState';
 import { CallLogItem } from './CallLogItem';
 import { NewCallSheet } from './NewCallSheet';
 import { useCallHistory, flattenCalls } from '../../queries/useCalls';
@@ -29,12 +30,13 @@ export function CallsScreen() {
       </View>
 
       {showEmpty ? (
-        <View style={styles.empty}>
-          <Ionicons name="call-outline" size={32} color={colors.textSecondary} style={{ marginBottom: spacing.sm }} />
-          <Text style={[typography.body, { color: colors.textSecondary, textAlign: 'center' }]}>
-            No calls yet. Tap the call button to start one — it opens the real WhatsApp app on this device.
-          </Text>
-        </View>
+        <EmptyState
+          icon="call-outline"
+          title="No calls yet"
+          subtitle="Tap the call button above to start one — it opens the real WhatsApp app on this device."
+          actionLabel="Start a call"
+          onAction={() => setSheetOpen(true)}
+        />
       ) : (
         <FlashList
           data={calls}
@@ -61,5 +63,4 @@ export function CallsScreen() {
 const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center' },
   newCallButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
 });

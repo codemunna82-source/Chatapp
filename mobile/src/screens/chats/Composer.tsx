@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useTheme } from '../../theme/ThemeProvider';
 import { emitTypingStart, emitTypingStop } from '../../sockets/actions';
 
@@ -16,12 +17,32 @@ interface ComposerProps {
 const TYPING_STOP_DELAY_MS = 2500;
 
 export function Composer({ conversationId, withinWindow, onSendText, onAttach, onUseTemplate, sending }: ComposerProps) {
-  const { colors, spacing, radius, typography } = useTheme();
+  const { colors, spacing, radius, shadow, typography } = useTheme();
   const [text, setText] = useState('');
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canSend = Boolean(text.trim()) && !sending;
+  const sendScale = useSharedValue(0.8);
+  const sendOpacity = useSharedValue(0);
+
+  const sendAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: sendScale.value }],
+    opacity: sendOpacity.value,
+  }));
+
+  // Mutating .value is Reanimated's documented, intentional API for driving
+  // a UI-thread animation from an event handler — not a real React state
+  // mutation. eslint-plugin-react-hooks' immutability check doesn't yet
+  // recognize this pattern outside useEffect, hence the disables below.
+  const setSendButtonVisible = (visible: boolean) => {
+    /* eslint-disable react-hooks/immutability */
+    sendScale.value = withTiming(visible ? 1 : 0.8, { duration: 140 });
+    sendOpacity.value = withTiming(visible ? 1 : 0, { duration: 140 });
+    /* eslint-enable react-hooks/immutability */
+  };
 
   const handleChangeText = (value: string) => {
     setText(value);
+    setSendButtonVisible(Boolean(value.trim()));
     emitTypingStart(conversationId);
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => emitTypingStop(conversationId), TYPING_STOP_DELAY_MS);
@@ -32,6 +53,7 @@ export function Composer({ conversationId, withinWindow, onSendText, onAttach, o
     if (!trimmed || sending) return;
     onSendText(trimmed);
     setText('');
+    setSendButtonVisible(false);
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     emitTypingStop(conversationId);
   };
@@ -41,7 +63,12 @@ export function Composer({ conversationId, withinWindow, onSendText, onAttach, o
   // invite a free-form send that's guaranteed to be rejected.
   if (!withinWindow) {
     return (
-      <View style={[styles.blockedBar, { backgroundColor: colors.surface, borderTopColor: colors.border, padding: spacing.md }]}>
+      <View
+        style={[
+          styles.blockedBar,
+          { backgroundColor: colors.surfaceElevated, borderTopColor: colors.divider, padding: spacing.md },
+        ]}
+      >
         <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: spacing.sm }]}>
           It&apos;s been over 24 hours since this contact last messaged you — send an approved template to continue.
         </Text>
@@ -56,36 +83,48 @@ export function Composer({ conversationId, withinWindow, onSendText, onAttach, o
   }
 
   return (
-    <View style={[styles.row, { backgroundColor: colors.surface, borderTopColor: colors.border, padding: spacing.sm }]}>
-      <Pressable onPress={onAttach} hitSlop={8} style={{ marginRight: spacing.xs }}>
-        <Ionicons name="add-circle-outline" size={26} color={colors.primary} />
+    <View
+      style={[
+        styles.row,
+        shadow.sm,
+        { backgroundColor: colors.surfaceElevated, borderTopColor: colors.divider, padding: spacing.sm },
+      ]}
+    >
+      <Pressable onPress={onAttach} hitSlop={8} style={styles.attachButton} accessibilityLabel="Add attachment">
+        <Ionicons name="add" size={24} color={colors.textSecondary} />
       </Pressable>
       <TextInput
         value={text}
         onChangeText={handleChangeText}
         placeholder="Message"
-        placeholderTextColor={colors.textSecondary}
+        placeholderTextColor={colors.textTertiary}
         multiline
         style={[
           styles.input,
           typography.body,
-          { color: colors.textPrimary, backgroundColor: colors.background, borderRadius: radius.lg, paddingHorizontal: spacing.sm },
+          { color: colors.textPrimary, backgroundColor: colors.surfaceAlt, borderRadius: radius.xl, paddingHorizontal: spacing.md },
         ]}
       />
-      <Pressable onPress={handleSend} disabled={!text.trim() || sending} hitSlop={8} style={{ marginLeft: spacing.xs }}>
-        <Ionicons
-          name="send"
-          size={22}
-          color={text.trim() && !sending ? colors.primary : colors.textSecondary}
-        />
-      </Pressable>
+      <Animated.View style={sendAnimatedStyle}>
+        <Pressable
+          onPress={handleSend}
+          disabled={!canSend}
+          hitSlop={8}
+          style={[styles.sendButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}
+          accessibilityLabel="Send message"
+        >
+          <Ionicons name="arrow-up" size={19} color={colors.textOnPrimary} />
+        </Pressable>
+      </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'flex-end', borderTopWidth: StyleSheet.hairlineWidth },
-  input: { flex: 1, maxHeight: 120, paddingVertical: 8 },
+  attachButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
+  input: { flex: 1, maxHeight: 120, paddingVertical: 9, marginHorizontal: 4 },
+  sendButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
   blockedBar: { borderTopWidth: StyleSheet.hairlineWidth },
   templateButton: { alignItems: 'center' },
 });

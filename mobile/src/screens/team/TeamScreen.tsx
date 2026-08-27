@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
+import { EmptyState } from '../../components/EmptyState';
 import { TeamMemberItem } from './TeamMemberItem';
 import { TeamMemberFormSheet } from './TeamMemberFormSheet';
 import { useTeamMembers, flattenTeamMembers } from '../../queries/useTeam';
@@ -39,11 +40,13 @@ export function TeamScreen() {
       </View>
 
       {showEmpty ? (
-        <View style={styles.empty}>
-          <Text style={[typography.body, { color: colors.textSecondary, textAlign: 'center' }]}>
-            No team members yet — tap the button above to invite one.
-          </Text>
-        </View>
+        <EmptyState
+          icon="people-outline"
+          title="No team members yet"
+          subtitle="Invite a colleague to give them their own login and permissions."
+          actionLabel="Invite a member"
+          onAction={openInvite}
+        />
       ) : (
         <FlashList
           data={members}
@@ -70,5 +73,4 @@ export function TeamScreen() {
 const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center' },
   addButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
 });
