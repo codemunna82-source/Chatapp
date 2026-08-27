@@ -19,27 +19,39 @@ const ThemeContext = createContext<Theme | null>(null);
 interface ThemeProviderProps {
   children: React.ReactNode;
   /**
-   * Overrides the resolved color tokens for this subtree only, ignoring
-   * the light/dark/system preference entirely — everything outside a
-   * nested provider still reads the normal preference-driven theme
-   * unaffected. Used to give one screen (e.g. a fixed-design conversation
-   * screen) a permanent look regardless of Settings. See chatRedTheme.ts.
+   * Overrides the resolved color tokens for this subtree only — everything
+   * outside a nested provider still reads the normal preference-driven
+   * theme unaffected. Used to give one screen (e.g. the conversation
+   * screen) its own fixed brand palette. The override itself is expected
+   * to already match the ambient light/dark scheme (pick it with
+   * useResolvedScheme() before rendering the nested provider) — see
+   * chatTheme.ts and ConversationDetailScreen.tsx.
    */
   colors?: ColorTokens;
 }
 
-export function ThemeProvider({ children, colors: colorsOverride }: ThemeProviderProps) {
+/**
+ * Resolves 'system' | 'light' | 'dark' down to the actual 'light' | 'dark'
+ * scheme currently in effect, the same logic ThemeProvider itself uses.
+ * Exported so a screen that overrides `colors` (see above) can still pick
+ * the right light/dark variant of ITS OWN palette to match — a themed
+ * screen should follow Settings' light/dark/system toggle same as every
+ * other screen, it just uses a different palette while doing so.
+ */
+export function useResolvedScheme(): 'light' | 'dark' {
   const systemScheme = useColorScheme();
   const preference = useThemePreferenceStore((s) => s.preference);
   // 'system' (the default) follows the OS setting, same as before this
   // store existed; 'light'/'dark' is an explicit user override from Settings.
-  const scheme = preference === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : preference;
+  return preference === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : preference;
+}
+
+export function ThemeProvider({ children, colors: colorsOverride }: ThemeProviderProps) {
+  const scheme = useResolvedScheme();
 
   const theme = useMemo<Theme>(
     () => ({
-      // An overridden subtree is always dark-styled (status bar, etc.)
-      // regardless of the app's own scheme — it has its own fixed palette.
-      scheme: colorsOverride ? 'dark' : scheme,
+      scheme,
       colors: colorsOverride ?? (scheme === 'dark' ? darkColors : lightColors),
       spacing,
       radius,

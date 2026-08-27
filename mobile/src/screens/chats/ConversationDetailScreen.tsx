@@ -8,7 +8,7 @@ import { Screen } from '../../components/Screen';
 import { LoadingIndicator } from '../../components/LoadingIndicator';
 import { InlineBanner } from '../../components/InlineBanner';
 import { MessageBubble } from './MessageBubble';
-import { CircuitWallpaper } from './CircuitWallpaper';
+import { ChatWallpaper } from './ChatWallpaper';
 import { DateSeparator } from './DateSeparator';
 import { TypingIndicator } from './TypingIndicator';
 import { Composer } from './Composer';
@@ -24,8 +24,8 @@ import { useSocketEvent } from '../../sockets/useSocketEvent';
 import { emitConversationRead } from '../../sockets/actions';
 import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage } from '../../api/client';
-import { ThemeProvider } from '../../theme/ThemeProvider';
-import { chatRedColors, chatHeaderBackground } from '../../theme/chatRedTheme';
+import { ThemeProvider, useResolvedScheme } from '../../theme/ThemeProvider';
+import { chatLightColors, chatDarkColors, chatHeaderBackground } from '../../theme/chatTheme';
 import { dayKey } from '../../utils/formatTime';
 import type { ChatsStackParamList } from '../../navigation/types';
 import type { Message } from '../../api/types';
@@ -73,13 +73,20 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const callError = callApiError ? getApiErrorMessage(callApiError, 'Could not start that call.') : callLinkError;
   const contactId = conversationQuery.data?.contactId;
 
+  // Fixed navy+gold look for this screen, in a light and a dark variant —
+  // matches the requested reference design — but unlike the earlier
+  // crimson version, it now follows Settings' own light/dark/system
+  // preference like every other screen instead of forcing one look.
+  const scheme = useResolvedScheme();
+  const chatColors = scheme === 'dark' ? chatDarkColors : chatLightColors;
+
   useEffect(() => {
     navigation.setOptions({
       title: conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Conversation',
-      // Fixed dark+crimson header for this screen specifically (matches the
-      // requested reference design) — hardcoded rather than theme-driven
+      // The header itself stays a fixed navy in both schemes (matches both
+      // reference images identically) — hardcoded rather than theme-driven
       // since headerStyle/headerTintColor render through React Navigation's
-      // own header, outside the nested <ThemeProvider colors={chatRedColors}>
+      // own header, outside the nested <ThemeProvider colors={chatColors}>
       // wrap below (that only covers this component's own returned JSX).
       headerStyle: { backgroundColor: chatHeaderBackground },
       headerTintColor: '#FFFFFF',
@@ -165,10 +172,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   }
 
   return (
-    // Fixed dark+crimson look for this screen — see chatRedTheme.ts. Scoped
-    // to this subtree only: every other screen keeps following Settings'
-    // light/dark/system preference untouched.
-    <ThemeProvider colors={chatRedColors}>
+    // Fixed navy+gold look for this screen — see chatTheme.ts. Scoped to
+    // this subtree only, and itself following Settings' light/dark/system
+    // preference (via chatColors above) same as every other screen does.
+    <ThemeProvider colors={chatColors}>
       <Screen padded={false}>
         <KeyboardAvoidingView
           style={styles.flex}
@@ -176,7 +183,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
           <View style={styles.flex}>
-            <CircuitWallpaper />
+            <ChatWallpaper />
             {callError ? (
               <View style={styles.callErrorWrap}>
                 <InlineBanner message={callError} />

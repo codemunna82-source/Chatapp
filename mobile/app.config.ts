@@ -3,8 +3,11 @@ import type { ExpoConfig, ConfigContext } from 'expo/config';
 // Android-only (spec §3) — no ios block is defined here on purpose, and no
 // iOS-specific config should be added. versionCode is the single source of
 // truth for the Play/APK build number; bump it on every release build
-// (spec §46 reports it alongside the APK).
-const ANDROID_VERSION_CODE = 1;
+// (spec §46 reports it alongside the APK). This had been left at 1 across
+// every build so far — bumping it here since an unchanged versionCode on a
+// same-package/same-signature reinstall can make Android's installer treat
+// a new APK as a no-op if the previous copy isn't uninstalled first.
+const ANDROID_VERSION_CODE = 2;
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,

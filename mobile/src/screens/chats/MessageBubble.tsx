@@ -70,8 +70,11 @@ export function MessageBubble({ message, replyTarget, reactions, onLongPress, on
             paddingHorizontal: spacing.sm + 4,
             paddingVertical: spacing.xs + 4,
             marginVertical: 2,
-            borderWidth: isFailed ? 1 : 0,
-            borderColor: colors.danger,
+            // Every bubble carries a themed border (gold, per the chat
+            // screen's own palette in chatTheme.ts) — a failed send
+            // overrides it with the danger color to keep that state visible.
+            borderWidth: 1,
+            borderColor: isFailed ? colors.danger : colors.border,
           },
         ]}
       >
