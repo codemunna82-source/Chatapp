@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../components/Avatar';
 import { useTheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage } from '../../api/client';
 import { formatChatListTime } from '../../utils/formatTime';
@@ -61,15 +62,18 @@ export function CallLogItem({ call }: { call: CallLog }) {
       <Pressable
         onPress={handleRedial}
         disabled={isPending}
-        hitSlop={10}
-        style={[styles.callButton, { backgroundColor: colors.primaryMuted }]}
+        style={styles.callTouch}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: isPending }}
         accessibilityLabel={`Call ${label}`}
       >
+        <View style={[styles.callButton, { backgroundColor: colors.primaryMuted, opacity: isPending ? 0.6 : 1 }]}>
         {isPending ? (
           <ActivityIndicator color={colors.primary} size="small" />
         ) : (
           <Ionicons name="call" size={17} color={colors.primary} />
         )}
+        </View>
       </Pressable>
     </View>
   );
@@ -78,5 +82,6 @@ export function CallLogItem({ call }: { call: CallLog }) {
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
   subRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  callTouch: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   callButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
 });

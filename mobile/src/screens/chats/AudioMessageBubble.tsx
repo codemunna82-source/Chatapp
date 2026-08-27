@@ -6,6 +6,7 @@ import { File, Paths } from 'expo-file-system';
 import { mediaUrl } from '../../api/endpoints/media';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 import { formatDuration } from '../../utils/formatTime';
 
 const BAR_COUNT = 22;
@@ -106,7 +107,9 @@ export function AudioMessageBubble({ mediaId, tint }: { mediaId: string; tint: s
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', minWidth: 200 },
+  // The whole row is the play/pause Pressable, so it carries the touch
+  // target for this control rather than the 32dp circle drawn inside it.
+  row: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact },
   playButton: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   playIconNudge: { marginLeft: 2 },
   waveform: { flexDirection: 'row', alignItems: 'center', height: 20 },

@@ -5,6 +5,7 @@ import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { type BottomSheetModal } from '@gorhom/bottom-sheet';
 import { AppBottomSheet } from '../../components/AppBottomSheet';
 import { useTheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 import { useRecentEmojiStore } from '../../store/recentEmojiStore';
 import { EMOJI_CATEGORIES, searchEmoji, type EmojiEntry } from '../../data/emojiData';
 
@@ -124,7 +125,7 @@ const styles = StyleSheet.create({
   grid: { flex: 1 },
   searchRow: { flexDirection: 'row', alignItems: 'center' },
   tabRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  tab: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  tab: { width: touchTarget.compact, height: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
   tabIcon: { fontSize: 18 },
   empty: { alignItems: 'center', padding: 24 },
   emojiCell: { width: `${100 / NUM_COLUMNS}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },

@@ -13,6 +13,7 @@ import {
 } from 'expo-audio';
 import { File } from 'expo-file-system';
 import { useTheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 import { emitTypingStart, emitTypingStop } from '../../sockets/actions';
 import { useUploadMedia } from '../../queries/useUploadMedia';
 import { useSendMessage } from '../../queries/useMessages';
@@ -428,8 +429,10 @@ export function Composer({
   if (isLocked && recorderState.isRecording) {
     return (
       <View style={rowBase}>
-        <Pressable onPress={discardRecording} hitSlop={8} style={styles.attachButton} accessibilityLabel="Discard recording">
-          <Ionicons name="trash-outline" size={22} color={colors.danger} />
+        <Pressable onPress={discardRecording} style={styles.attachButton} accessibilityRole="button" accessibilityLabel="Discard recording">
+          {({ pressed }) => (
+            <Ionicons name="trash-outline" size={22} color={colors.danger} style={{ opacity: pressed ? 0.5 : 1 }} />
+          )}
         </Pressable>
         <View style={[styles.recordingRow, { marginHorizontal: spacing.sm }]}>
           <View style={[styles.recordingDot, { backgroundColor: colors.danger }]} />
@@ -438,16 +441,27 @@ export function Composer({
           </Text>
           <RecordingWaveform metering={recorderState.metering} color={colors.primary} />
         </View>
-        <Pressable onPress={togglePauseResume} hitSlop={8} style={styles.attachButton} accessibilityLabel={isPaused ? 'Resume recording' : 'Pause recording'}>
-          <Ionicons name={isPaused ? 'mic' : 'pause'} size={20} color={colors.textSecondary} />
-        </Pressable>
         <Pressable
-          onPress={sendRecording}
-          hitSlop={8}
-          style={[styles.sendButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}
-          accessibilityLabel="Send voice message"
+          onPress={togglePauseResume}
+          style={styles.attachButton}
+          accessibilityRole="button"
+          accessibilityLabel={isPaused ? 'Resume recording' : 'Pause recording'}
         >
-          <Ionicons name="checkmark" size={19} color={colors.textOnPrimary} />
+          {({ pressed }) => (
+            <Ionicons name={isPaused ? 'mic' : 'pause'} size={20} color={colors.textSecondary} style={{ opacity: pressed ? 0.5 : 1 }} />
+          )}
+        </Pressable>
+        <Pressable onPress={sendRecording} style={styles.actionTouch} accessibilityRole="button" accessibilityLabel="Send voice message">
+          {({ pressed }) => (
+            <View
+              style={[
+                styles.sendButton,
+                { backgroundColor: colors.primary, borderRadius: radius.full, opacity: pressed ? 0.6 : 1 },
+              ]}
+            >
+              <Ionicons name="checkmark" size={19} color={colors.textOnPrimary} />
+            </View>
+          )}
         </Pressable>
       </View>
     );
@@ -478,8 +492,13 @@ export function Composer({
         </View>
       ) : (
         <>
-          <Pressable onPress={() => setEmojiPickerVisible(true)} hitSlop={8} style={styles.emojiButton} accessibilityLabel="Choose an emoji">
-            <Text style={styles.emojiGlyph}>😊</Text>
+          <Pressable
+            onPress={() => setEmojiPickerVisible(true)}
+            style={styles.emojiButton}
+            accessibilityRole="button"
+            accessibilityLabel="Choose an emoji"
+          >
+            {({ pressed }) => <Text style={[styles.emojiGlyph, { opacity: pressed ? 0.5 : 1 }]}>😊</Text>}
           </Pressable>
 
           <View style={[styles.pill, { backgroundColor: colors.surfaceAlt, borderRadius: radius.xl, paddingLeft: spacing.md }]}>
@@ -492,11 +511,27 @@ export function Composer({
               multiline
               style={[styles.input, typography.body, { color: colors.textPrimary }]}
             />
-            <Pressable onPress={onAttach} hitSlop={8} style={styles.pillIcon} accessibilityLabel="Add attachment">
-              <Ionicons name="attach-outline" size={21} color={colors.textSecondary} />
+            <Pressable onPress={onAttach} style={styles.pillIcon} accessibilityRole="button" accessibilityLabel="Add attachment">
+              {({ pressed }) => (
+                <Ionicons name="attach-outline" size={21} color={colors.textSecondary} style={{ opacity: pressed ? 0.5 : 1 }} />
+              )}
             </Pressable>
-            <Pressable onPress={pickFromCameraQuick} disabled={cameraBusy} hitSlop={8} style={styles.pillIcon} accessibilityLabel="Take a photo">
-              <Ionicons name="camera-outline" size={20} color={colors.primary} />
+            <Pressable
+              onPress={pickFromCameraQuick}
+              disabled={cameraBusy}
+              style={styles.pillIcon}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: cameraBusy }}
+              accessibilityLabel="Take a photo"
+            >
+              {({ pressed }) => (
+                <Ionicons
+                  name="camera-outline"
+                  size={20}
+                  color={colors.primary}
+                  style={{ opacity: cameraBusy ? 0.4 : pressed ? 0.5 : 1 }}
+                />
+              )}
             </Pressable>
           </View>
         </>
@@ -516,8 +551,13 @@ export function Composer({
             specifically so React never unmounts it mid-touch. */}
         <Animated.View style={[styles.actionSlotLayer, micAnimatedStyle]} pointerEvents={canSend ? 'none' : 'auto'}>
           <GestureDetector gesture={micGesture}>
-            <Animated.View style={[styles.sendButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}>
-              <Ionicons name="mic" size={18} color={colors.textOnPrimary} />
+            {/* Still the same element across idle<->holding (see above); it
+                is now the full 48dp touch square, with the coloured circle
+                drawn as a child so the button looks unchanged. */}
+            <Animated.View style={styles.actionTouch} accessibilityRole="button" accessibilityLabel="Hold to record a voice message">
+              <View style={[styles.sendButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}>
+                <Ionicons name="mic" size={18} color={colors.textOnPrimary} />
+              </View>
             </Animated.View>
           </GestureDetector>
         </Animated.View>
@@ -525,11 +565,20 @@ export function Composer({
           <Pressable
             onPress={handleSend}
             disabled={!canSend}
-            hitSlop={8}
-            style={[styles.sendButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}
+            style={styles.actionTouch}
+            accessibilityRole="button"
             accessibilityLabel="Send message"
           >
-            <Ionicons name="arrow-up" size={19} color={colors.textOnPrimary} />
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.sendButton,
+                  { backgroundColor: colors.primary, borderRadius: radius.full, opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Ionicons name="arrow-up" size={19} color={colors.textOnPrimary} />
+              </View>
+            )}
           </Pressable>
         </Animated.View>
       </View>
@@ -552,15 +601,21 @@ export function Composer({
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'flex-end', borderTopWidth: StyleSheet.hairlineWidth },
-  emojiButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
+  // Every control below is sized to a real touch target (44-48dp) rather
+  // than to its icon — see touchTarget in theme/spacing.ts for why hitSlop
+  // alone could not do this job inside a row this tightly packed.
+  emojiButton: { width: touchTarget.compact, height: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
   emojiGlyph: { fontSize: 22 },
-  attachButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
-  pill: { flex: 1, flexDirection: 'row', alignItems: 'center', marginHorizontal: 4 },
+  attachButton: { width: touchTarget.compact, height: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
+  pill: { flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact, marginHorizontal: 2 },
   input: { flex: 1, maxHeight: 120, paddingVertical: 9, paddingRight: 4 },
-  pillIcon: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  actionSlot: { width: 34, height: 34, marginLeft: 2 },
-  actionSlotLayer: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
-  sendButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  pillIcon: { width: touchTarget.compact, height: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
+  // The action slot is the full 48dp touch square; the coloured circle
+  // drawn inside it stays 38dp so the button looks the same as before.
+  actionSlot: { width: touchTarget.min, height: touchTarget.min },
+  actionSlotLayer: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  actionTouch: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
+  sendButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   lockHint: { position: 'absolute', top: -46, left: 0, right: 0, alignItems: 'center' },
   blockedBar: { borderTopWidth: StyleSheet.hairlineWidth },
   templateButton: { alignItems: 'center' },

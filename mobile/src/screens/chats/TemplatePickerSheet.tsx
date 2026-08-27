@@ -1,6 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 import { useTemplates } from '../../queries/useTemplates';
 import type { MessageTemplate } from '../../api/types';
 
@@ -71,7 +72,7 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
   sheet: { width: '100%', maxHeight: '70%' },
   list: { flexGrow: 0 },
-  row: { borderBottomWidth: StyleSheet.hairlineWidth },
+  row: { borderBottomWidth: StyleSheet.hairlineWidth, minHeight: touchTarget.compact, justifyContent: 'center' },
   centered: { alignItems: 'center', padding: 16 },
-  cancel: { alignItems: 'center' },
+  cancel: { alignItems: 'center', justifyContent: 'center', minHeight: touchTarget.compact },
 });

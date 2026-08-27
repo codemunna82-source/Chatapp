@@ -1,7 +1,8 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../../theme/ThemeProvider';
+import { IconButton } from '../../components/IconButton';
+import { touchTarget } from '../../theme/spacing';
 import type { Message } from '../../api/types';
 
 export function ReplyPreviewBar({ target, onCancel }: { target: Message; onCancel: () => void }) {
@@ -20,9 +21,14 @@ export function ReplyPreviewBar({ target, onCancel }: { target: Message; onCance
           {target.text || `[${target.type}]`}
         </Text>
       </View>
-      <Pressable onPress={onCancel} hitSlop={8}>
-        <Ionicons name="close" size={18} color={colors.textSecondary} />
-      </Pressable>
+      <IconButton
+        name="close"
+        size={18}
+        color={colors.textSecondary}
+        touchSize={touchTarget.compact}
+        onPress={onCancel}
+        accessibilityLabel="Cancel reply"
+      />
     </View>
   );
 }

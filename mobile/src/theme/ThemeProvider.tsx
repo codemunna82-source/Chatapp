@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useMemo } from 'react';
 import { useColorScheme } from 'react-native';
 import { lightColors, darkColors, type ColorTokens } from './colors';
-import { spacing, radius, shadow } from './spacing';
+import { spacing, radius, shadow, touchTarget } from './spacing';
 import { typography } from './typography';
 import { useThemePreferenceStore } from '../store/themePreferenceStore';
 
@@ -11,6 +11,7 @@ export interface Theme {
   spacing: typeof spacing;
   radius: typeof radius;
   shadow: typeof shadow;
+  touchTarget: typeof touchTarget;
   typography: typeof typography;
 }
 
@@ -56,6 +57,7 @@ export function ThemeProvider({ children, colors: colorsOverride }: ThemeProvide
       spacing,
       radius,
       shadow,
+      touchTarget,
       typography,
     }),
     [scheme, colorsOverride],

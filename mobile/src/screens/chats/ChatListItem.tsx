@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../components/Avatar';
 import { Badge } from '../../components/Badge';
 import { useTheme } from '../../theme/ThemeProvider';
+import { IconButton } from '../../components/IconButton';
+import { touchTarget } from '../../theme/spacing';
 import { formatChatListTime } from '../../utils/formatTime';
 import type { Conversation } from '../../api/types';
 
@@ -54,16 +56,22 @@ export function ChatListItem({ conversation, onPress, onTogglePin, onArchive }: 
         </View>
       </View>
       <View style={styles.actions}>
-        <Pressable hitSlop={10} onPress={onTogglePin} style={styles.actionButton} accessibilityLabel="Pin conversation">
-          <Ionicons
-            name={conversation.pinned ? 'pin' : 'pin-outline'}
-            size={17}
-            color={conversation.pinned ? colors.primary : colors.textTertiary}
-          />
-        </Pressable>
-        <Pressable hitSlop={10} onPress={onArchive} style={styles.actionButton} accessibilityLabel="Archive conversation">
-          <Ionicons name="archive-outline" size={17} color={colors.textTertiary} />
-        </Pressable>
+        <IconButton
+          name={conversation.pinned ? 'pin' : 'pin-outline'}
+          size={17}
+          color={conversation.pinned ? colors.primary : colors.textTertiary}
+          touchSize={touchTarget.compact}
+          onPress={onTogglePin}
+          accessibilityLabel={conversation.pinned ? 'Unpin conversation' : 'Pin conversation'}
+        />
+        <IconButton
+          name="archive-outline"
+          size={17}
+          color={colors.textTertiary}
+          touchSize={touchTarget.compact}
+          onPress={onArchive}
+          accessibilityLabel="Archive conversation"
+        />
       </View>
     </Pressable>
   );
@@ -74,5 +82,4 @@ const styles = StyleSheet.create({
   middle: { flex: 1 },
   topLine: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
   actions: { marginLeft: 4 },
-  actionButton: { padding: 6 },
 });

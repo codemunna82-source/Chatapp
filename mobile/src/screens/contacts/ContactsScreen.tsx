@@ -11,6 +11,7 @@ import { ContactFormSheet } from './ContactFormSheet';
 import { useContacts, flattenContacts } from '../../queries/useContacts';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { useTheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 import type { Contact } from '../../api/types';
 
 export function ContactsScreen() {
@@ -39,12 +40,17 @@ export function ContactsScreen() {
     <Screen padded={false}>
       <View style={[styles.titleRow, { paddingHorizontal: spacing.md, paddingTop: spacing.sm }]}>
         <Text style={[typography.heading, { color: colors.textPrimary, flex: 1 }]}>Contacts</Text>
-        <Pressable
-          onPress={openCreate}
-          hitSlop={8}
-          style={[styles.addButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}
-        >
-          <Ionicons name="add" size={22} color={colors.textOnPrimary} />
+        <Pressable onPress={openCreate} style={styles.addTouch} accessibilityRole="button" accessibilityLabel="Add a contact">
+          {({ pressed }) => (
+            <View
+              style={[
+                styles.addButton,
+                { backgroundColor: colors.primary, borderRadius: radius.full, opacity: pressed ? 0.6 : 1 },
+              ]}
+            >
+              <Ionicons name="add" size={22} color={colors.textOnPrimary} />
+            </View>
+          )}
         </Pressable>
       </View>
       <View style={styles.headerRow}>
@@ -92,5 +98,6 @@ export function ContactsScreen() {
 const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center' },
   headerRow: { flexDirection: 'row', alignItems: 'center' },
+  addTouch: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   addButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
 });

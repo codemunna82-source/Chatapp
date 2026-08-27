@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
@@ -26,8 +27,14 @@ export function MessageActionSheet({ visible, canReact, onClose, onReact, onRepl
           {canReact ? (
             <View style={[styles.emojiRow, { marginBottom: spacing.md }]}>
               {QUICK_EMOJIS.map((emoji) => (
-                <Pressable key={emoji} onPress={() => onReact(emoji)} hitSlop={8}>
-                  <Text style={styles.emoji}>{emoji}</Text>
+                <Pressable
+                  key={emoji}
+                  onPress={() => onReact(emoji)}
+                  style={styles.emojiButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={`React with ${emoji}`}
+                >
+                  {({ pressed }) => <Text style={[styles.emoji, { opacity: pressed ? 0.5 : 1 }]}>{emoji}</Text>}
                 </Pressable>
               ))}
             </View>
@@ -52,6 +59,7 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
   sheet: { width: '100%' },
   emojiRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  emojiButton: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   emoji: { fontSize: 28 },
-  actionRow: { borderTopWidth: StyleSheet.hairlineWidth },
+  actionRow: { borderTopWidth: StyleSheet.hairlineWidth, minHeight: touchTarget.compact, justifyContent: 'center' },
 });

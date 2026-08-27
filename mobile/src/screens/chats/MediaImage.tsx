@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { mediaUrl } from '../../api/endpoints/media';
 import { useAuthStore } from '../../store/authStore';
@@ -15,22 +15,30 @@ import { useTheme } from '../../theme/ThemeProvider';
 export function MediaImage({ mediaId }: { mediaId: string }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const { colors, radius } = useTheme();
+  const { width } = useWindowDimensions();
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  // Sized from the live window rather than a fixed 220dp: the enclosing
+  // bubble is maxWidth 80%, so a hardcoded square overflowed the bubble on
+  // a 320dp-wide phone and left dead space on a 430dp one. Recomputed on
+  // window/orientation change because useWindowDimensions subscribes.
+  const side = Math.round(Math.min(Math.max(width * 0.58, 160), 280));
+  const box = { width: side, height: side };
+
   if (failed) {
     return (
-      <View style={[styles.box, styles.center, { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm }]}>
+      <View style={[box, styles.center, { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm }]}>
         <Ionicons name="image-outline" size={28} color={colors.textSecondary} />
       </View>
     );
   }
 
   return (
-    <View style={[styles.box, { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surfaceAlt }]}>
+    <View style={[box, { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surfaceAlt }]}>
       <Image
         source={{ uri: mediaUrl(mediaId), headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined }}
-        style={styles.box}
+        style={box}
         resizeMode="cover"
         onError={() => setFailed(true)}
         onLoadEnd={() => setLoaded(true)}
@@ -45,6 +53,5 @@ export function MediaImage({ mediaId }: { mediaId: string }) {
 }
 
 const styles = StyleSheet.create({
-  box: { width: 220, height: 220 },
   center: { alignItems: 'center', justifyContent: 'center' },
 });

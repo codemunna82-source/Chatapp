@@ -47,3 +47,25 @@ export const shadow = {
     elevation: 12,
   },
 } as const;
+
+/**
+ * Minimum touch-target sizes. Android's own accessibility guidance (and
+ * WCAG 2.5.5) put the floor at 48dp / 44dp — every interactive control in
+ * this app must have a container at least this big, even when the icon
+ * drawn inside it is much smaller.
+ *
+ * This exists because `hitSlop` alone is NOT a reliable substitute on
+ * Android: a touch is dispatched down the view tree, so a child's hitSlop
+ * can only expand the area *within* its parent's bounds. In a tightly
+ * packed row (the chat composer, a list row's trailing actions) the parent
+ * is barely larger than the icon, so most of the hitSlop is clipped away
+ * and the control ends up with an effective ~28-34dp target that feels
+ * dead when tapped. Size the container instead; use hitSlop only as a
+ * small extra margin on top.
+ */
+export const touchTarget = {
+  /** Standalone controls — headers, FABs, list-row actions, the composer. */
+  min: 48,
+  /** Densely packed rows where 48 would not fit. Still meets WCAG's 44dp. */
+  compact: 44,
+} as const;

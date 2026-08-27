@@ -13,6 +13,7 @@ import { useLogout, useUploadOwnAvatar } from '../../queries/useAuthMutations';
 import { useSubscription } from '../../queries/useSubscription';
 import { useNotifications, flattenNotifications } from '../../queries/useNotifications';
 import { useTheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 import { getApiErrorMessage } from '../../api/client';
 import type { SettingsStackParamList } from '../../navigation/types';
 import type { SubscriptionStatus } from '../../api/types';
@@ -231,7 +232,7 @@ const styles = StyleSheet.create({
   subscriptionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   statusPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
   appearanceRow: { flexDirection: 'row' },
-  appearanceOption: { flex: 1, alignItems: 'center' },
+  appearanceOption: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: touchTarget.compact },
   editBadge: {
     position: 'absolute',
     right: -2,

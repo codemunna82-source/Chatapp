@@ -5,6 +5,7 @@ import { TextField } from '../../components/TextField';
 import { Button } from '../../components/Button';
 import { InlineBanner } from '../../components/InlineBanner';
 import { useTheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 import { useCreateTeamMember, useUpdateTeamMember, useDisableTeamMember } from '../../queries/useTeam';
 import { getApiErrorMessage } from '../../api/client';
 import { ALL_PERMISSIONS } from '../../api/types';
@@ -233,6 +234,6 @@ const styles = StyleSheet.create({
   sheet: { width: '100%', maxHeight: '88%' },
   actions: { flexDirection: 'row', marginTop: 8, marginBottom: 12 },
   roleRow: { flexDirection: 'row' },
-  roleChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  permissionRow: { flexDirection: 'row', alignItems: 'center' },
+  roleChip: { paddingHorizontal: 14, borderRadius: 18, minHeight: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
+  permissionRow: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact },
 });

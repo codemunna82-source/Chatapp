@@ -1,7 +1,9 @@
 import React from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
+import { IconButton } from './IconButton';
+import { touchTarget } from '../theme/spacing';
 
 interface SearchBarProps {
   value: string;
@@ -36,20 +38,20 @@ export function SearchBar({ value, onChangeText, placeholder = 'Search' }: Searc
         returnKeyType="search"
       />
       {value.length > 0 ? (
-        <Pressable
+        <IconButton
+          name="close-circle"
+          size={18}
+          color={colors.textTertiary}
+          touchSize={touchTarget.compact}
           onPress={() => onChangeText('')}
-          hitSlop={8}
-          accessibilityRole="button"
           accessibilityLabel="Clear search"
-        >
-          <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
-        </Pressable>
+        />
       ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flexDirection: 'row', alignItems: 'center', height: 42 },
+  container: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact },
   input: { flex: 1, fontSize: 15.5 },
 });

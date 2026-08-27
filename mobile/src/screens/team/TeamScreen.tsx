@@ -7,6 +7,7 @@ import { TeamMemberItem } from './TeamMemberItem';
 import { TeamMemberFormSheet } from './TeamMemberFormSheet';
 import { useTeamMembers, flattenTeamMembers } from '../../queries/useTeam';
 import { useTheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 import type { TeamMember } from '../../api/types';
 
 export function TeamScreen() {
@@ -31,11 +32,17 @@ export function TeamScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={[styles.headerRow, { padding: spacing.md }]}>
         <Text style={[typography.heading, { color: colors.textPrimary, flex: 1 }]}>Team</Text>
-        <Pressable
-          onPress={openInvite}
-          style={[styles.addButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}
-        >
-          <Ionicons name="person-add" size={18} color={colors.textOnPrimary} />
+        <Pressable onPress={openInvite} style={styles.addTouch} accessibilityRole="button" accessibilityLabel="Invite a team member">
+          {({ pressed }) => (
+            <View
+              style={[
+                styles.addButton,
+                { backgroundColor: colors.primary, borderRadius: radius.full, opacity: pressed ? 0.6 : 1 },
+              ]}
+            >
+              <Ionicons name="person-add" size={18} color={colors.textOnPrimary} />
+            </View>
+          )}
         </Pressable>
       </View>
 
@@ -72,5 +79,6 @@ export function TeamScreen() {
 
 const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center' },
+  addTouch: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   addButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
 });

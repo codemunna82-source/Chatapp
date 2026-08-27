@@ -25,6 +25,7 @@ import { emitConversationRead } from '../../sockets/actions';
 import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage } from '../../api/client';
 import { ThemeProvider, useResolvedScheme } from '../../theme/ThemeProvider';
+import { touchTarget } from '../../theme/spacing';
 import { chatLightColors, chatDarkColors, chatHeaderBackground } from '../../theme/chatTheme';
 import { dayKey } from '../../utils/formatTime';
 import type { ChatsStackParamList } from '../../navigation/types';
@@ -93,8 +94,22 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       headerTitleStyle: { color: '#FFFFFF' },
       headerRight: () =>
         contactId ? (
-          <Pressable onPress={() => placeCall(contactId)} disabled={callPending} hitSlop={8} style={{ marginRight: 4 }}>
-            <Ionicons name="call-outline" size={22} color={callPending ? 'rgba(255,255,255,0.5)' : '#FFFFFF'} />
+          <Pressable
+            onPress={() => placeCall(contactId)}
+            disabled={callPending}
+            style={styles.headerAction}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: callPending }}
+            accessibilityLabel="Call this contact"
+          >
+            {({ pressed }) => (
+              <Ionicons
+                name="call-outline"
+                size={22}
+                color={callPending ? 'rgba(255,255,255,0.5)' : '#FFFFFF'}
+                style={{ opacity: pressed ? 0.5 : 1 }}
+              />
+            )}
           </Pressable>
         ) : null,
     });
@@ -271,5 +286,8 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   callErrorWrap: { paddingHorizontal: 16, paddingTop: 8 },
+  // Real 48dp target for the header action — hitSlop was being clipped by
+  // the navigator's own tight headerRight container.
+  headerAction: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingVertical: 8 },
 });
