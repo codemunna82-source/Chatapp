@@ -1,8 +1,18 @@
-# Builds a debug-signed VOXO APK on GitHub's own runners, which (unlike the
+# Builds a standalone VOXO APK on GitHub's own runners, which (unlike the
 # sandbox this workflow was authored in) have real network access to
 # dl.google.com / the Android SDK. Produces a downloadable artifact on every
 # run — see BUILD.md for turning this into a genuinely release-signed build
 # once a real keystore exists (as repo secrets, never committed).
+#
+# Builds the "release" *build type*, not "debug": a debug-type APK doesn't
+# embed the JS bundle at all — it expects to fetch it live from a Metro dev
+# server on your computer, which fails with "Unable to load script" the
+# moment you just install and open it on a phone with no Metro running.
+# Release-type embeds the JS bundle in the APK so it runs standalone. This
+# is still signed with the debug key (android/app/build.gradle falls back
+# to it when android/app/keystore.properties — a real keystore — doesn't
+# exist), so it's an installable, standalone, but NOT production-signed
+# APK. See BUILD.md for producing a genuinely production-signed release.
 name: Android APK build
 
 on:
@@ -56,23 +66,20 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('mobile/android/**/*.gradle*', 'mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
-      - name: Assemble debug APK
+      - name: Assemble release-type APK (debug-signed, JS bundle embedded)
         working-directory: mobile/android
         timeout-minutes: 15
         # Restricts the native (Reanimated/Gesture Handler/app) CMake/ninja
         # build to arm64-v8a only, instead of gradle.properties' default of
-        # all 4 ABIs. A prior run's logs showed this was never actually
-        # stuck — it was genuinely compiling native C++ for
-        # armeabi-v7a/arm64-v8a/x86/x86_64 in sequence and simply ran out of
-        # time. arm64-v8a alone covers virtually every real Android device;
-        # this only narrows what CI builds for a debug smoke artifact, not
-        # the app.config.ts / gradle.properties defaults everyone else uses.
-        run: ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
+        # all 4 ABIs — arm64-v8a alone covers virtually every real Android
+        # device, and building 4 architectures roughly quadruples native
+        # compile time for no benefit on a smoke/test APK.
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: voxo-debug-apk
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          name: voxo-apk
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14
