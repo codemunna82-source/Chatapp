@@ -16,6 +16,8 @@ export interface RealtimeMessagePayload {
   direction: 'IN' | 'OUT';
   type: string;
   text?: string;
+  mediaId?: string;
+  replyToMessageId?: string;
   status: string;
   senderId?: string;
   createdAt: string;

@@ -3,6 +3,7 @@ import { Media, type MediaDoc, type MediaStatus } from './media.model';
 
 export interface CreateMediaInput {
   tenantId: string;
+  whatsappPhoneNumberId: string;
   mimeType: string;
   sizeBytes: number;
   sha256: string;

@@ -10,6 +10,8 @@ export function toRealtimeMessage(doc: MessageDoc): RealtimeMessagePayload {
     direction: doc.direction,
     type: doc.type,
     text: doc.text ?? undefined,
+    mediaId: doc.mediaId ? String(doc.mediaId) : undefined,
+    replyToMessageId: doc.replyToMessageId ? String(doc.replyToMessageId) : undefined,
     status: doc.status,
     senderId: doc.senderId ? String(doc.senderId) : undefined,
     createdAt: doc.get('createdAt').toISOString(),

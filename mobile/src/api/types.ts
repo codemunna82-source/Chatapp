@@ -41,3 +41,80 @@ export interface AuthTokens {
   refreshToken: string;
   user: AuthUser;
 }
+
+export interface Contact {
+  id: string;
+  tenantId: string;
+  phone: string;
+  name?: string;
+  avatarUrl?: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ConversationStatus = 'OPEN' | 'ARCHIVED';
+
+export interface Conversation {
+  id: string;
+  tenantId: string;
+  contactId: string;
+  contact?: Contact;
+  whatsappPhoneNumberId: string;
+  lastMessageAt?: string;
+  lastMessagePreview?: string;
+  lastCustomerMessageAt?: string;
+  conversationWindowExpiresAt?: string;
+  withinCustomerServiceWindow: boolean;
+  unreadCount: number;
+  pinned: boolean;
+  pinnedAt?: string;
+  status: ConversationStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MessageDirection = 'IN' | 'OUT';
+export type MessageType =
+  | 'text'
+  | 'image'
+  | 'video'
+  | 'audio'
+  | 'document'
+  | 'location'
+  | 'contacts'
+  | 'reaction'
+  | 'template'
+  | 'interactive'
+  | 'sticker'
+  | 'unknown';
+export type MessageStatus = 'QUEUED' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
+
+export interface Message {
+  id: string;
+  conversationId: string;
+  direction: MessageDirection;
+  type: MessageType;
+  text?: string;
+  mediaId?: string;
+  replyToMessageId?: string;
+  status: MessageStatus;
+  senderId?: string;
+  createdAt: string;
+}
+
+export interface MessageTemplate {
+  id: string;
+  name: string;
+  language: string;
+  category: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION';
+  status: string;
+  components: unknown;
+}
+
+export interface UploadedMedia {
+  id: string;
+  mimeType: string;
+  sizeBytes: number;
+  status: 'UPLOADING' | 'READY' | 'FAILED';
+}

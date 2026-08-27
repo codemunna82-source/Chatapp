@@ -108,7 +108,7 @@ export const openApiSpec = {
     '/conversations/{id}/messages': {
       get: { summary: 'List a conversation\'s messages (cursor-paginated, newest first)', responses: { '200': { description: 'OK' } } },
       post: {
-        summary: 'Send a message (text/template/image/video/audio/document) — enforces the 24h customer-service window server-side',
+        summary: 'Send a message (text/template/image/video/audio/document/reaction) — enforces the 24h customer-service window server-side',
         responses: {
           '201': { description: 'Sent' },
           '422': { description: 'Outside the 24h window and not a template — MESSAGE_TEMPLATE_REQUIRED', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
@@ -119,6 +119,12 @@ export const openApiSpec = {
       post: {
         summary: 'Upload a media file to Meta (multipart/form-data: file, whatsappPhoneNumberId)',
         responses: { '201': { description: 'Uploaded' } },
+      },
+    },
+    '/media/{id}': {
+      get: {
+        summary: 'Proxy-stream a media file\'s bytes from Meta (never exposes the Meta access token to the client)',
+        responses: { '200': { description: 'The raw file bytes, with the original Content-Type' } },
       },
     },
     '/templates': {

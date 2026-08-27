@@ -38,6 +38,9 @@ export const sendMessageHandler = asyncHandler(async (req: Request, res: Respons
   if (body.type === 'template') {
     assertPermission(auth, 'CHAT_TEMPLATE');
   }
+  if (body.type === 'reaction') {
+    assertPermission(auth, 'CHAT_REACTION');
+  }
 
   const message = await sendOutboundMessage({
     tenantId: auth.tenantId,

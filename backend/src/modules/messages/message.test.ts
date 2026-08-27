@@ -105,6 +105,63 @@ describe('Messages REST', () => {
     expect(res.body.meta.nextCursor).toEqual(expect.any(String));
   });
 
+  it('sends a reaction to a delivered message and links it via replyToMessageId', async () => {
+    const tenant = await createTestTenant();
+    const { conversation } = await createTestChatFixture(String(tenant._id));
+    const token = await tokenFor(String(tenant._id), ['CHAT_READ', 'CHAT_SEND', 'CHAT_REACTION']);
+
+    const sent = await request(app)
+      .post(`/api/conversations/${conversation._id}/messages`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'text', text: 'React to me' });
+    expect(sent.status).toBe(201);
+    const targetId = sent.body.data.id;
+
+    const reaction = await request(app)
+      .post(`/api/conversations/${conversation._id}/messages`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'reaction', reactToMessageId: targetId, emoji: '👍' });
+
+    expect(reaction.status).toBe(201);
+    expect(reaction.body.data.type).toBe('reaction');
+    expect(reaction.body.data.text).toBe('👍');
+    expect(reaction.body.data.replyToMessageId).toBe(targetId);
+  });
+
+  it('requires CHAT_REACTION to send a reaction', async () => {
+    const tenant = await createTestTenant();
+    const { conversation } = await createTestChatFixture(String(tenant._id));
+    const token = await tokenFor(String(tenant._id), ['CHAT_READ', 'CHAT_SEND']); // no CHAT_REACTION
+
+    const sent = await request(app)
+      .post(`/api/conversations/${conversation._id}/messages`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'text', text: 'React to me' });
+
+    const reaction = await request(app)
+      .post(`/api/conversations/${conversation._id}/messages`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'reaction', reactToMessageId: sent.body.data.id, emoji: '👍' });
+
+    expect(reaction.status).toBe(403);
+  });
+
+  it('rejects reacting to a message that has not been delivered yet', async () => {
+    const tenant = await createTestTenant();
+    const { conversation } = await createTestChatFixture(String(tenant._id));
+    const token = await tokenFor(String(tenant._id), ['CHAT_READ', 'CHAT_SEND', 'CHAT_REACTION']);
+
+    // A random, never-sent id — never delivered, so it has no metaMessageId.
+    const fakeId = String(conversation._id);
+    const reaction = await request(app)
+      .post(`/api/conversations/${conversation._id}/messages`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'reaction', reactToMessageId: fakeId, emoji: '👍' });
+
+    expect(reaction.status).toBe(400);
+    expect(reaction.body.error.code).toBe('REACTION_TARGET_NOT_SENT');
+  });
+
   it('a message send against another tenant\'s conversation 404s', async () => {
     const tenantA = await createTestTenant('Tenant A');
     const tenantB = await createTestTenant('Tenant B');

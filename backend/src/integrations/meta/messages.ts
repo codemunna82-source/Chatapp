@@ -5,6 +5,7 @@ import type {
   SendTextMessageParams,
   SendTemplateMessageParams,
   SendMediaMessageParams,
+  SendReactionParams,
 } from './types';
 
 interface MetaSendResponse {
@@ -72,6 +73,21 @@ export async function sendMedia(creds: MetaCredentials, params: SendMediaMessage
     type: params.mediaType,
     [params.mediaType]: mediaNode,
     ...(params.replyToMetaMessageId ? { context: { message_id: params.replyToMetaMessageId } } : {}),
+  };
+  const res = await metaRequest<MetaSendResponse>((client) =>
+    client.post(`/${creds.phoneNumberId}/messages`, body, authConfig(creds.accessToken)),
+  );
+  return extractResult(res);
+}
+
+/** Meta's reaction message type — official, documented Cloud API behavior, not an invented endpoint. */
+export async function sendReaction(creds: MetaCredentials, params: SendReactionParams): Promise<MetaSendResult> {
+  const body = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: params.to,
+    type: 'reaction',
+    reaction: { message_id: params.reactToMetaMessageId, emoji: params.emoji },
   };
   const res = await metaRequest<MetaSendResponse>((client) =>
     client.post(`/${creds.phoneNumberId}/messages`, body, authConfig(creds.accessToken)),

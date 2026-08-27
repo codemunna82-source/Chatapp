@@ -6,6 +6,7 @@ import { AuthNavigator } from './AuthNavigator';
 import { MainTabNavigator } from './MainTabNavigator';
 import { LoadingIndicator } from '../components/LoadingIndicator';
 import { useAuthStore } from '../store/authStore';
+import { RealtimeSync } from '../sockets/RealtimeSync';
 
 export function RootNavigator() {
   const status = useAuthStore((s) => s.status);
@@ -29,7 +30,14 @@ export function RootNavigator() {
 
   return (
     <NavigationContainer linking={linking} fallback={<LoadingIndicator fullscreen />}>
-      {status === 'signedIn' ? <MainTabNavigator /> : <AuthNavigator />}
+      {status === 'signedIn' ? (
+        <>
+          <RealtimeSync />
+          <MainTabNavigator />
+        </>
+      ) : (
+        <AuthNavigator />
+      )}
     </NavigationContainer>
   );
 }

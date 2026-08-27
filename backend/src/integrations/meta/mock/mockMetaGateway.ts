@@ -25,6 +25,11 @@ export const mockMetaGateway: MetaGateway = {
     return { metaMessageId: `mock-wamid-${randomUUID()}` };
   },
 
+  async sendReaction(_creds, params) {
+    logger.debug({ to: params.to, reactToMetaMessageId: params.reactToMetaMessageId, emoji: params.emoji }, '[MOCK META] sendReaction');
+    return { metaMessageId: `mock-wamid-${randomUUID()}` };
+  },
+
   async markAsRead(_creds, metaMessageId) {
     logger.debug({ metaMessageId }, '[MOCK META] markAsRead');
   },

@@ -6,6 +6,10 @@ export type MediaStatus = (typeof MEDIA_STATUSES)[number];
 const mediaSchema = new Schema(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+    // Which WhatsApp connection's credentials to use when retrieving this
+    // file's bytes from Meta (spec's media-proxy design — see media.service.ts
+    // streamMediaForTenant) — a tenant can hold multiple WhatsApp accounts.
+    whatsappPhoneNumberId: { type: Schema.Types.ObjectId, ref: 'WhatsAppPhoneNumber', required: true },
     metaMediaId: { type: String }, // Meta's media id, once uploaded to Graph API
     mimeType: { type: String, required: true },
     sizeBytes: { type: Number, required: true },

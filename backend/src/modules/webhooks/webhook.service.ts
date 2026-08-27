@@ -5,7 +5,7 @@ import { findPhoneNumberByMetaId } from '../whatsapp/whatsapp.repository';
 import type { WhatsAppPhoneNumberDoc } from '../whatsapp/whatsappPhoneNumber.model';
 import { findOrCreateContactByPhone } from '../contacts/contact.repository';
 import { findOrCreateConversation, recordInboundActivity } from '../conversations/conversation.repository';
-import { createMessage, updateMessageStatusByMetaId } from '../messages/message.repository';
+import { createMessage, updateMessageStatusByMetaId, findMessageByMetaIdAndTenant } from '../messages/message.repository';
 import { createMedia } from '../media/media.repository';
 import type { MessageStatus } from '../messages/message.model';
 import { getRealtimeEmitter } from '../../realtime/events';
@@ -38,6 +38,7 @@ async function handleIncomingMessage(
     // keeps this handler fast and doesn't require object storage yet.
     const media = await createMedia({
       tenantId,
+      whatsappPhoneNumberId: String(phoneNumberDoc._id),
       metaMediaId: item.mediaRef.metaMediaId,
       mimeType: item.mediaRef.mimeType ?? 'application/octet-stream',
       sizeBytes: 0,
@@ -46,6 +47,19 @@ async function handleIncomingMessage(
       status: 'READY',
     });
     mediaId = String(media._id);
+  }
+
+  // A reaction links to the message it targets via replyToMessageId (the
+  // same field a reply uses) so the client can attach it to the right
+  // bubble instead of rendering it as its own top-level message.
+  let replyToMessageId: string | undefined;
+  if (item.messageType === 'reaction') {
+    const raw = item.raw as { reaction?: { message_id?: string } };
+    const targetMetaMessageId = raw.reaction?.message_id;
+    if (targetMetaMessageId) {
+      const target = await findMessageByMetaIdAndTenant(targetMetaMessageId, tenantId);
+      replyToMessageId = target ? String(target._id) : undefined;
+    }
   }
 
   const message = await createMessage({
@@ -57,6 +71,7 @@ async function handleIncomingMessage(
     text: item.text,
     mediaId,
     metaMessageId: item.messageId,
+    replyToMessageId,
     status: 'DELIVERED',
   });
 

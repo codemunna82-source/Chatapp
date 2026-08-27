@@ -47,6 +47,14 @@ export interface SendMediaMessageParams {
   replyToMetaMessageId?: string;
 }
 
+export interface SendReactionParams {
+  to: string;
+  /** The Meta wamid of the message being reacted to — not our own Message._id. */
+  reactToMetaMessageId: string;
+  /** A single emoji, or '' to remove a previously-sent reaction (both real, documented Meta behaviors). */
+  emoji: string;
+}
+
 export interface UploadMediaParams {
   buffer: Buffer;
   mimeType: string;

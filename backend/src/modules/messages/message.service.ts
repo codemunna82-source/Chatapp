@@ -13,11 +13,12 @@ import type { MessageDoc } from './message.model';
  * Message types this service can actually dispatch through the Meta
  * gateway today. Deliberately narrower than the full Message.type enum
  * (which also covers inbound-only/receive-side types like location,
- * contacts, reaction, sticker) — spec §20 forbids claiming unsupported
+ * contacts, sticker) — spec §20 forbids claiming unsupported
  * functionality, so anything outside this list is rejected explicitly
- * rather than silently mishandled.
+ * rather than silently mishandled. `reaction` IS included: Meta's Cloud
+ * API genuinely supports sending one (spec §51 — Meta's docs win).
  */
-export type SendableMessageType = 'text' | 'template' | SendableMediaType;
+export type SendableMessageType = 'text' | 'template' | 'reaction' | SendableMediaType;
 
 export interface SendOutboundMessageInput {
   tenantId: string;
@@ -32,7 +33,9 @@ export interface SendOutboundMessageInput {
   templateName?: string;
   languageCode?: string;
   templateComponents?: unknown[];
-  replyToMessageId?: string; // our Message._id
+  replyToMessageId?: string; // our Message._id — quotes another message when sending text/media
+  reactToMessageId?: string; // our Message._id — the target of a `type: 'reaction'` send
+  emoji?: string; // '' removes a previously-sent reaction (real, documented Meta behavior)
 }
 
 /**
@@ -71,6 +74,9 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
 
   // Our own row is created before calling Meta (status QUEUED) so a
   // mid-flight crash never loses the attempt — see markMessageFailed below.
+  // A reaction's row links to its target via replyToMessageId (same field
+  // a reply uses) — see realtime/serializers.ts / the mobile client for how
+  // that's read back to attach the reaction badge to the right bubble.
   const localMessage = await createMessage({
     tenantId: input.tenantId,
     conversationId: input.conversationId,
@@ -78,9 +84,14 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     recipientPhone: contact.phone,
     direction: 'OUT',
     type: input.type,
-    text: input.text,
+    text:
+      input.type === 'reaction'
+        ? input.emoji
+        : input.type === 'template'
+          ? `Template: ${input.templateName}`
+          : input.text,
     mediaId: input.mediaId,
-    replyToMessageId: input.replyToMessageId,
+    replyToMessageId: input.type === 'reaction' ? input.reactToMessageId : input.replyToMessageId,
     status: 'QUEUED',
   });
 
@@ -163,6 +174,24 @@ async function dispatch(
         caption: input.caption,
         filename: input.filename,
         replyToMetaMessageId,
+      });
+      return result.metaMessageId;
+    }
+    case 'reaction': {
+      if (!input.reactToMessageId || input.emoji === undefined) {
+        throw ApiError.badRequest('REACTION_REQUIRED', 'reactToMessageId and emoji are required');
+      }
+      const target = await findMessageByIdAndTenant(input.reactToMessageId, input.tenantId);
+      if (!target?.metaMessageId) {
+        throw ApiError.badRequest(
+          'REACTION_TARGET_NOT_SENT',
+          'Cannot react to a message that has not been delivered by Meta yet',
+        );
+      }
+      const result = await gateway.sendReaction(credentials, {
+        to: toPhone,
+        reactToMetaMessageId: target.metaMessageId,
+        emoji: input.emoji,
       });
       return result.metaMessageId;
     }

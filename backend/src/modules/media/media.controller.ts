@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { ApiError } from '../../lib/ApiError';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
-import { uploadMediaForTenant } from './media.service';
+import { uploadMediaForTenant, getMediaBytesForTenant } from './media.service';
 
 export const uploadMediaHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
@@ -30,4 +30,12 @@ export const uploadMediaHandler = asyncHandler(async (req: Request, res: Respons
       status: media.status,
     },
   });
+});
+
+export const getMediaHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const { buffer, mimeType } = await getMediaBytesForTenant(auth.tenantId, req.params.id as string);
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.status(200).send(buffer);
 });

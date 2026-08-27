@@ -20,12 +20,22 @@ const mediaMessage = z.object({
   filename: z.string().max(255).optional(),
   ...base,
 });
+// emoji: '' is valid and means "remove my previous reaction" — a real,
+// documented Meta behavior, so this stays a plain string, not min(1).
+const reactionMessage = z.object({
+  type: z.literal('reaction'),
+  reactToMessageId: z.string().min(1),
+  emoji: z.string().max(8),
+});
 
 export const sendMessageSchema = z
-  .discriminatedUnion('type', [textMessage, templateMessage, mediaMessage])
-  .refine((data) => (data.type === 'text' || data.type === 'template' ? true : Boolean(data.mediaId) !== Boolean(data.mediaLink)), {
-    message: 'Exactly one of mediaId or mediaLink is required for a media message',
-  });
+  .discriminatedUnion('type', [textMessage, templateMessage, mediaMessage, reactionMessage])
+  .refine(
+    (data) => (data.type !== 'image' && data.type !== 'video' && data.type !== 'audio' && data.type !== 'document'
+      ? true
+      : Boolean(data.mediaId) !== Boolean(data.mediaLink)),
+    { message: 'Exactly one of mediaId or mediaLink is required for a media message' },
+  );
 
 export const listMessagesQuerySchema = z.object({
   cursor: z.string().optional(),
