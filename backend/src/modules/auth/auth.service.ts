@@ -36,6 +36,7 @@ export interface AuthTokens {
     role: 'MASTER_ADMIN' | 'SUB_USER';
     permissions: Permission[];
     displayName?: string;
+    avatarUpdatedAt?: string;
   };
 }
 
@@ -118,6 +119,7 @@ export async function login(email: string, password: string, meta: RequestMeta):
       role: user.role as 'MASTER_ADMIN' | 'SUB_USER',
       permissions: (user.permissions ?? []) as Permission[],
       displayName: user.displayName ?? undefined,
+      avatarUpdatedAt: user.avatarUpdatedAt ? user.avatarUpdatedAt.toISOString() : undefined,
     },
   };
 }
@@ -189,6 +191,7 @@ export async function refresh(refreshTokenRaw: string, meta: RequestMeta): Promi
       role: user.role as 'MASTER_ADMIN' | 'SUB_USER',
       permissions: (user.permissions ?? []) as Permission[],
       displayName: user.displayName ?? undefined,
+      avatarUpdatedAt: user.avatarUpdatedAt ? user.avatarUpdatedAt.toISOString() : undefined,
     },
   };
 }

@@ -26,6 +26,15 @@ const userSchema = new Schema(
     validUntil: { type: Date, required: true },
     lastLoginAt: { type: Date },
     displayName: { type: String, trim: true },
+    // Stored inline rather than in an external bucket — there's no object
+    // storage configured for this project (ARCHITECTURE.md never specced
+    // one), and profile photos are small/capped (see avatar.validation.ts)
+    // so this stays well within a reasonable document size. select: false
+    // keeps this off every ordinary user fetch/list — only the dedicated
+    // GET .../avatar route asks for it explicitly.
+    avatarData: { type: Buffer, select: false },
+    avatarContentType: { type: String, select: false },
+    avatarUpdatedAt: { type: Date },
   },
   { timestamps: true },
 );

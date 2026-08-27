@@ -1,15 +1,19 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Screen } from '../../components/Screen';
 import { Button } from '../../components/Button';
 import { Badge } from '../../components/Badge';
+import { Avatar } from '../../components/Avatar';
 import { useAuthStore } from '../../store/authStore';
-import { useLogout } from '../../queries/useAuthMutations';
+import { useThemePreferenceStore, type ThemePreference } from '../../store/themePreferenceStore';
+import { useLogout, useUploadOwnAvatar } from '../../queries/useAuthMutations';
 import { useSubscription } from '../../queries/useSubscription';
 import { useNotifications, flattenNotifications } from '../../queries/useNotifications';
 import { useTheme } from '../../theme/ThemeProvider';
+import { getApiErrorMessage } from '../../api/client';
 import type { SettingsStackParamList } from '../../navigation/types';
 import type { SubscriptionStatus } from '../../api/types';
 
@@ -50,6 +54,103 @@ function SettingsRow({
   );
 }
 
+/** Tap to replace the photo — square crop, uploaded to PATCH /api/users/me/avatar. */
+function ProfileAvatar({ userId, label, version }: { userId: string; label: string; version?: string }) {
+  const { colors, spacing } = useTheme();
+  const uploadAvatar = useUploadOwnAvatar();
+  const [error, setError] = useState<string | null>(null);
+
+  const pickAndUpload = async () => {
+    setError(null);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setError('Photo library permission was denied.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    const asset = result.canceled ? undefined : result.assets[0];
+    if (!asset) return;
+    try {
+      await uploadAvatar.mutateAsync({
+        uri: asset.uri,
+        name: asset.fileName ?? 'avatar.jpg',
+        mimeType: asset.mimeType ?? 'image/jpeg',
+      });
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Could not update your profile picture.'));
+    }
+  };
+
+  return (
+    <View style={{ alignItems: 'center', marginBottom: spacing.sm }}>
+      <Pressable onPress={pickAndUpload} disabled={uploadAvatar.isPending} testID="settings-avatar">
+        <Avatar userId={userId} version={version} label={label} size={72} />
+        <View style={[styles.editBadge, { backgroundColor: colors.primary, borderColor: colors.background }]}>
+          {uploadAvatar.isPending ? (
+            <ActivityIndicator size="small" color={colors.textOnPrimary} />
+          ) : (
+            <Ionicons name="camera" size={14} color={colors.textOnPrimary} />
+          )}
+        </View>
+      </Pressable>
+      {error ? (
+        <Text style={[{ color: colors.danger, marginTop: spacing.xs, fontSize: 12 }]}>{error}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+const APPEARANCE_OPTIONS: { value: ThemePreference; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { value: 'system', label: 'System', icon: 'phone-portrait-outline' },
+  { value: 'light', label: 'Light', icon: 'sunny-outline' },
+  { value: 'dark', label: 'Dark', icon: 'moon-outline' },
+];
+
+function AppearanceSection() {
+  const { colors, spacing, radius, typography } = useTheme();
+  const preference = useThemePreferenceStore((s) => s.preference);
+  const setPreference = useThemePreferenceStore((s) => s.setPreference);
+
+  return (
+    <View style={{ marginBottom: spacing.lg }}>
+      <Text style={[typography.label, { color: colors.textSecondary, marginBottom: spacing.xs }]}>Appearance</Text>
+      <View style={styles.appearanceRow}>
+        {APPEARANCE_OPTIONS.map((option) => {
+          const active = preference === option.value;
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => setPreference(option.value)}
+              style={[
+                styles.appearanceOption,
+                {
+                  backgroundColor: active ? colors.primary : colors.surfaceAlt,
+                  borderRadius: radius.md,
+                  marginRight: spacing.sm,
+                  paddingVertical: spacing.sm,
+                },
+              ]}
+              testID={`settings-theme-${option.value}`}
+            >
+              <Ionicons name={option.icon} size={18} color={active ? colors.textOnPrimary : colors.textSecondary} />
+              <Text
+                style={[typography.caption, { color: active ? colors.textOnPrimary : colors.textSecondary, marginTop: 2 }]}
+              >
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 export function SettingsScreen({ navigation }: Props) {
   const { colors, spacing, radius, typography } = useTheme();
   const user = useAuthStore((s) => s.user);
@@ -64,7 +165,10 @@ export function SettingsScreen({ navigation }: Props) {
     <Screen>
       <Text style={[typography.heading, { color: colors.textPrimary, marginBottom: spacing.lg }]}>Settings</Text>
 
-      <View style={{ marginBottom: spacing.lg }}>
+      <View style={{ marginBottom: spacing.lg, alignItems: 'center' }}>
+        {user ? (
+          <ProfileAvatar userId={user.id} label={user.displayName ?? user.email} version={user.avatarUpdatedAt} />
+        ) : null}
         <Text style={[typography.label, { color: colors.textSecondary }]}>Account</Text>
         <Text style={[typography.body, { color: colors.textPrimary, marginTop: spacing.xs }]}>
           {user?.displayName ?? user?.email}
@@ -74,6 +178,8 @@ export function SettingsScreen({ navigation }: Props) {
           {user?.role === 'MASTER_ADMIN' ? 'Master Admin' : 'Team member'}
         </Text>
       </View>
+
+      <AppearanceSection />
 
       {isMasterAdmin && subscription.data
         ? (() => {
@@ -124,4 +230,17 @@ const styles = StyleSheet.create({
   subscriptionCard: {},
   subscriptionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   statusPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  appearanceRow: { flexDirection: 'row' },
+  appearanceOption: { flex: 1, alignItems: 'center' },
+  editBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

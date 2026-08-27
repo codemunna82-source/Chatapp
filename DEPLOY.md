@@ -70,6 +70,10 @@ identical setup with plain dashboard clicks.
    - `RATE_LIMIT_WINDOW_MS=60000`, `RATE_LIMIT_MAX=100`, `LOG_LEVEL=info`
    - `SEED_TENANT_NAME`, `SEED_MASTER_ADMIN_EMAIL`,
      `SEED_MASTER_ADMIN_PASSWORD` — real values for your first login
+   - `SEED_DEMO_DATA=true` — since `NODE_ENV=production`, the seed script
+     otherwise skips creating a demo contact/conversation to test chat with
+     (that skip exists to protect a real customer's tenant, which this
+     deployment isn't)
 4. Deploy.
 
 ## 2. Verify it's actually up
@@ -92,6 +96,14 @@ Render's **Shell** tab on the service (or a one-off Job):
 ```bash
 node dist/scripts/seed.js
 ```
+
+With `SEED_DEMO_DATA=true` set, this also creates a demo WhatsApp account,
+2 contacts, and a conversation with 2 messages — something to actually open
+and chat in from the app instead of an empty inbox. Both parts are
+idempotent: if you already ran this once (e.g. before setting
+`SEED_DEMO_DATA`), just add the env var and re-run the same command — it
+recognizes the admin account already exists and only backfills the demo
+chat data that's still missing.
 
 ## 4. Point the Android app at it
 

@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
+import { ApiError } from '../../lib/ApiError';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import * as userService from './user.service';
 
@@ -36,4 +37,22 @@ export const disableUserHandler = asyncHandler(async (req: Request, res: Respons
   const auth = getTenantContext(req);
   const user = await userService.disableUserForTenant(auth.tenantId, auth.userId, req.params.id as string);
   res.status(200).json({ success: true, data: user });
+});
+
+export const updateOwnAvatarHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const file = req.file;
+  if (!file) {
+    throw ApiError.badRequest('FILE_REQUIRED', 'A file is required (multipart field name: "file")');
+  }
+  const user = await userService.updateOwnAvatar(auth.tenantId, auth.userId, file.buffer, file.mimetype);
+  res.status(200).json({ success: true, data: user });
+});
+
+export const getUserAvatarHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const { data, contentType } = await userService.getUserAvatarForTenant(auth.tenantId, req.params.id as string);
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.status(200).send(data);
 });

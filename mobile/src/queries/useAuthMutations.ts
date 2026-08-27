@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as authApi from '../api/endpoints/auth';
+import { uploadOwnAvatar, type PickedAvatarFile } from '../api/endpoints/users';
 import { useAuthStore } from '../store/authStore';
 
 export function useLogin() {
@@ -34,5 +35,13 @@ export function useChangePassword() {
   return useMutation({
     mutationFn: (vars: { currentPassword: string; newPassword: string }) =>
       authApi.changePassword(vars.currentPassword, vars.newPassword),
+  });
+}
+
+export function useUploadOwnAvatar() {
+  const updateUser = useAuthStore((s) => s.updateUser);
+  return useMutation({
+    mutationFn: (file: PickedAvatarFile) => uploadOwnAvatar(file),
+    onSuccess: (user) => updateUser({ avatarUpdatedAt: user.avatarUpdatedAt, displayName: user.displayName }),
   });
 }

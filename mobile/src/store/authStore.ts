@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { getStoredTokens, setStoredTokens, clearStoredTokens } from '../storage/secureStorage';
 import { getJSON, setJSON, remove as removeCached } from '../storage/mmkv';
 import { setAuthHandlers } from '../api/client';
-import { ALL_PERMISSIONS, type AuthTokens, type AuthUser } from '../api/types';
+import type { AuthTokens, AuthUser } from '../api/types';
 
 const CACHED_USER_KEY = 'voxo.cachedUser';
 
@@ -13,21 +13,12 @@ interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
   user: AuthUser | null;
-  /**
-   * True only for the "Continue without login" testing bypass (see
-   * LoginScreen) — a real signed-in session never sets this. Every screen
-   * still calls the real backend and will show real network errors with no
-   * backend reachable; this only exists to look at the app's UI/navigation
-   * without a live server. Never persisted, so a restart returns to the
-   * real login screen.
-   */
-  demoMode: boolean;
   /** Reads persisted tokens/user at app startup — call once from the root component. */
   hydrate: () => Promise<void>;
   setSession: (tokens: AuthTokens) => Promise<void>;
   clearSession: () => Promise<void>;
-  /** Testing-only bypass — see `demoMode` above. Never persisted. */
-  enterDemoMode: () => void;
+  /** Merges a partial update into the cached user (e.g. avatarUpdatedAt after an upload) without a full re-login. */
+  updateUser: (patch: Partial<AuthUser>) => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -35,7 +26,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: null,
   refreshToken: null,
   user: null,
-  demoMode: false,
 
   hydrate: async () => {
     const { accessToken, refreshToken } = await getStoredTokens();
@@ -66,28 +56,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   clearSession: async () => {
     await clearStoredTokens();
     removeCached(CACHED_USER_KEY);
-    set({ status: 'signedOut', accessToken: null, refreshToken: null, user: null, demoMode: false });
+    set({ status: 'signedOut', accessToken: null, refreshToken: null, user: null });
   },
 
-  enterDemoMode: () => {
-    // Deliberately NOT persisted (no setStoredTokens/setJSON call) — this
-    // never touches the real session storage, so it can't be mistaken for
-    // a real login on the next app launch, and clearSession()'s "partial
-    // state = signed out" hydrate logic never sees it.
-    set({
-      status: 'signedIn',
-      demoMode: true,
-      accessToken: 'demo-mode-no-backend',
-      refreshToken: 'demo-mode-no-backend',
-      user: {
-        id: 'demo-user',
-        tenantId: 'demo-tenant',
-        email: 'demo@voxo.local',
-        role: 'MASTER_ADMIN',
-        permissions: [...ALL_PERMISSIONS],
-        displayName: 'Demo User',
-      },
-    });
+  updateUser: (patch: Partial<AuthUser>) => {
+    const current = get().user;
+    if (!current) return;
+    const updated = { ...current, ...patch };
+    setJSON(CACHED_USER_KEY, updated);
+    set({ user: updated });
   },
 }));
 

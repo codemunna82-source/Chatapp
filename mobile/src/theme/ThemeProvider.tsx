@@ -3,6 +3,7 @@ import { useColorScheme } from 'react-native';
 import { lightColors, darkColors, type ColorTokens } from './colors';
 import { spacing, radius } from './spacing';
 import { typography } from './typography';
+import { useThemePreferenceStore } from '../store/themePreferenceStore';
 
 export interface Theme {
   scheme: 'light' | 'dark';
@@ -16,7 +17,10 @@ const ThemeContext = createContext<Theme | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
-  const scheme = systemScheme === 'dark' ? 'dark' : 'light';
+  const preference = useThemePreferenceStore((s) => s.preference);
+  // 'system' (the default) follows the OS setting, same as before this
+  // store existed; 'light'/'dark' is an explicit user override from Settings.
+  const scheme = preference === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : preference;
 
   const theme = useMemo<Theme>(
     () => ({

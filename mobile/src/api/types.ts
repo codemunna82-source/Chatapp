@@ -38,6 +38,7 @@ export interface AuthUser {
   role: UserRole;
   permissions: Permission[];
   displayName?: string;
+  avatarUpdatedAt?: string;
 }
 
 export interface AuthTokens {
@@ -212,6 +213,7 @@ export interface TeamMember {
   validUntil: string;
   displayName?: string;
   lastLoginAt?: string;
+  avatarUpdatedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -17,7 +17,7 @@ export function TeamMemberItem({ member, onPress }: { member: TeamMember; onPres
         { padding: spacing.md, backgroundColor: pressed ? colors.surface : colors.background },
       ]}
     >
-      <Avatar label={label} />
+      <Avatar userId={member.id} version={member.avatarUpdatedAt} label={label} />
       <View style={{ flex: 1, marginLeft: spacing.md, opacity: isDisabled ? 0.5 : 1 }}>
         <Text style={[typography.bodyMedium, { color: colors.textPrimary }]} numberOfLines={1}>
           {label}

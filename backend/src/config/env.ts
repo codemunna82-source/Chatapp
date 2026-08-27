@@ -43,6 +43,14 @@ const envSchema = z.object({
   SEED_TENANT_NAME: z.string().default('Demo Tenant'),
   SEED_MASTER_ADMIN_EMAIL: z.string().email().default('admin@example.com'),
   SEED_MASTER_ADMIN_PASSWORD: z.string().min(8).default('ChangeMe123!'),
+  // seed.ts normally only creates demo WhatsApp/chat data outside production
+  // (a real customer tenant shouldn't get fake contacts). Set true to opt a
+  // specific production deployment into it anyway — e.g. this project's own
+  // Render deployment, which is a testing environment despite NODE_ENV=production.
+  SEED_DEMO_DATA: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof envSchema>;

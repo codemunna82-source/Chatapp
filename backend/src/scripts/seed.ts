@@ -13,7 +13,7 @@ import { env } from '../config/env';
 import { Tenant } from '../modules/tenants/tenant.model';
 import { User } from '../modules/users/user.model';
 import { hashPassword } from '../lib/password';
-import { createWabaAccount, createPhoneNumber } from '../modules/whatsapp/whatsapp.repository';
+import { createWabaAccount, createPhoneNumber, findWabaAccountsByTenant } from '../modules/whatsapp/whatsapp.repository';
 import { createContact } from '../modules/contacts/contact.repository';
 import { findOrCreateConversation, recordInboundActivity, recordOutboundActivity } from '../modules/conversations/conversation.repository';
 import { createMessage } from '../modules/messages/message.repository';
@@ -100,13 +100,18 @@ async function seedDemoWorkspaceData(tenantId: string): Promise<void> {
   await creditWallet(tenantId, 100, 'Initial demo credit');
 }
 
-async function seed(): Promise<void> {
-  await connectMongo();
-
+/**
+ * Ensures the tenant + MASTER_ADMIN exist, creating them on first run.
+ * Idempotent: a second run just returns the existing tenant's id instead of
+ * failing — this is what lets `SEED_DEMO_DATA=true` be turned on and the
+ * script re-run *after* the admin account already exists, to backfill demo
+ * chat data without touching the admin account itself.
+ */
+async function ensureTenantAndAdmin(): Promise<string> {
   const existing = await User.findOne({ email: env.SEED_MASTER_ADMIN_EMAIL.toLowerCase() });
   if (existing) {
-    console.log(`Seed skipped — ${env.SEED_MASTER_ADMIN_EMAIL} already exists.`);
-    return;
+    console.log(`Master admin already exists — ${env.SEED_MASTER_ADMIN_EMAIL} (tenant ${existing.tenantId}).`);
+    return String(existing.tenantId);
   }
 
   const tenant = await Tenant.create({
@@ -134,19 +139,34 @@ async function seed(): Promise<void> {
   tenant.masterAdminId = admin._id;
   await tenant.save();
 
-  console.log('Seed complete:');
+  console.log('Tenant + Master Admin created:');
   console.log(`  Tenant: ${tenant.name} (${tenant._id})`);
   console.log(`  Master Admin: ${admin.email} / ${env.SEED_MASTER_ADMIN_PASSWORD}`);
   console.log('  ⚠️  Change this password immediately after first login.');
 
-  if (env.NODE_ENV === 'production') {
-    console.log('  NODE_ENV=production — skipping demo WhatsApp/chat data.');
+  return String(tenant._id);
+}
+
+async function seed(): Promise<void> {
+  await connectMongo();
+
+  const tenantId = await ensureTenantAndAdmin();
+
+  if (env.NODE_ENV === 'production' && !env.SEED_DEMO_DATA) {
+    console.log('NODE_ENV=production and SEED_DEMO_DATA is not set — skipping demo WhatsApp/chat data.');
+    console.log('Set SEED_DEMO_DATA=true if this deployment is for testing, not a real customer tenant.');
     return;
   }
 
-  await seedDemoWorkspaceData(String(tenant._id));
-  console.log('  Demo data: WhatsApp account, 2 contacts, 1 conversation with 2 messages,');
-  console.log('             1 approved template, a PRO subscription, and a $100 wallet credit.');
+  const existingWaba = await findWabaAccountsByTenant(tenantId);
+  if (existingWaba.length > 0) {
+    console.log('Demo workspace data already exists for this tenant — skipping.');
+    return;
+  }
+
+  await seedDemoWorkspaceData(tenantId);
+  console.log('Demo data seeded: WhatsApp account, 2 contacts, 1 conversation with 2 messages,');
+  console.log('                  1 approved template, a PRO subscription, and a $100 wallet credit.');
 }
 
 seed()

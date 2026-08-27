@@ -74,6 +74,12 @@ services:
         sync: false
       - key: SEED_MASTER_ADMIN_PASSWORD
         sync: false
+      # Seeds a demo WhatsApp account/contact/conversation even though
+      # NODE_ENV=production — safe here because this deployment is for
+      # testing, not a real customer tenant. Never set this true on an
+      # actual customer's production tenant.
+      - key: SEED_DEMO_DATA
+        value: "true"
 
   - type: keyvalue
     name: voxo-redis

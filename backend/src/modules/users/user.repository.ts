@@ -93,3 +93,29 @@ export async function countUsersByTenantAndEmail(email: string): Promise<number>
   // conflict checks before hitting the unique index.
   return User.countDocuments({ email: email.toLowerCase() });
 }
+
+export async function setUserAvatar(
+  id: string,
+  tenantId: string,
+  data: Buffer,
+  contentType: string,
+): Promise<UserDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return User.findOneAndUpdate(
+    { _id: id, tenantId },
+    { $set: { avatarData: data, avatarContentType: contentType, avatarUpdatedAt: new Date() } },
+    { new: true },
+  );
+}
+
+export interface AvatarBytes {
+  data: Buffer;
+  contentType: string;
+}
+
+export async function findUserAvatarByIdAndTenant(id: string, tenantId: string): Promise<AvatarBytes | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  const user = await User.findOne({ _id: id, tenantId }).select('+avatarData +avatarContentType');
+  if (!user || !user.avatarData || !user.avatarContentType) return null;
+  return { data: user.avatarData as unknown as Buffer, contentType: user.avatarContentType };
+}

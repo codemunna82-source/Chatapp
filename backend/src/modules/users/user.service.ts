@@ -17,6 +17,7 @@ export interface PublicUser {
   validUntil: Date;
   displayName?: string;
   lastLoginAt?: Date;
+  avatarUpdatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -33,6 +34,7 @@ export function toPublicUser(user: UserDoc): PublicUser {
     validUntil: user.validUntil,
     displayName: user.displayName ?? undefined,
     lastLoginAt: user.lastLoginAt ?? undefined,
+    avatarUpdatedAt: user.avatarUpdatedAt ?? undefined,
     createdAt: user.get('createdAt'),
     updatedAt: user.get('updatedAt'),
   };
@@ -114,6 +116,50 @@ export async function updateUserForTenant(
     metadata: patch,
   });
   return toPublicUser(user);
+}
+
+// Small ceiling, deliberately — the image is stored inline on the User
+// document (see user.model.ts avatarData), not in an external bucket,
+// so this keeps every profile photo well within a reasonable document
+// size instead of needing a resize/compress pipeline server-side.
+export const AVATAR_MAX_SIZE_BYTES = 1.5 * 1024 * 1024;
+export const AVATAR_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+export async function updateOwnAvatar(
+  tenantId: string,
+  userId: string,
+  data: Buffer,
+  contentType: string,
+): Promise<PublicUser> {
+  if (!AVATAR_MIME_TYPES.includes(contentType)) {
+    throw ApiError.badRequest(
+      'UNSUPPORTED_AVATAR_TYPE',
+      `Unsupported image type "${contentType}" — use JPEG, PNG, or WebP`,
+    );
+  }
+  if (data.length > AVATAR_MAX_SIZE_BYTES) {
+    throw ApiError.badRequest(
+      'AVATAR_TOO_LARGE',
+      `Image is ${(data.length / (1024 * 1024)).toFixed(1)}MB — must be under ${AVATAR_MAX_SIZE_BYTES / (1024 * 1024)}MB`,
+    );
+  }
+
+  const user = await repo.setUserAvatar(userId, tenantId, data, contentType);
+  if (!user) {
+    throw ApiError.notFound('USER_NOT_FOUND', 'User not found');
+  }
+  return toPublicUser(user);
+}
+
+export async function getUserAvatarForTenant(
+  tenantId: string,
+  id: string,
+): Promise<{ data: Buffer; contentType: string }> {
+  const avatar = await repo.findUserAvatarByIdAndTenant(id, tenantId);
+  if (!avatar) {
+    throw ApiError.notFound('AVATAR_NOT_FOUND', 'No profile picture set');
+  }
+  return avatar;
 }
 
 /** DELETE /api/users/:id is implemented as a soft-disable — see user.repository.ts. */
