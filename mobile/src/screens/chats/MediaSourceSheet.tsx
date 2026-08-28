@@ -1,8 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { type BottomSheetModal } from '@gorhom/bottom-sheet';
-import { AppBottomSheet } from '../../components/AppBottomSheet';
+import { AppBottomSheet, type AppBottomSheetRef } from '../../components/AppBottomSheet';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
 
@@ -20,7 +19,7 @@ interface MediaSourceSheetProps {
  */
 export function MediaSourceSheet({ visible, onClose, onPickCamera, onPickGallery }: MediaSourceSheetProps) {
   const { colors, spacing, radius, typography } = useTheme();
-  const sheetRef = useRef<BottomSheetModal>(null);
+  const sheetRef = useRef<AppBottomSheetRef>(null);
 
   useEffect(() => {
     if (visible) {

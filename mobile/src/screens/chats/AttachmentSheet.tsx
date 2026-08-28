@@ -3,8 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { type BottomSheetModal } from '@gorhom/bottom-sheet';
-import { AppBottomSheet } from '../../components/AppBottomSheet';
+import { AppBottomSheet, type AppBottomSheetRef } from '../../components/AppBottomSheet';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useUploadMedia } from '../../queries/useUploadMedia';
 import { useSendMessage } from '../../queries/useMessages';
@@ -41,7 +40,7 @@ export function AttachmentSheet({
   onSent,
 }: AttachmentSheetProps) {
   const { colors, spacing, radius, typography } = useTheme();
-  const sheetRef = useRef<BottomSheetModal>(null);
+  const sheetRef = useRef<AppBottomSheetRef>(null);
   const uploadMedia = useUploadMedia();
   const sendMessage = useSendMessage(conversationId);
   const [busy, setBusy] = useState(false);

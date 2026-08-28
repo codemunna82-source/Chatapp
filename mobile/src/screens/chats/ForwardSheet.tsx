@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetFlatList, type BottomSheetModal } from '@gorhom/bottom-sheet';
-import { AppBottomSheet } from '../../components/AppBottomSheet';
+import { AppBottomSheet, type AppBottomSheetRef } from '../../components/AppBottomSheet';
 import { Avatar } from '../../components/Avatar';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
@@ -51,7 +50,7 @@ export function buildForwardBody(message: Message): SendMessageBody | null {
 
 export function ForwardSheet({ visible, messages, currentConversationId, onClose, onForwarded }: ForwardSheetProps) {
   const { colors, spacing, typography } = useTheme();
-  const sheetRef = useRef<BottomSheetModal>(null);
+  const sheetRef = useRef<AppBottomSheetRef>(null);
   const [sendingTo, setSendingTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -158,7 +157,7 @@ export function ForwardSheet({ visible, messages, currentConversationId, onClose
           </Text>
         </View>
       ) : (
-        <BottomSheetFlatList
+        <FlatList
           data={targets}
           keyExtractor={(item: Conversation) => item.id}
           renderItem={renderItem}
