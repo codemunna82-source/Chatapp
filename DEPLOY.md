@@ -191,7 +191,7 @@ log instead — the server logs the actual reason:
 No log line at all means the request never arrived: the URL is wrong, or
 the free instance was asleep. Render's free plan spins down after ~15
 minutes and takes 30-60s to wake, while Meta gives up after a few seconds
-— **wake the service first** (`curl .../healthz`) and then press *Verify
+— **wake the service first** (`curl .../health`) and then press *Verify
 and Save*, or the very first attempt can fail on a perfectly correct
 configuration.
 
