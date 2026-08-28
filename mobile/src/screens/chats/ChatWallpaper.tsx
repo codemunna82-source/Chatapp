@@ -55,7 +55,7 @@ function buildCells(width: number, height: number): DoodleCell[] {
  * colors.primary on light/dark switch), and only regenerates its icon grid
  * when the measured viewport size actually changes.
  */
-export function ChatWallpaper() {
+function ChatWallpaperImpl() {
   const { colors } = useTheme();
   const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -70,7 +70,18 @@ export function ChatWallpaper() {
   );
 
   return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} onLayout={onLayout} pointerEvents="none">
+    <View
+      style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]}
+      onLayout={onLayout}
+      pointerEvents="none"
+      // This subtree is ~200 glyph views that never move or change. Promoting
+      // it to a single GPU texture means the message list scrolls over one
+      // composited layer instead of re-compositing every icon each frame.
+      renderToHardwareTextureAndroid
+      // Without this, RN may flatten the wrapper away and the texture hint
+      // would have no view left to apply to.
+      collapsable={false}
+    >
       {cells.map((cell) => (
         <Ionicons
           key={cell.key}
@@ -83,6 +94,14 @@ export function ChatWallpaper() {
     </View>
   );
 }
+
+/**
+ * Memoized: this is a full-screen decorative layer with no props, mounted
+ * behind the message list. Before this, every re-render of the conversation
+ * screen (typing indicator, reply target, toast, keystroke) walked all ~200
+ * icon elements again for a layer that never actually changes.
+ */
+export const ChatWallpaper = React.memo(ChatWallpaperImpl);
 
 const styles = StyleSheet.create({
   icon: { position: 'absolute' },

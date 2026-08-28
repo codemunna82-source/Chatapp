@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,11 +10,17 @@ import { useCallHistory, flattenCalls } from '../../queries/useCalls';
 import { useTheme } from '../../theme/ThemeProvider';
 import type { CallLog } from '../../api/types';
 
+// Module scope: identity never changes, so the list never re-renders rows
+// just because the screen did.
+const renderCallItem = ({ item }: { item: CallLog }) => <CallLogItem call={item} />;
+
 export function CallsScreen() {
   const { colors, spacing, radius, shadow, typography } = useTheme();
   const [sheetOpen, setSheetOpen] = useState(false);
   const query = useCallHistory();
-  const calls = flattenCalls(query.data);
+  // Keyed off the query data (stable from react-query) rather than the fresh
+  // array flatten allocates, so downstream memos actually hold.
+  const calls = useMemo(() => flattenCalls(query.data), [query.data]);
 
   const showEmpty = !query.isLoading && calls.length === 0;
 
@@ -36,7 +42,7 @@ export function CallsScreen() {
         <FlashList
           data={calls}
           keyExtractor={(item: CallLog) => item.id}
-          renderItem={({ item }: { item: CallLog }) => <CallLogItem call={item} />}
+          renderItem={renderCallItem}
           ListHeaderComponent={
             <Text style={[typography.label, { color: colors.textSecondary, paddingHorizontal: spacing.md, paddingBottom: spacing.xs }]}>
               Recent

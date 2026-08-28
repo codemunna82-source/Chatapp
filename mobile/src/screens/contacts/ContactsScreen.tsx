@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,19 +22,26 @@ export function ContactsScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const query = useContacts({ search: debouncedSearch || undefined });
-  const contacts = flattenContacts(query.data);
-
-  const showSkeleton = query.isLoading;
-  const showEmpty = !showSkeleton && contacts.length === 0;
+  // Keyed off the query data (stable from react-query) rather than the fresh
+  // array flatten allocates, so downstream memos actually hold.
+  const contacts = useMemo(() => flattenContacts(query.data), [query.data]);
 
   const openCreate = () => {
     setEditingContact(null);
     setSheetOpen(true);
   };
-  const openEdit = (contact: Contact) => {
+  const openEdit = useCallback((contact: Contact) => {
     setEditingContact(contact);
     setSheetOpen(true);
-  };
+  }, []);
+
+  const renderItem = useCallback(
+    ({ item }: { item: Contact }) => <ContactListItem contact={item} onPress={openEdit} />,
+    [openEdit],
+  );
+
+  const showSkeleton = query.isLoading;
+  const showEmpty = !showSkeleton && contacts.length === 0;
 
   return (
     <Screen padded={false}>
@@ -76,7 +83,7 @@ export function ContactsScreen() {
         <FlashList
           data={contacts}
           keyExtractor={(item: Contact) => item.id}
-          renderItem={({ item }: { item: Contact }) => <ContactListItem contact={item} onPress={() => openEdit(item)} />}
+          renderItem={renderItem}
           refreshControl={
             <RefreshControl refreshing={query.isRefetching} onRefresh={() => query.refetch()} tintColor={colors.primary} />
           }

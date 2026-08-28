@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { RefreshControl, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -20,9 +20,39 @@ export function ChatsListScreen({ navigation }: Props) {
   const debouncedSearch = useDebouncedValue(search, 300);
 
   const query = useConversations({ search: debouncedSearch || undefined });
-  const conversations = flattenConversations(query.data);
+  // Keyed off the query data (stable identity from react-query) rather than
+  // the freshly-allocated array flatten returns, so the list only rebuilds
+  // when the conversations actually change.
+  const conversations = useMemo(() => flattenConversations(query.data), [query.data]);
   const pinConversation = usePinConversation();
   const archiveConversation = useArchiveConversation();
+
+  // Stable per-row callbacks — inline arrows would change identity every
+  // render and defeat ChatListItem's React.memo.
+  const handleOpen = useCallback(
+    (conversation: Conversation) => navigation.navigate('ConversationDetail', { conversationId: conversation.id }),
+    [navigation],
+  );
+  const handleTogglePin = useCallback(
+    (conversation: Conversation) => pinConversation.mutate({ id: conversation.id, pinned: !conversation.pinned }),
+    [pinConversation],
+  );
+  const handleArchive = useCallback(
+    (conversation: Conversation) => archiveConversation.mutate({ id: conversation.id, status: 'ARCHIVED' }),
+    [archiveConversation],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: Conversation }) => (
+      <ChatListItem
+        conversation={item}
+        onPress={handleOpen}
+        onTogglePin={handleTogglePin}
+        onArchive={handleArchive}
+      />
+    ),
+    [handleOpen, handleTogglePin, handleArchive],
+  );
 
   const showSkeleton = query.isLoading;
   const showEmpty = !showSkeleton && conversations.length === 0;
@@ -43,14 +73,7 @@ export function ChatsListScreen({ navigation }: Props) {
         <FlashList
           data={conversations}
           keyExtractor={(item: Conversation) => item.id}
-          renderItem={({ item }: { item: Conversation }) => (
-            <ChatListItem
-              conversation={item}
-              onPress={() => navigation.navigate('ConversationDetail', { conversationId: item.id })}
-              onTogglePin={() => pinConversation.mutate({ id: item.id, pinned: !item.pinned })}
-              onArchive={() => archiveConversation.mutate({ id: item.id, status: 'ARCHIVED' })}
-            />
-          )}
+          renderItem={renderItem}
           ItemSeparatorComponent={() => (
             <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginLeft: 84 }} />
           )}

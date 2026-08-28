@@ -18,7 +18,7 @@ const STATUS_LABEL: Record<CallLog['status'], string> = {
   FAILED: 'Failed',
 };
 
-export function CallLogItem({ call }: { call: CallLog }) {
+function CallLogItemImpl({ call }: { call: CallLog }) {
   const { colors, spacing, typography } = useTheme();
   // Contacts (WhatsApp customers) don't have a profile photo in this app —
   // only team members do (Settings/Team avatar upload) — so this always
@@ -78,6 +78,13 @@ export function CallLogItem({ call }: { call: CallLog }) {
     </View>
   );
 }
+
+/**
+ * Memoized: list rows re-render whenever the screen above them does (search
+ * text, a refetch, a sheet opening). The callbacks take their item rather
+ * than closing over it so the parent can pass one stable function per list.
+ */
+export const CallLogItem = React.memo(CallLogItemImpl);
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },

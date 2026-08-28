@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatDateSeparator } from '../../utils/formatTime';
 
-export function DateSeparator({ iso }: { iso: string }) {
+function DateSeparatorImpl({ iso }: { iso: string }) {
   const { colors, spacing, radius, typography } = useTheme();
   return (
     <View style={[styles.container, { marginVertical: spacing.sm }]}>
@@ -18,3 +18,6 @@ const styles = StyleSheet.create({
   container: { alignItems: 'center' },
   pill: { paddingVertical: 4 },
 });
+
+/** Memoized: one per day in the list, and its only prop is a fixed ISO string. */
+export const DateSeparator = React.memo(DateSeparatorImpl);

@@ -94,6 +94,45 @@ function RecordingWaveform({ metering, color }: { metering: number | undefined; 
   );
 }
 
+/**
+ * The live timer + waveform, in its own component **on purpose**.
+ *
+ * expo-audio's useAudioRecorderState installs a setInterval that calls the
+ * native recorder's getStatus() on every tick, for as long as the calling
+ * component is mounted — its effect keys only on recorder.id, so the poll
+ * interval can't be changed after mount. Calling it from the Composer meant
+ * 10 native status calls a second for the entire time any chat was open,
+ * competing with touch dispatch on the JS thread even though nothing was
+ * being recorded. Mounting the hook here, and this component only while a
+ * recording is actually running, confines that cost to when it's needed.
+ */
+function RecordingReadout({
+  recorder,
+  paused,
+  dotColor,
+  textColor,
+  waveColor,
+  textStyle,
+  gap,
+}: {
+  recorder: ReturnType<typeof useAudioRecorder>;
+  paused: boolean;
+  dotColor: string;
+  textColor: string;
+  waveColor: string;
+  textStyle: object;
+  gap: number;
+}) {
+  const state = useAudioRecorderState(recorder, RECORDER_POLL_MS);
+  return (
+    <View style={styles.recordingRow}>
+      <View style={[styles.recordingDot, { backgroundColor: dotColor }]} />
+      <Text style={[textStyle, { color: textColor, marginRight: gap }]}>{formatDuration(state.durationMillis / 1000)}</Text>
+      <RecordingWaveform metering={paused ? 0 : state.metering} color={waveColor} />
+    </View>
+  );
+}
+
 export function Composer({
   conversationId,
   whatsappPhoneNumberId,
@@ -256,7 +295,11 @@ export function Composer({
 
   // ----------------------------------------------------------- voice notes
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const recorderState = useAudioRecorderState(recorder, RECORDER_POLL_MS);
+  // Tracked here rather than read from useAudioRecorderState: this component
+  // is the only thing that starts and stops the recorder, so it already
+  // knows, and owning the flag lets the polling hook stay unmounted while
+  // idle (see RecordingReadout).
+  const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
@@ -277,8 +320,8 @@ export function Composer({
   const startingRef = useRef(false);
   const sendingRef = useRef(false);
   useEffect(() => {
-    isRecordingRef.current = recorderState.isRecording;
-  }, [recorderState.isRecording]);
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
   useEffect(() => {
     previewUriRef.current = previewUri;
   }, [previewUri]);
@@ -312,7 +355,7 @@ export function Composer({
   );
 
   const startRecording = async () => {
-    if (startingRef.current || recorderState.isRecording) return;
+    if (startingRef.current || isRecording) return;
     startingRef.current = true;
     setVoiceError(null);
     setIsPaused(false);
@@ -325,6 +368,7 @@ export function Composer({
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
       recorder.record();
+      setIsRecording(true);
     } catch {
       setVoiceError('Could not start recording on this device.');
       // Never leave the audio session in record mode after a failed start.
@@ -336,12 +380,15 @@ export function Composer({
 
   /** Stops the recorder and moves to the preview state — the mic is released here. */
   const stopRecording = async () => {
-    const duration = recorderState.durationMillis;
+    // Read straight from the recorder rather than the (up to 100ms stale)
+    // polled snapshot.
+    const duration = recorder.getStatus().durationMillis;
     try {
       await recorder.stop();
     } catch {
       setVoiceError('Recording stopped unexpectedly.');
     }
+    setIsRecording(false);
     setIsPaused(false);
     // Back out of record mode so playback routes to the speaker rather than
     // the earpiece, and the mic indicator clears.
@@ -378,10 +425,11 @@ export function Composer({
 
   /** Throws away the take (recording or preview) and releases everything. */
   const discardRecording = async () => {
-    if (recorderState.isRecording) {
+    if (isRecording) {
       await recorder.stop().catch(() => undefined);
       await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
     }
+    setIsRecording(false);
     setIsPaused(false);
     setVoiceError(null);
     const uri = previewUri ?? recorder.uri;
@@ -455,7 +503,7 @@ export function Composer({
   const errorText = mediaError ?? voiceError;
 
   // --- recording in progress: an explicit, always-visible Stop button ---
-  if (recorderState.isRecording) {
+  if (isRecording) {
     return (
       <View style={shellStyle}>
         {errorText ? <Text style={[typography.caption, { color: colors.danger, marginBottom: 4 }]}>{errorText}</Text> : null}
@@ -471,13 +519,15 @@ export function Composer({
             )}
           </Pressable>
 
-          <View style={styles.recordingRow}>
-            <View style={[styles.recordingDot, { backgroundColor: isPaused ? colors.textTertiary : colors.danger }]} />
-            <Text style={[typography.bodyMedium, { color: colors.textPrimary, marginRight: spacing.sm }]}>
-              {formatDuration(recorderState.durationMillis / 1000)}
-            </Text>
-            <RecordingWaveform metering={isPaused ? 0 : recorderState.metering} color={colors.primary} />
-          </View>
+          <RecordingReadout
+            recorder={recorder}
+            paused={isPaused}
+            dotColor={isPaused ? colors.textTertiary : colors.danger}
+            textColor={colors.textPrimary}
+            waveColor={colors.primary}
+            textStyle={typography.bodyMedium}
+            gap={spacing.sm}
+          />
 
           <Pressable
             onPress={togglePauseResume}

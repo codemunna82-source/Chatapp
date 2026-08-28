@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,13 +23,19 @@ const ICONS: Record<AppNotification['type'], keyof typeof Ionicons.glyphMap> = {
   SYSTEM: 'information-circle-outline',
 };
 
-function NotificationRow({ item, onPress }: { item: AppNotification; onPress: () => void }) {
+const NotificationRow = React.memo(function NotificationRow({
+  item,
+  onPress,
+}: {
+  item: AppNotification;
+  onPress: (item: AppNotification) => void;
+}) {
   const { colors, spacing, typography } = useTheme();
   const unread = !item.readAt;
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => onPress(item)}
       style={[styles.row, { padding: spacing.md, backgroundColor: unread ? colors.primaryMuted : colors.background }]}
     >
       <Ionicons name={ICONS[item.type]} size={22} color={unread ? colors.primary : colors.textSecondary} />
@@ -44,14 +50,28 @@ function NotificationRow({ item, onPress }: { item: AppNotification; onPress: ()
       <Text style={[typography.caption, { color: colors.textSecondary }]}>{formatChatListTime(item.createdAt)}</Text>
     </Pressable>
   );
-}
+});
 
 export function NotificationsScreen() {
   const { colors, spacing, typography } = useTheme();
   const query = useNotifications();
-  const notifications = flattenNotifications(query.data);
+  // Keyed off the query data (stable from react-query) rather than the fresh
+  // array flatten allocates, so downstream memos actually hold.
+  const notifications = useMemo(() => flattenNotifications(query.data), [query.data]);
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
+
+  const handleRowPress = useCallback(
+    (item: AppNotification) => {
+      if (!item.readAt) markRead.mutate(item.id);
+    },
+    [markRead],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: AppNotification }) => <NotificationRow item={item} onPress={handleRowPress} />,
+    [handleRowPress],
+  );
 
   const hasUnread = notifications.some((n) => !n.readAt);
 
@@ -73,9 +93,7 @@ export function NotificationsScreen() {
         <FlashList
           data={notifications}
           keyExtractor={(item: AppNotification) => item.id}
-          renderItem={({ item }: { item: AppNotification }) => (
-            <NotificationRow item={item} onPress={() => (!item.readAt ? markRead.mutate(item.id) : undefined)} />
-          )}
+          renderItem={renderItem}
           refreshControl={
             <RefreshControl refreshing={query.isRefetching} onRefresh={() => query.refetch()} tintColor={colors.primary} />
           }

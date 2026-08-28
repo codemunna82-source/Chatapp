@@ -1,17 +1,18 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Avatar } from '../../components/Avatar';
 import { useTheme } from '../../theme/ThemeProvider';
 import type { TeamMember } from '../../api/types';
 
-export function TeamMemberItem({ member, onPress }: { member: TeamMember; onPress: () => void }) {
+function TeamMemberItemImpl({ member, onPress }: { member: TeamMember; onPress: (member: TeamMember) => void }) {
+  const handlePress = useCallback(() => onPress(member), [onPress, member]);
   const { colors, spacing, typography } = useTheme();
   const label = member.displayName || member.email;
   const isDisabled = member.status === 'DISABLED';
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       style={({ pressed }) => [
         styles.row,
         { padding: spacing.md, backgroundColor: pressed ? colors.surface : colors.background },
@@ -44,6 +45,13 @@ export function TeamMemberItem({ member, onPress }: { member: TeamMember; onPres
     </Pressable>
   );
 }
+
+/**
+ * Memoized: list rows re-render whenever the screen above them does (search
+ * text, a refetch, a sheet opening). The callbacks take their item rather
+ * than closing over it so the parent can pass one stable function per list.
+ */
+export const TeamMemberItem = React.memo(TeamMemberItemImpl);
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },

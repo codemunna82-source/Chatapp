@@ -16,10 +16,15 @@ interface MessageBubbleProps {
   message: Message;
   replyTarget?: Message;
   reactions?: ReactionSummary;
-  onLongPress: () => void;
-  onRetry: () => void;
+  /**
+   * These take the message rather than closing over it so the parent can
+   * pass one stable callback for the whole list — an inline arrow per row
+   * would change identity every render and defeat the React.memo below.
+   */
+  onLongPress: (message: Message) => void;
+  onRetry: (message: Message) => void;
   /** Swipe-to-reply. Omit to disable the gesture for this row. */
-  onReply?: () => void;
+  onReply?: (message: Message) => void;
 }
 
 // How far the bubble must travel before the swipe counts as a reply, and how
@@ -47,12 +52,17 @@ function MessageContent({ message, textColor }: { message: Message; textColor: s
   return <Text style={[typography.body, { color: textColor }]}>{message.text || `[${message.type}]`}</Text>;
 }
 
-export function MessageBubble({ message, replyTarget, reactions, onLongPress, onRetry, onReply }: MessageBubbleProps) {
+function MessageBubbleImpl({ message, replyTarget, reactions, onLongPress, onRetry, onReply }: MessageBubbleProps) {
   const { colors, spacing, radius, typography } = useTheme();
   const isOut = message.direction === 'OUT';
   const bubbleColor = isOut ? colors.bubbleSent : colors.bubbleReceived;
   const textColor = isOut ? colors.bubbleSentText : colors.bubbleReceivedText;
   const isFailed = message.status === 'FAILED';
+
+  // Bound inside the memoized component, so these closures are recreated
+  // only when this row actually re-renders.
+  const handleLongPress = useCallback(() => onLongPress(message), [onLongPress, message]);
+  const handleRetry = useCallback(() => onRetry(message), [onRetry, message]);
 
   const activeReactions = reactions ? [reactions.IN, reactions.OUT].filter((e): e is string => Boolean(e)) : [];
 
@@ -72,8 +82,8 @@ export function MessageBubble({ message, replyTarget, reactions, onLongPress, on
   const triggered = useSharedValue(0);
 
   const fireReply = useCallback(() => {
-    onReply?.();
-  }, [onReply]);
+    onReply?.(message);
+  }, [onReply, message]);
 
   const swipeGesture = useMemo(
     () =>
@@ -120,8 +130,8 @@ export function MessageBubble({ message, replyTarget, reactions, onLongPress, on
         </Animated.View>
         <Animated.View style={[styles.bubbleShift, bubbleStyle, isOut ? styles.shiftOut : styles.shiftIn]}>
       <Pressable
-        onLongPress={onLongPress}
-        onPress={isFailed ? onRetry : undefined}
+        onLongPress={handleLongPress}
+        onPress={isFailed ? handleRetry : undefined}
         style={[
           styles.bubble,
           bubbleRadius,
@@ -184,6 +194,16 @@ export function MessageBubble({ message, replyTarget, reactions, onLongPress, on
     </GestureDetector>
   );
 }
+
+/**
+ * Memoized: a conversation renders one of these per message, and the screen
+ * above re-renders on unrelated state (typing indicator, reply target,
+ * toasts). Without this every bubble — including its images, audio players
+ * and gesture handlers — was rebuilt each time. All props are either stable
+ * identities from the react-query cache or the stable callbacks described
+ * in MessageBubbleProps, so the default shallow compare is correct here.
+ */
+export const MessageBubble = React.memo(MessageBubbleImpl);
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row' },

@@ -12,16 +12,22 @@ interface SearchBarProps {
 }
 
 export function SearchBar({ value, onChangeText, placeholder = 'Search' }: SearchBarProps) {
-  const { colors, spacing, radius } = useTheme();
+  const { colors, spacing, radius, shadow } = useTheme();
   return (
     <View
       style={[
         styles.container,
+        shadow.sm,
         {
-          backgroundColor: colors.surfaceAlt,
+          backgroundColor: colors.surfaceElevated,
           borderRadius: radius.full,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
           paddingHorizontal: spacing.md,
           marginHorizontal: spacing.md,
+          // Sits clear of the header instead of flush against it, and reads
+          // as a raised pill rather than a flat inset field.
+          marginTop: spacing.sm,
           marginBottom: spacing.sm,
         },
       ]}

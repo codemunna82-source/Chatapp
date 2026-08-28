@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { useAuthStore } from '../store/authStore';
@@ -33,20 +33,24 @@ function AvatarPhoto({ userId, version, label, size }: { userId: string; version
   const accessToken = useAuthStore((s) => s.accessToken);
   const [failed, setFailed] = useState(false);
 
+  // A fresh {uri, headers} object each render makes RN's Image see a new
+  // source and re-fetch through the authenticated media proxy. Memoize so
+  // the request happens once per avatar.
+  const source = useMemo(
+    () => ({
+      uri: userAvatarUrl(userId, version),
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    }),
+    [userId, version, accessToken],
+  );
+
   if (failed) {
     return <InitialsCircle label={label} size={size} />;
   }
 
   return (
     <View style={[styles.circle, { width: size, height: size, borderRadius: size / 2, overflow: 'hidden' }]}>
-      <Image
-        source={{
-          uri: userAvatarUrl(userId, version),
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        }}
-        style={{ width: size, height: size }}
-        onError={() => setFailed(true)}
-      />
+      <Image source={source} style={{ width: size, height: size }} onError={() => setFailed(true)} />
     </View>
   );
 }

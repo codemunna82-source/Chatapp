@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../components/Avatar';
@@ -11,19 +11,22 @@ import type { Conversation } from '../../api/types';
 
 interface ChatListItemProps {
   conversation: Conversation;
-  onPress: () => void;
-  onTogglePin: () => void;
-  onArchive: () => void;
+  onPress: (conversation: Conversation) => void;
+  onTogglePin: (conversation: Conversation) => void;
+  onArchive: (conversation: Conversation) => void;
 }
 
-export function ChatListItem({ conversation, onPress, onTogglePin, onArchive }: ChatListItemProps) {
+function ChatListItemImpl({ conversation, onPress, onTogglePin, onArchive }: ChatListItemProps) {
+  const handlePress = useCallback(() => onPress(conversation), [onPress, conversation]);
+  const handleTogglePin = useCallback(() => onTogglePin(conversation), [onTogglePin, conversation]);
+  const handleArchive = useCallback(() => onArchive(conversation), [onArchive, conversation]);
   const { colors, spacing, typography } = useTheme();
   const label = conversation.contact?.name || conversation.contact?.phone || 'Unknown contact';
   const unread = conversation.unreadCount > 0;
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       style={({ pressed }) => [
         styles.row,
         { paddingVertical: spacing.sm + 4, paddingHorizontal: spacing.md, backgroundColor: pressed ? colors.surface : colors.background },
@@ -61,7 +64,7 @@ export function ChatListItem({ conversation, onPress, onTogglePin, onArchive }: 
           size={17}
           color={conversation.pinned ? colors.primary : colors.textTertiary}
           touchSize={touchTarget.compact}
-          onPress={onTogglePin}
+          onPress={handleTogglePin}
           accessibilityLabel={conversation.pinned ? 'Unpin conversation' : 'Pin conversation'}
         />
         <IconButton
@@ -69,13 +72,20 @@ export function ChatListItem({ conversation, onPress, onTogglePin, onArchive }: 
           size={17}
           color={colors.textTertiary}
           touchSize={touchTarget.compact}
-          onPress={onArchive}
+          onPress={handleArchive}
           accessibilityLabel="Archive conversation"
         />
       </View>
     </Pressable>
   );
 }
+
+/**
+ * Memoized: list rows re-render whenever the screen above them does (search
+ * text, a refetch, a sheet opening). The callbacks take their item rather
+ * than closing over it so the parent can pass one stable function per list.
+ */
+export const ChatListItem = React.memo(ChatListItemImpl);
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },

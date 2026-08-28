@@ -57,6 +57,12 @@ function buildRenderItems(renderableNewestFirst: Message[]): RenderItem[] {
 const TYPING_AUTO_CLEAR_MS = 6000;
 const SCREEN_EDGES: Edge[] = ['top'];
 
+// Module scope so these never change identity between renders.
+const keyExtractor = (item: RenderItem) => item.id;
+// Lets FlashList recycle separators and bubbles into separate pools instead
+// of reusing one cell type for both.
+const getItemType = (item: RenderItem) => item.kind;
+
 export function ConversationDetailScreen({ route, navigation }: Props) {
   const { conversationId } = route.params;
   const queryClient = useQueryClient();
@@ -148,7 +154,13 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     [conversationId],
   );
 
-  const messages = flattenMessages(messagesQuery.data);
+  // flattenMessages() allocates a fresh array, so keying the memos below off
+  // its result meant they recomputed on EVERY render — re-deriving reactions
+  // and reply targets for the whole conversation, and rebuilding the date
+  // separators, whenever anything unrelated changed (a typing indicator, a
+  // toast, a keystroke). Key off the query data itself, whose identity
+  // react-query only changes when the messages actually change.
+  const messages = useMemo(() => flattenMessages(messagesQuery.data), [messagesQuery.data]);
   const view = useMemo(() => deriveConversationView(messages), [messages]);
   const renderItems = useMemo(() => buildRenderItems(view.renderable), [view.renderable]);
 
@@ -188,6 +200,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   const canReactTo = (message: Message) => !message.id.startsWith('temp-') && message.status !== 'FAILED';
 
+  // Stable identities: an inline arrow per row would change every render and
+  // defeat MessageBubble's React.memo, re-rendering every bubble in the list.
+  const handleLongPress = useCallback((message: Message) => setActionTarget(message), []);
+  const handleReply = useCallback((message: Message) => setReplyingTo(message), []);
+
   const showToast = useCallback((text: string) => {
     setToast(text);
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -196,7 +213,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   useEffect(
     () => () => {
+      // Both timers must die with the screen — a pending typing-clear or
+      // toast timer would otherwise fire setState on an unmounted component.
       if (toastTimer.current) clearTimeout(toastTimer.current);
+      if (typingClearTimer.current) clearTimeout(typingClearTimer.current);
     },
     [],
   );
@@ -210,6 +230,31 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   }, [actionTarget, showToast]);
 
   const conversation = conversationQuery.data;
+
+  // Hoisted out of the JSX: an inline renderItem is a new function every
+  // render, which makes FlashList re-render every visible row.
+  const renderItem = useCallback(
+    ({ item }: { item: RenderItem }) =>
+      item.kind === 'separator' ? (
+        <DateSeparator iso={item.iso} />
+      ) : (
+        <MessageBubble
+          message={item.message}
+          replyTarget={item.message.replyToMessageId ? view.messageById.get(item.message.replyToMessageId) : undefined}
+          reactions={view.reactionsByTarget.get(item.message.id)}
+          onLongPress={handleLongPress}
+          onRetry={handleRetry}
+          onReply={handleReply}
+        />
+      ),
+    [view, handleLongPress, handleRetry, handleReply],
+  );
+
+  const handleEndReached = useCallback(() => {
+    if (messagesQuery.hasNextPage && !messagesQuery.isFetchingNextPage) {
+      messagesQuery.fetchNextPage();
+    }
+  }, [messagesQuery]);
 
   if (messagesQuery.isLoading || conversationQuery.isLoading) {
     return <LoadingIndicator fullscreen />;
@@ -244,26 +289,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
             <FlashList
               data={renderItems}
               inverted
-              keyExtractor={(item: RenderItem) => item.id}
-              renderItem={({ item }: { item: RenderItem }) =>
-                item.kind === 'separator' ? (
-                  <DateSeparator iso={item.iso} />
-                ) : (
-                  <MessageBubble
-                    message={item.message}
-                    replyTarget={item.message.replyToMessageId ? view.messageById.get(item.message.replyToMessageId) : undefined}
-                    reactions={view.reactionsByTarget.get(item.message.id)}
-                    onLongPress={() => setActionTarget(item.message)}
-                    onRetry={() => handleRetry(item.message)}
-                    onReply={() => setReplyingTo(item.message)}
-                  />
-                )
-              }
-              onEndReached={() => {
-                if (messagesQuery.hasNextPage && !messagesQuery.isFetchingNextPage) {
-                  messagesQuery.fetchNextPage();
-                }
-              }}
+              keyExtractor={keyExtractor}
+              getItemType={getItemType}
+              renderItem={renderItem}
+              onEndReached={handleEndReached}
               onEndReachedThreshold={0.5}
               ListHeaderComponent={isTyping ? <TypingIndicator /> : null}
               contentContainerStyle={styles.listContent}

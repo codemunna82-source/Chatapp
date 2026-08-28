@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,17 +16,24 @@ export function TeamScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const query = useTeamMembers();
-  const members = flattenTeamMembers(query.data);
+  // Keyed off the query data (stable from react-query) rather than the fresh
+  // array flatten allocates, so downstream memos actually hold.
+  const members = useMemo(() => flattenTeamMembers(query.data), [query.data]);
   const showEmpty = !query.isLoading && members.length === 0;
 
   const openInvite = () => {
     setEditingMember(null);
     setSheetOpen(true);
   };
-  const openEdit = (member: TeamMember) => {
+  const openEdit = useCallback((member: TeamMember) => {
     setEditingMember(member);
     setSheetOpen(true);
-  };
+  }, []);
+
+  const renderItem = useCallback(
+    ({ item }: { item: TeamMember }) => <TeamMemberItem member={item} onPress={openEdit} />,
+    [openEdit],
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -58,7 +65,7 @@ export function TeamScreen() {
         <FlashList
           data={members}
           keyExtractor={(item: TeamMember) => item.id}
-          renderItem={({ item }: { item: TeamMember }) => <TeamMemberItem member={item} onPress={() => openEdit(item)} />}
+          renderItem={renderItem}
           refreshControl={
             <RefreshControl refreshing={query.isRefetching} onRefresh={() => query.refetch()} tintColor={colors.primary} />
           }
