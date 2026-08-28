@@ -23,12 +23,17 @@ const envSchema = z.object({
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('30d'),
 
-  META_APP_ID: z.string().optional().default(''),
-  META_APP_SECRET: z.string().optional().default(''),
-  META_VERIFY_TOKEN: z.string().optional().default(''),
-  META_ACCESS_TOKEN: z.string().optional().default(''),
-  META_BUSINESS_ACCOUNT_ID: z.string().optional().default(''),
-  META_PHONE_NUMBER_ID: z.string().optional().default(''),
+  // Every META_* credential is trimmed. Values for these are pasted by hand
+  // into a hosting dashboard (Render, Railway, …), and a trailing newline or
+  // stray space survives that paste far more often than anyone expects — an
+  // untrimmed verify token fails Meta's challenge with no visible reason,
+  // and an untrimmed app secret silently breaks every HMAC check.
+  META_APP_ID: z.string().optional().default('').transform((v) => v.trim()),
+  META_APP_SECRET: z.string().optional().default('').transform((v) => v.trim()),
+  META_VERIFY_TOKEN: z.string().optional().default('').transform((v) => v.trim()),
+  META_ACCESS_TOKEN: z.string().optional().default('').transform((v) => v.trim()),
+  META_BUSINESS_ACCOUNT_ID: z.string().optional().default('').transform((v) => v.trim()),
+  META_PHONE_NUMBER_ID: z.string().optional().default('').transform((v) => v.trim()),
   META_API_VERSION: z.string().default('v21.0'),
   META_MOCK_MODE: z
     .string()

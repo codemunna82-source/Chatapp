@@ -123,6 +123,85 @@ I'll rebuild the APK (`.github/workflows/android-build.yml`, the
 of the emulator-only default, so the app on your phone actually connects
 end-to-end: login, chat, everything.
 
+## 5. Connect the Meta webhook
+
+Meta only calls the app when a webhook URL is subscribed, and it refuses
+to save a URL whose verification challenge does not pass. The endpoint is:
+
+```
+https://<your-service>.onrender.com/api/webhooks/meta
+```
+
+### Before touching the Meta dashboard, check the deployment
+
+```bash
+curl https://<your-service>.onrender.com/api/webhooks/meta/health
+```
+
+This is unauthenticated on purpose — it is meant to be run against a fresh
+deploy before anyone can log in — and reports only whether each credential
+is present, never any part of its value:
+
+```json
+{
+  "success": true,
+  "data": {
+    "callbackUrl": "https://<your-service>.onrender.com/api/webhooks/meta",
+    "verifyTokenConfigured": true,
+    "verifyTokenLength": 24,
+    "appSecretConfigured": true,
+    "appSecretLength": 32,
+    "mockMode": false,
+    "queueMode": "redis"
+  }
+}
+```
+
+`verifyTokenConfigured: false` is the single most common cause of a failed
+subscription: set `META_VERIFY_TOKEN` in Render → your service →
+**Environment**, to any random string you choose, and wait for the
+redeploy to finish. `mockMode: true` means `META_MOCK_MODE` is still on
+and no message will ever reach Meta — set it to `false` for a real
+deployment.
+
+### Then subscribe it in the Meta App dashboard
+
+Meta App Dashboard → **WhatsApp → Configuration → Webhook → Edit**:
+
+- **Callback URL** — the `callbackUrl` value the health check printed
+- **Verify token** — the exact same string as `META_VERIFY_TOKEN`
+- **Verify and Save**
+- Then **Manage** next to Webhook fields and **Subscribe** to `messages`.
+  Verification passes without this step, but no event is ever delivered —
+  a subscribed URL with no subscribed fields looks identical to a broken
+  one from the app's side.
+
+### If "The callback URL or verify token couldn't be validated"
+
+Meta shows that same message for every possible cause, so read the Render
+log instead — the server logs the actual reason:
+
+| Logged `reason` | What it means |
+| --- | --- |
+| `VERIFY_TOKEN_NOT_CONFIGURED` | `META_VERIFY_TOKEN` is not set on Render |
+| `TOKEN_MISMATCH` | Both sides have a token, they differ — compare `receivedTokenLength` and `configuredTokenLength` in the same log line |
+| `MODE_NOT_SUBSCRIBE` | Not Meta's verification call |
+| `MISSING_PARAMS` | The `hub.*` query parameters were absent |
+
+No log line at all means the request never arrived: the URL is wrong, or
+the free instance was asleep. Render's free plan spins down after ~15
+minutes and takes 30-60s to wake, while Meta gives up after a few seconds
+— **wake the service first** (`curl .../healthz`) and then press *Verify
+and Save*, or the very first attempt can fail on a perfectly correct
+configuration.
+
+You can also run Meta's exact request yourself:
+
+```bash
+curl "https://<your-service>.onrender.com/api/webhooks/meta?hub.mode=subscribe&hub.verify_token=YOUR_TOKEN&hub.challenge=12345"
+# expected output: 12345
+```
+
 ## Known limitation of the free plan
 
 Render's free web service plan spins down after ~15 minutes of no

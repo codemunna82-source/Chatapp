@@ -26,6 +26,20 @@ async function main(): Promise<void> {
     logger.warn('REDIS_URL not configured — subscription expiry sweep will not run (auth middleware stays authoritative regardless)');
   }
 
+  // Surfaced at boot, not on first failure: Meta refuses to save a callback
+  // URL whose challenge fails, so a missing verify token has to be visible
+  // in the deploy log before anyone tries to subscribe the webhook.
+  if (!env.META_VERIFY_TOKEN) {
+    logger.warn(
+      'META_VERIFY_TOKEN is not set — Meta webhook verification (GET /api/webhooks/meta) will reject every request',
+    );
+  }
+  if (!env.META_APP_SECRET) {
+    logger.warn(
+      'META_APP_SECRET is not set — signed Meta webhook deliveries (POST /api/webhooks/meta) will be rejected',
+    );
+  }
+
   const app = createApp();
   // A plain http.Server (not app.listen()'s implicit one) so Socket.IO can
   // attach to the exact same server/port — REST and WebSocket traffic share
