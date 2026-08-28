@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import type { MainTabParamList } from './types';
 import { ChatsStackNavigator } from './ChatsStackNavigator';
 import { SettingsStackNavigator } from './SettingsStackNavigator';
-import { ContactsScreen } from '../screens/contacts/ContactsScreen';
 import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
 import { CallsScreen } from '../screens/calls/CallsScreen';
 import { useTheme } from '../theme/ThemeProvider';
@@ -15,7 +14,6 @@ type IoniconName = keyof typeof Ionicons.glyphMap;
 
 const TAB_ICONS: Record<keyof MainTabParamList, IoniconName> = {
   ChatsTab: 'chatbubble-ellipses',
-  ContactsTab: 'people',
   DashboardTab: 'stats-chart',
   CallsTab: 'call',
   SettingsTab: 'settings',
@@ -37,7 +35,6 @@ export function MainTabNavigator() {
       })}
     >
       <Tab.Screen name="ChatsTab" component={ChatsStackNavigator} options={{ title: 'Chats' }} />
-      <Tab.Screen name="ContactsTab" component={ContactsScreen} options={{ title: 'Contacts' }} />
       <Tab.Screen name="DashboardTab" component={DashboardScreen} options={{ title: 'Dashboard' }} />
       <Tab.Screen name="CallsTab" component={CallsScreen} options={{ title: 'Calls' }} />
       <Tab.Screen name="SettingsTab" component={SettingsStackNavigator} options={{ title: 'Settings' }} />

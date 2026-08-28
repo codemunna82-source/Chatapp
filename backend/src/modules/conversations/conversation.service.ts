@@ -2,6 +2,7 @@ import { ApiError } from '../../lib/ApiError';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './conversation.repository';
 import * as contactRepo from '../contacts/contact.repository';
+import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
 import type { ConversationDoc, ConversationStatus } from './conversation.model';
 import type { ContactDoc } from '../contacts/contact.model';
@@ -98,6 +99,34 @@ export async function getConversationForTenant(tenantId: string, id: string): Pr
 export interface UpdateConversationBody {
   pinned?: boolean;
   status?: ConversationStatus;
+}
+
+/**
+ * Opens the conversation with a contact, creating it if this is the first
+ * time — the app's "new chat" entry point. Idempotent by design: the repo's
+ * findOrCreate keys on (tenant, contact), so tapping the same contact twice
+ * returns the same thread rather than a duplicate.
+ *
+ * The conversation is attached to the tenant's own WhatsApp number, since an
+ * outbound-initiated chat has no inbound webhook to say which number it
+ * belongs to.
+ */
+export async function startConversationForTenant(tenantId: string, contactId: string): Promise<PublicConversation> {
+  const contact = await contactRepo.findContactByIdAndTenant(contactId, tenantId);
+  if (!contact) {
+    throw ApiError.notFound('CONTACT_NOT_FOUND', 'That contact does not exist.');
+  }
+
+  const phoneNumber = await findFirstPhoneNumberForTenant(tenantId);
+  if (!phoneNumber) {
+    throw ApiError.badRequest(
+      'NO_WHATSAPP_NUMBER',
+      'This workspace has no connected WhatsApp number yet, so a chat cannot be started.',
+    );
+  }
+
+  const conversation = await repo.findOrCreateConversation(tenantId, contactId, String(phoneNumber._id));
+  return toPublicConversation(conversation, contact);
 }
 
 export async function updateConversationForTenant(

@@ -19,7 +19,6 @@ export const linking: LinkingOptions<ReactNavigation.RootParamList> = {
           ConversationDetail: 'conversation/:conversationId',
         },
       },
-      ContactsTab: 'contacts',
       DashboardTab: 'dashboard',
       CallsTab: 'calls',
       SettingsTab: 'settings',

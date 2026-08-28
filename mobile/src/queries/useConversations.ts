@@ -27,6 +27,21 @@ export function useConversation(id: string | undefined) {
   });
 }
 
+/**
+ * Starts (or reopens) the chat with a contact. Idempotent server-side, so
+ * picking the same contact twice lands on the same thread.
+ */
+export function useStartConversation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (contactId: string) => conversationsApi.startConversation(contactId),
+    onSuccess: (conversation) => {
+      queryClient.setQueryData(queryKeys.conversation(conversation.id), conversation);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+    },
+  });
+}
+
 export function usePinConversation() {
   const queryClient = useQueryClient();
   return useMutation({

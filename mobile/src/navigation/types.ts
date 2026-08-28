@@ -22,7 +22,6 @@ export type SettingsStackParamList = {
 
 export type MainTabParamList = {
   ChatsTab: NavigatorScreenParams<ChatsStackParamList>;
-  ContactsTab: undefined;
   DashboardTab: undefined;
   CallsTab: undefined;
   SettingsTab: NavigatorScreenParams<SettingsStackParamList>;

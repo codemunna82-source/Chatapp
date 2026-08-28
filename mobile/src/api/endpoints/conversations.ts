@@ -26,6 +26,12 @@ export async function setConversationPinned(id: string, pinned: boolean): Promis
   return res.data.data;
 }
 
+/** Opens (creating if needed) the conversation with a contact — the app's "new chat" action. */
+export async function startConversation(contactId: string): Promise<Conversation> {
+  const res = await apiClient.post<ApiSuccess<Conversation>>('/conversations', { contactId });
+  return res.data.data;
+}
+
 export async function setConversationStatus(id: string, status: ConversationStatus): Promise<Conversation> {
   const res = await apiClient.patch<ApiSuccess<Conversation>>(`/conversations/${id}`, { status });
   return res.data.data;

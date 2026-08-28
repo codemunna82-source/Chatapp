@@ -16,6 +16,10 @@ export const updateConversationSchema = z
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 
+export const createConversationSchema = z.object({
+  contactId: z.string().min(1),
+});
+
 export const conversationIdParamSchema = z.object({
   id: z.string().min(1),
 });

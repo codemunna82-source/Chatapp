@@ -47,6 +47,15 @@ export async function createPhoneNumber(input: CreatePhoneNumberInput): Promise<
 }
 
 /**
+ * The tenant's first configured WhatsApp number. Used when starting a
+ * conversation from the app: outbound chats have no inbound webhook to say
+ * which number they belong to, so they default to the tenant's own.
+ */
+export async function findFirstPhoneNumberForTenant(tenantId: string): Promise<WhatsAppPhoneNumberDoc | null> {
+  return WhatsAppPhoneNumber.findOne({ tenantId }).sort({ createdAt: 1 });
+}
+
+/**
  * The ONE legitimate tenant-unscoped lookup in the whole codebase: resolving
  * which tenant an inbound Meta webhook belongs to, keyed by Meta's
  * `phone_number_id`. Every caller of this function must treat its result as

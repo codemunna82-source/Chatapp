@@ -7,6 +7,7 @@ import { SearchBar } from '../../components/SearchBar';
 import { ChatListSkeleton } from '../../components/Skeleton';
 import { EmptyState } from '../../components/EmptyState';
 import { ChatListItem } from './ChatListItem';
+import { NewChatSheet } from './NewChatSheet';
 import { useConversations, flattenConversations, usePinConversation, useArchiveConversation } from '../../queries/useConversations';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -17,9 +18,10 @@ import type { Conversation } from '../../api/types';
 type Props = NativeStackScreenProps<ChatsStackParamList, 'ChatsList'>;
 
 export function ChatsListScreen({ navigation }: Props) {
-  const { colors, spacing, radius, typography } = useTheme();
+  const { colors, spacing, radius, typography, shadow } = useTheme();
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [newChatOpen, setNewChatOpen] = useState(false);
   const debouncedSearch = useDebouncedValue(search, 300);
 
   // The status filter was never sent, and the backend only filters when it
@@ -152,6 +154,29 @@ export function ChatsListScreen({ navigation }: Props) {
           contentContainerStyle={{ paddingBottom: spacing.lg }}
         />
       )}
+
+      {/* New chat: pick a contact and the thread opens (creating it the
+          first time). This is the only entry point now that the Contacts
+          tab is gone, so it also offers adding a contact. */}
+      {!showArchived ? (
+        <Pressable
+          onPress={() => setNewChatOpen(true)}
+          style={[styles.fab, shadow.lg, { backgroundColor: colors.primary, borderRadius: radius.full, bottom: spacing.lg }]}
+          accessibilityRole="button"
+          accessibilityLabel="Start a new chat"
+        >
+          {({ pressed }) => <Ionicons name="add" size={28} color={colors.textOnPrimary} style={{ opacity: pressed ? 0.6 : 1 }} />}
+        </Pressable>
+      ) : null}
+
+      <NewChatSheet
+        visible={newChatOpen}
+        onClose={() => setNewChatOpen(false)}
+        onOpenConversation={(conversationId) => {
+          setNewChatOpen(false);
+          navigation.navigate('ConversationDetail', { conversationId });
+        }}
+      />
     </View>
   );
 }
@@ -159,4 +184,5 @@ export function ChatsListScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   archiveToggle: { minHeight: touchTarget.compact, justifyContent: 'center' },
   archiveToggleInner: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', minHeight: 32 },
+  fab: { position: 'absolute', right: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
 });
