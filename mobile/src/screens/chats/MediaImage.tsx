@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { File, Paths } from 'expo-file-system';
 import { mediaUrl } from '../../api/endpoints/media';
@@ -18,7 +18,7 @@ import { useTheme } from '../../theme/ThemeProvider';
  * re-fetched the full image over the network. Same approach
  * AudioMessageBubble already uses for voice notes.
  */
-function MediaImageImpl({ mediaId }: { mediaId: string }) {
+function MediaImageImpl({ mediaId, onOpen }: { mediaId: string; onOpen?: (localUri: string) => void }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const { colors, radius } = useTheme();
   const { width } = useWindowDimensions();
@@ -69,7 +69,15 @@ function MediaImageImpl({ mediaId }: { mediaId: string }) {
   }
 
   return (
-    <View style={[box, { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surfaceAlt }]}>
+    <Pressable
+      // Opening the viewer passes the already-cached file, so a full-screen
+      // photo costs no extra request and works offline.
+      onPress={localUri && onOpen ? () => onOpen(localUri) : undefined}
+      disabled={!localUri || !onOpen}
+      accessibilityRole={onOpen ? 'imagebutton' : 'image'}
+      accessibilityLabel="Photo"
+      style={[box, { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surfaceAlt }]}
+    >
       {localUri ? (
         <Image source={{ uri: localUri }} style={box} resizeMode="cover" onError={() => setFailed(true)} />
       ) : (
@@ -77,7 +85,7 @@ function MediaImageImpl({ mediaId }: { mediaId: string }) {
           <ActivityIndicator color={colors.primary} />
         </View>
       )}
-    </View>
+    </Pressable>
   );
 }
 

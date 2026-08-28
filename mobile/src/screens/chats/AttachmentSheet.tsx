@@ -130,7 +130,7 @@ export function AttachmentSheet({
   ];
 
   return (
-    <AppBottomSheet ref={sheetRef} onDismiss={onClose} onChange={handleSheetChange}>
+    <AppBottomSheet ref={sheetRef} snapPoints={SNAP_POINTS} onDismiss={onClose} onChange={handleSheetChange}>
       <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xl, paddingTop: spacing.xs }}>
         <Text style={[typography.heading, { color: colors.textPrimary, marginBottom: spacing.md }]}>Share</Text>
 
@@ -167,6 +167,10 @@ export function AttachmentSheet({
     </AppBottomSheet>
   );
 }
+
+// Title + one row of four options; a real height rather than dynamic
+// sizing, which presented at zero height on device.
+const SNAP_POINTS = ['34%'];
 
 const styles = StyleSheet.create({
   busy: { alignItems: 'center', padding: 16 },

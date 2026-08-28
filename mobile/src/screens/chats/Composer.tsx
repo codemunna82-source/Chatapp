@@ -23,7 +23,6 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 import { File } from 'expo-file-system';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
 import { emitTypingStart, emitTypingStop } from '../../sockets/actions';
@@ -31,7 +30,7 @@ import { useUploadMedia } from '../../queries/useUploadMedia';
 import { useSendMessage } from '../../queries/useMessages';
 import { getApiErrorMessage } from '../../api/client';
 import { formatDuration } from '../../utils/formatTime';
-import { useKeyboardVisible } from '../../utils/useKeyboardVisible';
+import { useMessageDraft } from '../../utils/useMessageDraft';
 import { MediaSourceSheet } from './MediaSourceSheet';
 
 interface ComposerProps {
@@ -145,14 +144,16 @@ export function Composer({
   onSent,
 }: ComposerProps) {
   const { colors, spacing, radius, typography } = useTheme();
-  const insets = useSafeAreaInsets();
-  const keyboardVisible = useKeyboardVisible();
-  // The screen hands the bottom safe area to the composer (Screen
-  // edges={['top']}) so it can be dropped while the keyboard is up —
-  // otherwise the navigation-bar inset stacks above the keyboard as a dead
-  // gap. See useKeyboardVisible for why edge-to-edge makes this necessary.
-  const bottomPad = keyboardVisible ? 6 : Math.max(6, insets.bottom);
-  const [text, setText] = useState('');
+  // The bottom inset is owned by the screen's keyboard-tracking wrapper
+  // (see ConversationDetailScreen's useAnimatedKeyboard padding), which
+  // resolves the navigation bar and the keyboard as one value. The composer
+  // only owns its own internal breathing room — applying an inset here too
+  // would stack into a dead gap above the keyboard.
+  const bottomPad = 6;
+  // Restore any half-typed message for this chat. Lazy initial state rather
+  // than an effect, so the field is already populated on first paint.
+  const draft = useMessageDraft(conversationId);
+  const [text, setText] = useState(() => draft.read());
   const [inputHeight, setInputHeight] = useState(INPUT_MIN_HEIGHT);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -168,6 +169,7 @@ export function Composer({
 
   const handleChangeText = (value: string) => {
     setText(value);
+    draft.save(value);
     emitTypingStart(conversationId);
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => emitTypingStop(conversationId), TYPING_STOP_DELAY_MS);
@@ -183,8 +185,11 @@ export function Composer({
   useEffect(
     () => () => {
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
+      // Commit whatever the debounce hasn't written yet, so a fast
+      // back-navigation doesn't lose the last few characters.
+      draft.flush();
     },
-    [],
+    [draft],
   );
 
   // ---------------------------------------------------------------- images
@@ -281,11 +286,13 @@ export function Composer({
       const ok = await sendPendingImages(trimmed);
       if (ok) {
         setText('');
+        draft.clear();
         setInputHeight(INPUT_MIN_HEIGHT);
       }
     } else {
       onSendText(trimmed);
       setText('');
+      draft.clear();
       setInputHeight(INPUT_MIN_HEIGHT);
     }
 

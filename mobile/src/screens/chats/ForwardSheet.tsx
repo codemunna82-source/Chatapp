@@ -14,12 +14,12 @@ import type { Conversation, Message } from '../../api/types';
 
 interface ForwardSheetProps {
   visible: boolean;
-  /** The message being forwarded; null closes the sheet. */
-  message: Message | null;
+  /** The messages being forwarded; empty closes the sheet. */
+  messages: Message[];
   /** Excluded from the target list — forwarding into the current chat is pointless. */
   currentConversationId: string;
   onClose: () => void;
-  onForwarded: (conversationName: string) => void;
+  onForwarded: (conversationName: string, count: number) => void;
 }
 
 /**
@@ -49,7 +49,7 @@ export function buildForwardBody(message: Message): SendMessageBody | null {
   return null;
 }
 
-export function ForwardSheet({ visible, message, currentConversationId, onClose, onForwarded }: ForwardSheetProps) {
+export function ForwardSheet({ visible, messages, currentConversationId, onClose, onForwarded }: ForwardSheetProps) {
   const { colors, spacing, typography } = useTheme();
   const sheetRef = useRef<BottomSheetModal>(null);
   const [sendingTo, setSendingTo] = useState<string | null>(null);
@@ -76,20 +76,25 @@ export function ForwardSheet({ visible, message, currentConversationId, onClose,
   };
 
   const handlePick = async (target: Conversation) => {
-    if (!message || sendingTo) return;
-    const body = buildForwardBody(message);
-    if (!body) {
-      setError('This message type can’t be forwarded.');
+    if (messages.length === 0 || sendingTo) return;
+    const bodies = messages.map(buildForwardBody).filter((b): b is SendMessageBody => b !== null);
+    if (bodies.length === 0) {
+      setError('None of the selected messages can be forwarded.');
       return;
     }
     setSendingTo(target.id);
     setError(null);
     try {
-      await sendMessageRequest(target.id, body);
-      onForwarded(target.contact?.name || target.contact?.phone || 'that chat');
+      // Sequential rather than Promise.all: the target chat should receive
+      // them in the order they were selected, and a parallel burst would
+      // arrive interleaved.
+      for (const body of bodies) {
+        await sendMessageRequest(target.id, body);
+      }
+      onForwarded(target.contact?.name || target.contact?.phone || 'that chat', bodies.length);
       sheetRef.current?.dismiss();
     } catch (err) {
-      setError(getApiErrorMessage(err, 'Could not forward that message.'));
+      setError(getApiErrorMessage(err, 'Could not forward those messages.'));
     } finally {
       setSendingTo(null);
     }
@@ -135,7 +140,9 @@ export function ForwardSheet({ visible, message, currentConversationId, onClose,
   return (
     <AppBottomSheet ref={sheetRef} snapPoints={SNAP_POINTS} onDismiss={onClose} onChange={handleSheetChange}>
       <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }}>
-        <Text style={[typography.heading, { color: colors.textPrimary }]}>Forward to</Text>
+        <Text style={[typography.heading, { color: colors.textPrimary }]}>
+          {messages.length > 1 ? `Forward ${messages.length} messages to` : 'Forward to'}
+        </Text>
         {error ? <Text style={[typography.caption, { color: colors.danger, marginTop: 4 }]}>{error}</Text> : null}
       </View>
 

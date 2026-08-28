@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -17,6 +19,7 @@ import { MessageActionSheet } from './MessageActionSheet';
 import { TemplatePickerSheet } from './TemplatePickerSheet';
 import { AttachmentSheet } from './AttachmentSheet';
 import { ForwardSheet, buildForwardBody } from './ForwardSheet';
+import { ImageViewerModal } from './ImageViewerModal';
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
 import { useMessages, flattenMessages, useSendMessage, removeMessageFromCache } from '../../queries/useMessages';
@@ -77,7 +80,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
   const [attachSheetOpen, setAttachSheetOpen] = useState(false);
   const [templateSheetOpen, setTemplateSheetOpen] = useState(false);
-  const [forwardTarget, setForwardTarget] = useState<Message | null>(null);
+  // Multi-select: long-press enters selection mode, tap toggles rows, and
+  // the header turns into a selection bar with a forward action.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [forwardTargets, setForwardTargets] = useState<Message[]>([]);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
   // Short-lived confirmation for copy/forward — both are silent otherwise.
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -95,40 +102,24 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const scheme = useResolvedScheme();
   const chatColors = scheme === 'dark' ? chatDarkColors : chatLightColors;
 
-  useEffect(() => {
-    navigation.setOptions({
-      title: conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Conversation',
-      // The header itself stays a fixed navy in both schemes (matches both
-      // reference images identically) — hardcoded rather than theme-driven
-      // since headerStyle/headerTintColor render through React Navigation's
-      // own header, outside the nested <ThemeProvider colors={chatColors}>
-      // wrap below (that only covers this component's own returned JSX).
-      headerStyle: { backgroundColor: chatHeaderBackground },
-      headerTintColor: '#FFFFFF',
-      headerTitleStyle: { color: '#FFFFFF' },
-      headerRight: () =>
-        contactId ? (
-          <Pressable
-            onPress={() => placeCall(contactId)}
-            disabled={callPending}
-            style={styles.headerAction}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: callPending }}
-            accessibilityLabel="Call this contact"
-          >
-            {({ pressed }) => (
-              <Ionicons
-                name="call-outline"
-                size={22}
-                color={callPending ? 'rgba(255,255,255,0.5)' : '#FFFFFF'}
-                style={{ opacity: pressed ? 0.5 : 1 }}
-              />
-            )}
-          </Pressable>
-        ) : null,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- placeCall is a stable closure from usePlaceCall; including it would re-run this on every render
-  }, [navigation, conversationQuery.data, contactId, callPending]);
+  // Keyboard avoidance, take two. KeyboardAvoidingView did not work here:
+  // this app runs edge-to-edge (targetSdk 36), where Android stops resizing
+  // the window for the IME and RN's JS-side keyboard events are unreliable,
+  // so the composer stayed pinned under the keyboard. Reanimated's
+  // useAnimatedKeyboard reads the IME inset straight off WindowInsets on
+  // the UI thread, which is the one source that stays correct under
+  // edge-to-edge.
+  //
+  // One expression covers both states: while the keyboard is up the pad is
+  // its height, and while it is down the pad falls back to the navigation
+  // bar inset. That also removes the stacked-inset problem - the two can
+  // never add together into a dead gap above the keyboard.
+  const keyboard = useAnimatedKeyboard();
+  const insets = useSafeAreaInsets();
+  const keyboardPadStyle = useAnimatedStyle(() => ({
+    paddingBottom: Math.max(keyboard.height.value, insets.bottom),
+  }));
+
 
   useEffect(() => {
     emitConversationRead(conversationId);
@@ -202,8 +193,122 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   // Stable identities: an inline arrow per row would change every render and
   // defeat MessageBubble's React.memo, re-rendering every bubble in the list.
-  const handleLongPress = useCallback((message: Message) => setActionTarget(message), []);
+  const selectionMode = selectedIds.length > 0;
+
+  const toggleSelected = useCallback((message: Message) => {
+    setSelectedIds((prev) =>
+      prev.includes(message.id) ? prev.filter((id) => id !== message.id) : [...prev, message.id],
+    );
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedIds([]), []);
+
+  // In selection mode a long-press just toggles, so the action sheet can't
+  // open on top of a selection the user is still building.
+  const handleLongPress = useCallback(
+    (message: Message) => {
+      if (selectionMode) {
+        toggleSelected(message);
+        return;
+      }
+      if (buildForwardBody(message)) {
+        // Long-press starts a selection for anything forwardable; the
+        // single-message action sheet stays reachable via the tap-and-hold
+        // on a non-forwardable row (reactions, templates).
+        toggleSelected(message);
+        return;
+      }
+      setActionTarget(message);
+    },
+    [selectionMode, toggleSelected],
+  );
+
+  const handleSelectTap = useCallback(
+    (message: Message) => {
+      if (selectionMode) toggleSelected(message);
+    },
+    [selectionMode, toggleSelected],
+  );
+
   const handleReply = useCallback((message: Message) => setReplyingTo(message), []);
+  const handleForwardOne = useCallback((message: Message) => setForwardTargets([message]), []);
+
+  const forwardSelected = useCallback(() => {
+    // Preserve conversation order rather than tap order.
+    const ordered = view.renderable.filter((m) => selectedIds.includes(m.id)).reverse();
+    setForwardTargets(ordered);
+  }, [view.renderable, selectedIds]);
+
+  useEffect(() => {
+    if (selectionMode) {
+      // Selection bar replaces the normal header: count on the left, a
+      // close and a forward action on the right.
+      navigation.setOptions({
+        title: `${selectedIds.length} selected`,
+        headerStyle: { backgroundColor: chatHeaderBackground },
+        headerTintColor: '#FFFFFF',
+        headerTitleStyle: { color: '#FFFFFF' },
+        headerLeft: () => (
+          <Pressable
+            onPress={clearSelection}
+            style={styles.headerAction}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel selection"
+          >
+            {({ pressed }) => <Ionicons name="close" size={24} color="#FFFFFF" style={{ opacity: pressed ? 0.5 : 1 }} />}
+          </Pressable>
+        ),
+        headerRight: () => (
+          <Pressable
+            onPress={forwardSelected}
+            style={styles.headerAction}
+            accessibilityRole="button"
+            accessibilityLabel={`Forward ${selectedIds.length} selected messages`}
+          >
+            {({ pressed }) => (
+              <Ionicons name="arrow-redo" size={22} color="#FFFFFF" style={{ opacity: pressed ? 0.5 : 1 }} />
+            )}
+          </Pressable>
+        ),
+      });
+      return;
+    }
+
+    navigation.setOptions({
+      headerLeft: undefined,
+      title: conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Conversation',
+      // The header itself stays a fixed navy in both schemes (matches both
+      // reference images identically) — hardcoded rather than theme-driven
+      // since headerStyle/headerTintColor render through React Navigation's
+      // own header, outside the nested <ThemeProvider colors={chatColors}>
+      // wrap below (that only covers this component's own returned JSX).
+      headerStyle: { backgroundColor: chatHeaderBackground },
+      headerTintColor: '#FFFFFF',
+      headerTitleStyle: { color: '#FFFFFF' },
+      headerRight: () =>
+        contactId ? (
+          <Pressable
+            onPress={() => placeCall(contactId)}
+            disabled={callPending}
+            style={styles.headerAction}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: callPending }}
+            accessibilityLabel="Call this contact"
+          >
+            {({ pressed }) => (
+              <Ionicons
+                name="call-outline"
+                size={22}
+                color={callPending ? 'rgba(255,255,255,0.5)' : '#FFFFFF'}
+                style={{ opacity: pressed ? 0.5 : 1 }}
+              />
+            )}
+          </Pressable>
+        ) : null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- placeCall is a stable closure from usePlaceCall; including it would re-run this on every render
+  }, [navigation, conversationQuery.data, contactId, callPending, selectionMode, selectedIds.length, clearSelection, forwardSelected]);
+  const handleOpenImage = useCallback((localUri: string) => setViewerUri(localUri), []);
 
   const showToast = useCallback((text: string) => {
     setToast(text);
@@ -244,10 +349,25 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           reactions={view.reactionsByTarget.get(item.message.id)}
           onLongPress={handleLongPress}
           onRetry={handleRetry}
-          onReply={handleReply}
+          onReply={selectionMode ? undefined : handleReply}
+          onForward={selectionMode || !buildForwardBody(item.message) ? undefined : handleForwardOne}
+          onOpenImage={selectionMode ? undefined : handleOpenImage}
+          selectable={selectionMode}
+          selected={selectedIds.includes(item.message.id)}
+          onSelectTap={handleSelectTap}
         />
       ),
-    [view, handleLongPress, handleRetry, handleReply],
+    [
+      view,
+      handleLongPress,
+      handleRetry,
+      handleReply,
+      handleForwardOne,
+      handleOpenImage,
+      selectionMode,
+      selectedIds,
+      handleSelectTap,
+    ],
   );
 
   const handleEndReached = useCallback(() => {
@@ -265,20 +385,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     // this subtree only, and itself following Settings' light/dark/system
     // preference (via chatColors above) same as every other screen does.
     <ThemeProvider colors={chatColors}>
-      {/* edges={['top']}: the composer applies the bottom inset itself so it
-          can drop it while the keyboard is up — see useKeyboardVisible. */}
+      {/* edges={['top']}: the keyboard-tracking wrapper below owns the
+          bottom inset, resolving nav bar and keyboard as a single value. */}
       <Screen padded={false} edges={SCREEN_EDGES}>
-        <KeyboardAvoidingView
-          style={styles.flex}
-          // 'padding' on Android too, deliberately: this app runs
-          // edge-to-edge (targetSdk 36), where Android ignores
-          // windowSoftInputMode="adjustResize" and delivers the keyboard as
-          // a window inset instead. Leaving behavior undefined here — the
-          // old value — meant no avoidance at all on Android, which is why
-          // the keyboard covered the composer. The view sits below the
-          // navigator's header, so no vertical offset is needed.
-          behavior="padding"
-        >
+        <Animated.View style={[styles.flex, keyboardPadStyle]}>
           <View style={styles.flex}>
             <ChatWallpaper />
             {callError ? (
@@ -312,7 +422,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               onSent={() => setReplyingTo(null)}
             />
           </View>
-        </KeyboardAvoidingView>
+        </Animated.View>
 
         <MessageActionSheet
           visible={Boolean(actionTarget)}
@@ -322,7 +432,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           onClose={() => setActionTarget(null)}
           onCopy={handleCopy}
           onForward={() => {
-            setForwardTarget(actionTarget);
+            if (actionTarget) setForwardTargets([actionTarget]);
             setActionTarget(null);
           }}
           onReply={() => {
@@ -344,14 +454,17 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           conversationId={conversationId}
         />
 
+        <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} />
+
         <ForwardSheet
-          visible={Boolean(forwardTarget)}
-          message={forwardTarget}
+          visible={forwardTargets.length > 0}
+          messages={forwardTargets}
           currentConversationId={conversationId}
-          onClose={() => setForwardTarget(null)}
-          onForwarded={(name) => {
-            setForwardTarget(null);
-            showToast(`Forwarded to ${name}`);
+          onClose={() => setForwardTargets([])}
+          onForwarded={(name, count) => {
+            setForwardTargets([]);
+            clearSelection();
+            showToast(count > 1 ? `${count} messages forwarded to ${name}` : `Forwarded to ${name}`);
           }}
         />
 

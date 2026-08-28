@@ -52,7 +52,7 @@ export function MediaSourceSheet({ visible, onClose, onPickCamera, onPickGallery
   ];
 
   return (
-    <AppBottomSheet ref={sheetRef} onDismiss={onClose}>
+    <AppBottomSheet ref={sheetRef} snapPoints={SNAP_POINTS} onDismiss={onClose}>
       <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xl, paddingTop: spacing.xs }}>
         <Text style={[typography.heading, { color: colors.textPrimary, marginBottom: spacing.md }]}>Add photos</Text>
         {options.map((option) => (
@@ -80,6 +80,9 @@ export function MediaSourceSheet({ visible, onClose, onPickCamera, onPickGallery
     </AppBottomSheet>
   );
 }
+
+// Title + two option rows.
+const SNAP_POINTS = ['32%'];
 
 const styles = StyleSheet.create({
   row: { minHeight: touchTarget.min + 8, justifyContent: 'center' },

@@ -8,10 +8,24 @@ import {
 } from '@gorhom/bottom-sheet';
 import { useTheme } from '../theme/ThemeProvider';
 
+// Every sheet in this app that relied on enableDynamicSizing failed to
+// appear at all on a real device — it presents at zero height, so the tap
+// looks like it did nothing. The emoji picker hit this and was fixed by
+// giving it explicit snap points; the attachment and media-source sheets
+// then hit exactly the same thing. So dynamic sizing is no longer the
+// default: a sheet gets a real height unless it deliberately opts in.
+const DEFAULT_SNAP_POINTS: (string | number)[] = ['45%'];
+
 interface AppBottomSheetProps {
   children: React.ReactNode;
-  /** Fixed snap points (e.g. ['50%']). Omit to let content size the sheet (enableDynamicSizing). */
+  /** Fixed snap points. Defaults to a real height — see DEFAULT_SNAP_POINTS. */
   snapPoints?: (string | number)[];
+  /**
+   * Opt in to content-driven height. Only use this with content whose
+   * measured height is reliable, and verify it on a device — see the note
+   * above DEFAULT_SNAP_POINTS.
+   */
+  dynamicSizing?: boolean;
   onDismiss?: () => void;
   /**
    * Forwards the underlying sheet's index-change event — a real callback
@@ -29,7 +43,7 @@ interface AppBottomSheetProps {
  * MediaSourceSheet instead of each hand-rolling Modal + PanResponder gesture code.
  */
 export const AppBottomSheet = forwardRef<BottomSheetModal, AppBottomSheetProps>(function AppBottomSheet(
-  { children, snapPoints, onDismiss, onChange },
+  { children, snapPoints, dynamicSizing = false, onDismiss, onChange },
   ref,
 ) {
   const { colors, radius } = useTheme();
@@ -41,7 +55,10 @@ export const AppBottomSheet = forwardRef<BottomSheetModal, AppBottomSheetProps>(
     [],
   );
 
-  const points = useMemo(() => snapPoints, [snapPoints]);
+  const points = useMemo(
+    () => (dynamicSizing ? undefined : (snapPoints ?? DEFAULT_SNAP_POINTS)),
+    [snapPoints, dynamicSizing],
+  );
 
   return (
     <BottomSheetModal
