@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -26,8 +24,9 @@ import { File } from 'expo-file-system';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
 import { emitTypingStart, emitTypingStop } from '../../sockets/actions';
+import { useQueryClient } from '@tanstack/react-query';
 import { useUploadMedia } from '../../queries/useUploadMedia';
-import { useSendMessage } from '../../queries/useMessages';
+import { useSendMessage, insertPendingMediaMessage, removeMessageFromCache } from '../../queries/useMessages';
 import { getApiErrorMessage } from '../../api/client';
 import { formatDuration } from '../../utils/formatTime';
 import { useMessageDraft } from '../../utils/useMessageDraft';
@@ -44,13 +43,6 @@ interface ComposerProps {
   replyToMessageId: string | undefined;
   /** Fired after any send this component performs itself, so the screen can clear the reply target. */
   onSent: () => void;
-}
-
-/** An image picked but not yet sent — shown as a removable thumbnail above the input. */
-interface PendingImage {
-  uri: string;
-  name: string;
-  mimeType: string;
 }
 
 const TYPING_STOP_DELAY_MS = 2500;
@@ -157,15 +149,14 @@ export function Composer({
   const [inputHeight, setInputHeight] = useState(INPUT_MIN_HEIGHT);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const queryClient = useQueryClient();
   const uploadMedia = useUploadMedia();
   const sendMessage = useSendMessage(conversationId);
 
-  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
-  const [mediaBusy, setMediaBusy] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
 
-  const canSend = (Boolean(text.trim()) || pendingImages.length > 0) && !sending && !mediaBusy;
+  const canSend = Boolean(text.trim()) && !sending;
 
   const handleChangeText = (value: string) => {
     setText(value);
@@ -193,16 +184,58 @@ export function Composer({
   );
 
   // ---------------------------------------------------------------- images
-  const addAssets = (assets: ImagePicker.ImagePickerAsset[]) => {
-    const picked: PendingImage[] = assets.map((asset, i) => ({
-      uri: asset.uri,
-      name: asset.fileName ?? `image-${Date.now()}-${i}.jpg`,
-      mimeType: asset.mimeType ?? 'image/jpeg',
-    }));
-    // Selection order is preserved, and the cap is enforced across repeated
-    // picks rather than per pick.
-    setPendingImages((prev) => [...prev, ...picked].slice(0, MAX_IMAGES_PER_SEND));
-  };
+  /**
+   * Sends picked photos straight to the chat, WhatsApp-style: each one shows
+   * up as a bubble immediately (rendered from the local file) while its
+   * upload runs in the background, rather than sitting as a thumbnail inside
+   * the input field waiting for a separate send tap.
+   */
+  const sendAssets = useCallback(
+    async (assets: ImagePicker.ImagePickerAsset[]) => {
+      if (assets.length === 0) return;
+      if (!whatsappPhoneNumberId) {
+        setMediaError('This conversation has no connected WhatsApp number yet.');
+        return;
+      }
+      setMediaError(null);
+
+      // Sequential so the bubbles land in the order they were picked.
+      for (let i = 0; i < assets.length; i++) {
+        const asset = assets[i];
+        if (!asset) continue;
+        const tempId = `local-${Date.now()}-${i}`;
+
+        // Straight into the chat, before the upload even starts.
+        insertPendingMediaMessage(queryClient, conversationId, {
+          tempId,
+          type: 'image',
+          localUri: asset.uri,
+          replyToMessageId,
+        });
+
+        try {
+          const uploaded = await uploadMedia.mutateAsync({
+            whatsappPhoneNumberId,
+            file: {
+              uri: asset.uri,
+              name: asset.fileName ?? `image-${Date.now()}-${i}.jpg`,
+              mimeType: asset.mimeType ?? 'image/jpeg',
+            },
+          });
+          // The real send replaces the placeholder with its own optimistic
+          // entry, so drop ours first to avoid a duplicate bubble.
+          removeMessageFromCache(queryClient, conversationId, tempId);
+          sendMessage.mutate({ type: 'image', mediaId: uploaded.id, replyToMessageId });
+        } catch (err) {
+          removeMessageFromCache(queryClient, conversationId, tempId);
+          setMediaError(getApiErrorMessage(err, 'Could not send that photo.'));
+          break;
+        }
+      }
+      onSent();
+    },
+    [whatsappPhoneNumberId, queryClient, conversationId, replyToMessageId, uploadMedia, sendMessage, onSent],
+  );
 
   const pickFromGallery = async () => {
     setMediaError(null);
@@ -214,7 +247,7 @@ export function Composer({
       quality: 0.8,
     });
     if (result.canceled) return;
-    addAssets(result.assets);
+    await sendAssets(result.assets);
   };
 
   const captureFromCamera = async () => {
@@ -227,44 +260,7 @@ export function Composer({
     }
     const result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
     if (result.canceled) return;
-    addAssets(result.assets);
-  };
-
-  const removePendingImage = (index: number) => {
-    setPendingImages((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  /** Uploads and sends each pending image in order. Returns false if it bailed. */
-  const sendPendingImages = async (caption: string): Promise<boolean> => {
-    if (!whatsappPhoneNumberId) {
-      setMediaError('This conversation has no connected WhatsApp number yet.');
-      return false;
-    }
-    setMediaBusy(true);
-    setMediaError(null);
-    try {
-      // Sequential on purpose: it preserves the order the user picked, and
-      // the caption belongs on the first image only (same as WhatsApp).
-      for (let i = 0; i < pendingImages.length; i++) {
-        const image = pendingImages[i];
-        if (!image) continue;
-        const uploaded = await uploadMedia.mutateAsync({ whatsappPhoneNumberId, file: image });
-        sendMessage.mutate({
-          type: 'image',
-          mediaId: uploaded.id,
-          caption: i === 0 && caption ? caption : undefined,
-          replyToMessageId,
-        });
-      }
-      setPendingImages([]);
-      onSent();
-      return true;
-    } catch (err) {
-      setMediaError(getApiErrorMessage(err, 'Could not send those photos.'));
-      return false;
-    } finally {
-      setMediaBusy(false);
-    }
+    await sendAssets(result.assets);
   };
 
   const handleSend = async () => {
@@ -279,23 +275,10 @@ export function Composer({
 
   const performSend = async () => {
     const trimmed = text.trim();
-
-    if (pendingImages.length > 0) {
-      // The typed text rides along as the first image's caption rather than
-      // being sent as a separate message.
-      const ok = await sendPendingImages(trimmed);
-      if (ok) {
-        setText('');
-        draft.clear();
-        setInputHeight(INPUT_MIN_HEIGHT);
-      }
-    } else {
-      onSendText(trimmed);
-      setText('');
-      draft.clear();
-      setInputHeight(INPUT_MIN_HEIGHT);
-    }
-
+    onSendText(trimmed);
+    setText('');
+    draft.clear();
+    setInputHeight(INPUT_MIN_HEIGHT);
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     emitTypingStop(conversationId);
   };
@@ -647,33 +630,6 @@ export function Composer({
     <View style={shellStyle}>
       {errorText ? <Text style={[typography.caption, { color: colors.danger, marginBottom: 4 }]}>{errorText}</Text> : null}
 
-      {pendingImages.length > 0 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.previewStrip}
-          contentContainerStyle={styles.previewStripContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          {pendingImages.map((image, index) => (
-            <View key={`${image.uri}-${index}`} style={[styles.thumbWrap, { borderRadius: radius.md, borderColor: colors.border }]}>
-              <Image source={{ uri: image.uri }} style={[styles.thumb, { borderRadius: radius.md }]} />
-              <Pressable
-                onPress={() => removePendingImage(index)}
-                disabled={mediaBusy}
-                style={styles.thumbRemove}
-                accessibilityRole="button"
-                accessibilityLabel={`Remove image ${index + 1}`}
-              >
-                <View style={[styles.thumbRemoveDot, { backgroundColor: colors.overlay }]}>
-                  <Ionicons name="close" size={13} color="#FFFFFF" />
-                </View>
-              </Pressable>
-            </View>
-          ))}
-        </ScrollView>
-      ) : null}
-
       <View style={styles.row}>
         <Pressable onPress={onAttach} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Add attachment">
           {({ pressed }) => (
@@ -695,10 +651,8 @@ export function Composer({
 
         <Pressable
           onPress={() => setMediaSheetOpen(true)}
-          disabled={mediaBusy}
           style={styles.iconButton}
           accessibilityRole="button"
-          accessibilityState={{ disabled: mediaBusy }}
           accessibilityLabel="Take a photo or choose from gallery"
         >
           {({ pressed }) => (
@@ -706,7 +660,7 @@ export function Composer({
               name="camera-outline"
               size={24}
               color={colors.textSecondary}
-              style={{ opacity: mediaBusy ? 0.4 : pressed ? 0.5 : 1 }}
+              style={{ opacity: pressed ? 0.5 : 1 }}
             />
           )}
         </Pressable>
@@ -727,17 +681,15 @@ export function Composer({
         ) : (
           <Pressable
             onPress={startRecording}
-            disabled={mediaBusy}
-            style={styles.actionTouch}
+              style={styles.actionTouch}
             accessibilityRole="button"
-            accessibilityState={{ disabled: mediaBusy }}
-            accessibilityLabel="Record a voice message"
+              accessibilityLabel="Record a voice message"
           >
             {({ pressed }) => (
               <View
                 style={[
                   styles.actionCircle,
-                  { backgroundColor: colors.primary, opacity: mediaBusy ? 0.5 : pressed ? 0.6 : 1 },
+                  { backgroundColor: colors.primary, opacity: pressed ? 0.6 : 1 },
                 ]}
               >
                 <Ionicons name="mic" size={19} color={colors.textOnPrimary} />
@@ -776,12 +728,6 @@ const styles = StyleSheet.create({
   actionCircle: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   // Ionicons' send glyph is optically left-heavy inside a circle.
   sendGlyph: { marginLeft: 2 },
-  previewStrip: { maxHeight: 84 },
-  previewStripContent: { paddingBottom: 8, paddingLeft: 4 },
-  thumbWrap: { marginRight: 8, borderWidth: StyleSheet.hairlineWidth },
-  thumb: { width: 64, height: 64 },
-  thumbRemove: { position: 'absolute', top: -6, right: -6, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  thumbRemoveDot: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   previewPill: { flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.min, paddingRight: 14, marginHorizontal: 2 },
   templateButton: { alignItems: 'center' },
   recordingRow: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4 },

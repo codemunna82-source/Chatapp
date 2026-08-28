@@ -18,7 +18,16 @@ import { useTheme } from '../../theme/ThemeProvider';
  * re-fetched the full image over the network. Same approach
  * AudioMessageBubble already uses for voice notes.
  */
-function MediaImageImpl({ mediaId, onOpen }: { mediaId: string; onOpen?: (localUri: string) => void }) {
+function MediaImageImpl({
+  mediaId,
+  localUri: providedUri,
+  onOpen,
+}: {
+  mediaId?: string;
+  /** A local file to render directly — used for a just-picked, still-uploading photo. */
+  localUri?: string;
+  onOpen?: (localUri: string) => void;
+}) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const { colors, radius } = useTheme();
   const { width } = useWindowDimensions();
@@ -32,6 +41,10 @@ function MediaImageImpl({ mediaId, onOpen }: { mediaId: string; onOpen?: (localU
   const box = { width: side, height: side };
 
   useEffect(() => {
+    // A locally-picked photo needs no fetch at all — providedUri is used
+    // directly below, so there is nothing to synchronise here.
+    if (providedUri || !mediaId) return;
+
     let cancelled = false;
     const target = new File(Paths.cache, `voxo-media-${mediaId}.img`);
 
@@ -58,7 +71,11 @@ function MediaImageImpl({ mediaId, onOpen }: { mediaId: string; onOpen?: (localU
       // state on it afterwards.
       cancelled = true;
     };
-  }, [mediaId, accessToken]);
+  }, [mediaId, providedUri, accessToken]);
+
+  // Derived, not stored: the local file wins when present, otherwise
+  // whatever the download produced.
+  const displayUri = providedUri ?? localUri;
 
   if (failed) {
     return (
@@ -72,14 +89,14 @@ function MediaImageImpl({ mediaId, onOpen }: { mediaId: string; onOpen?: (localU
     <Pressable
       // Opening the viewer passes the already-cached file, so a full-screen
       // photo costs no extra request and works offline.
-      onPress={localUri && onOpen ? () => onOpen(localUri) : undefined}
-      disabled={!localUri || !onOpen}
+      onPress={displayUri && onOpen ? () => onOpen(displayUri) : undefined}
+      disabled={!displayUri || !onOpen}
       accessibilityRole={onOpen ? 'imagebutton' : 'image'}
       accessibilityLabel="Photo"
       style={[box, { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surfaceAlt }]}
     >
-      {localUri ? (
-        <Image source={{ uri: localUri }} style={box} resizeMode="cover" onError={() => setFailed(true)} />
+      {displayUri ? (
+        <Image source={{ uri: displayUri }} style={box} resizeMode="cover" onError={() => setFailed(true)} />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.center]}>
           <ActivityIndicator color={colors.primary} />

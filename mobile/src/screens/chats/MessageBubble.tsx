@@ -51,10 +51,10 @@ function MessageContent({
 }) {
   const { typography } = useTheme();
 
-  if (message.type === 'image' && message.mediaId) {
+  if (message.type === 'image' && (message.mediaId || message.localUri)) {
     return (
       <View>
-        <MediaImage mediaId={message.mediaId} onOpen={onOpenImage} />
+        <MediaImage mediaId={message.mediaId} localUri={message.localUri} onOpen={onOpenImage} />
         {message.text ? <Text style={[typography.body, { color: textColor, marginTop: 6 }]}>{message.text}</Text> : null}
       </View>
     );

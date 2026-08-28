@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { File, Paths } from 'expo-file-system';
@@ -28,6 +28,15 @@ const BAR_HEIGHTS = Array.from({ length: BAR_COUNT }, (_, i) => {
 export function AudioMessageBubble({ mediaId, tint }: { mediaId: string; tint: string }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const { spacing, typography } = useTheme();
+  const { width } = useWindowDimensions();
+  // The row's content column is flex:1, but a message bubble sizes itself to
+  // its content — so with nothing to flex against it collapsed and the
+  // waveform/duration were squashed. (A fixed minWidth used to hold this
+  // open; it was dropped during the touch-target pass, which is what broke
+  // the card.) Restored as a responsive floor instead of a hardcoded one:
+  // wide enough for the 22 bars plus the play button, capped so it can't
+  // overflow the bubble's own 80% ceiling on a small screen.
+  const rowMinWidth = Math.min(Math.max(width * 0.5, 180), 240);
   const [localUri, setLocalUri] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(false);
@@ -77,7 +86,7 @@ export function AudioMessageBubble({ mediaId, tint }: { mediaId: string; tint: s
   const remaining = status.isLoaded && status.duration > 0 ? status.duration - status.currentTime : status.duration;
 
   return (
-    <Pressable onPress={handlePress} disabled={downloading} style={styles.row}>
+    <Pressable onPress={handlePress} disabled={downloading} style={[styles.row, { minWidth: rowMinWidth }]}>
       <View style={[styles.playButton, { backgroundColor: `${tint}22` }]}>
         {downloading ? (
           <ActivityIndicator color={tint} size="small" />

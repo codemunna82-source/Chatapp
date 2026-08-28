@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import { useColorScheme } from 'react-native';
 import { lightColors, darkColors, type ColorTokens } from './colors';
 import { spacing, radius, shadow, touchTarget } from './spacing';
 import { typography } from './typography';
@@ -32,19 +31,16 @@ interface ThemeProviderProps {
 }
 
 /**
- * Resolves 'system' | 'light' | 'dark' down to the actual 'light' | 'dark'
- * scheme currently in effect, the same logic ThemeProvider itself uses.
- * Exported so a screen that overrides `colors` (see above) can still pick
- * the right light/dark variant of ITS OWN palette to match — a themed
- * screen should follow Settings' light/dark/system toggle same as every
- * other screen, it just uses a different palette while doing so.
+ * The light/dark scheme currently in effect. Exported so a screen that
+ * overrides `colors` (see above) can still pick the right variant of ITS
+ * OWN palette — a themed screen should follow the Settings toggle like
+ * every other screen, it just uses a different palette while doing so.
  */
 export function useResolvedScheme(): 'light' | 'dark' {
-  const systemScheme = useColorScheme();
-  const preference = useThemePreferenceStore((s) => s.preference);
-  // 'system' (the default) follows the OS setting, same as before this
-  // store existed; 'light'/'dark' is an explicit user override from Settings.
-  return preference === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : preference;
+  // The preference is now always an explicit 'light' or 'dark' — the
+  // follow-the-system option was removed from Settings, and the store
+  // migrates any previously-stored 'system' value on first read.
+  return useThemePreferenceStore((s) => s.preference);
 }
 
 export function ThemeProvider({ children, colors: colorsOverride }: ThemeProviderProps) {

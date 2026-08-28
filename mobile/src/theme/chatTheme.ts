@@ -31,10 +31,14 @@ export const chatLightColors: ColorTokens = {
   danger: '#D3403F',
   dangerMuted: '#FBE7E7',
   overlay: 'rgba(31, 58, 71, 0.48)',
+  // Outgoing keeps the deep navy; incoming is a lighter, warmer surface so
+  // the two sides are distinguishable at a glance. They were previously the
+  // same value, which made every bubble look identical apart from its
+  // alignment.
   bubbleSent: '#1F3A47',
   bubbleSentText: '#F5EEDC',
-  bubbleReceived: '#1F3A47',
-  bubbleReceivedText: '#F5EEDC',
+  bubbleReceived: '#F7F1E3',
+  bubbleReceivedText: '#22323B',
 };
 
 export const chatDarkColors: ColorTokens = {
@@ -57,10 +61,11 @@ export const chatDarkColors: ColorTokens = {
   danger: '#E9706F',
   dangerMuted: '#3C1F1F',
   overlay: 'rgba(0, 0, 0, 0.68)',
+  // Same split in dark: navy out, a raised charcoal in.
   bubbleSent: '#1F3A47',
   bubbleSentText: '#F5EEDC',
-  bubbleReceived: '#1F3A47',
-  bubbleReceivedText: '#F5EEDC',
+  bubbleReceived: '#23262B',
+  bubbleReceivedText: '#ECE6D8',
 };
 
 /**

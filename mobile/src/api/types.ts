@@ -102,6 +102,13 @@ export interface Message {
   type: MessageType;
   text?: string;
   mediaId?: string;
+  /**
+   * Client-only: the local file behind an outgoing media message, set on the
+   * optimistic entry so the photo appears in the chat the instant it is
+   * picked rather than after the upload round-trip. Never sent or returned
+   * by the API, and gone once the server's real message replaces this one.
+   */
+  localUri?: string;
   replyToMessageId?: string;
   status: MessageStatus;
   senderId?: string;

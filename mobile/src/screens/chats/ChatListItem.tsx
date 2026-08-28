@@ -62,7 +62,7 @@ function ChatListItemImpl({ conversation, onPress, onTogglePin, onArchive }: Cha
       <View style={styles.actions}>
         <IconButton
           name={conversation.pinned ? 'pin' : 'pin-outline'}
-          size={17}
+          size={18}
           color={conversation.pinned ? colors.primary : colors.textTertiary}
           touchSize={touchTarget.compact}
           onPress={handleTogglePin}
@@ -70,7 +70,7 @@ function ChatListItemImpl({ conversation, onPress, onTogglePin, onArchive }: Cha
         />
         <IconButton
           name={isArchived ? 'arrow-undo-outline' : 'archive-outline'}
-          size={17}
+          size={18}
           color={colors.textTertiary}
           touchSize={touchTarget.compact}
           onPress={handleArchive}
@@ -92,5 +92,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
   middle: { flex: 1 },
   topLine: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
-  actions: { marginLeft: 4 },
+  // Without flexDirection these two stacked vertically (a 44x88 column),
+  // which is what threw the row's alignment and made the icons look wrong.
+  actions: { flexDirection: 'row', alignItems: 'center', marginLeft: 2 },
 });

@@ -107,7 +107,6 @@ function ProfileAvatar({ userId, label, version }: { userId: string; label: stri
 }
 
 const APPEARANCE_OPTIONS: { value: ThemePreference; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { value: 'system', label: 'System', icon: 'phone-portrait-outline' },
   { value: 'light', label: 'Light', icon: 'sunny-outline' },
   { value: 'dark', label: 'Dark', icon: 'moon-outline' },
 ];

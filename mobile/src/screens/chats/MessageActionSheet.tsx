@@ -18,6 +18,9 @@ interface MessageActionSheetProps {
   onReply: () => void;
   onForward: () => void;
   onCopy: () => void;
+  /** Whether this message can start a multi-message selection. */
+  canSelect: boolean;
+  onSelectMore: () => void;
 }
 
 /**
@@ -40,6 +43,8 @@ export function MessageActionSheet({
   onReply,
   onForward,
   onCopy,
+  canSelect,
+  onSelectMore,
 }: MessageActionSheetProps) {
   const { colors, spacing, radius, typography } = useTheme();
 
@@ -71,6 +76,13 @@ export function MessageActionSheet({
               { key: 'reply', label: 'Reply', icon: 'arrow-undo-outline', onPress: onReply, enabled: true },
               { key: 'forward', label: 'Forward', icon: 'arrow-redo-outline', onPress: onForward, enabled: canForward },
               { key: 'copy', label: 'Copy', icon: 'copy-outline', onPress: onCopy, enabled: canCopy },
+              {
+                key: 'select',
+                label: 'Select more',
+                icon: 'checkmark-circle-outline',
+                onPress: onSelectMore,
+                enabled: canSelect,
+              },
             ] as const
           )
             .filter((action) => action.enabled)

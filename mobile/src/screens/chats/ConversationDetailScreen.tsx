@@ -205,16 +205,13 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   // In selection mode a long-press just toggles, so the action sheet can't
   // open on top of a selection the user is still building.
+  // Long-press opens the action sheet (react / reply / forward / copy).
+  // It briefly started a selection instead, which made those actions
+  // unreachable on any forwardable message — multi-select is now entered
+  // from the sheet's own "Select more" row.
   const handleLongPress = useCallback(
     (message: Message) => {
       if (selectionMode) {
-        toggleSelected(message);
-        return;
-      }
-      if (buildForwardBody(message)) {
-        // Long-press starts a selection for anything forwardable; the
-        // single-message action sheet stays reachable via the tap-and-hold
-        // on a non-forwardable row (reactions, templates).
         toggleSelected(message);
         return;
       }
@@ -431,6 +428,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           canForward={Boolean(actionTarget && buildForwardBody(actionTarget))}
           onClose={() => setActionTarget(null)}
           onCopy={handleCopy}
+          canSelect={Boolean(actionTarget && buildForwardBody(actionTarget))}
+          onSelectMore={() => {
+            if (actionTarget) toggleSelected(actionTarget);
+            setActionTarget(null);
+          }}
           onForward={() => {
             if (actionTarget) setForwardTargets([actionTarget]);
             setActionTarget(null);

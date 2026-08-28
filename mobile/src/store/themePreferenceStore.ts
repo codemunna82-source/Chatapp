@@ -1,7 +1,8 @@
+import { Appearance } from 'react-native';
 import { create } from 'zustand';
 import { getJSON, setJSON } from '../storage/mmkv';
 
-export type ThemePreference = 'system' | 'light' | 'dark';
+export type ThemePreference = 'light' | 'dark';
 
 const THEME_PREFERENCE_KEY = 'voxo.themePreference';
 
@@ -11,12 +12,22 @@ interface ThemePreferenceState {
 }
 
 /**
- * Manual light/dark override, persisted across restarts. ThemeProvider
- * falls back to the OS scheme (useColorScheme()) whenever this is 'system'
- * — the default, and the only behavior before this store existed.
+ * Reads the stored choice, migrating anything that isn't a valid preference.
+ *
+ * 'system' used to be an option and is still on disk for anyone who picked
+ * it, so it resolves once to whatever the OS is currently set to and is then
+ * treated as an explicit choice — the appearance setting is now Light or
+ * Dark only, with no follow-the-system mode.
  */
+function initialPreference(): ThemePreference {
+  const stored = getJSON<string>(THEME_PREFERENCE_KEY);
+  if (stored === 'light' || stored === 'dark') return stored;
+  return Appearance.getColorScheme() === 'dark' ? 'dark' : 'light';
+}
+
+/** Explicit light/dark choice, persisted across restarts. */
 export const useThemePreferenceStore = create<ThemePreferenceState>((set) => ({
-  preference: getJSON<ThemePreference>(THEME_PREFERENCE_KEY) ?? 'system',
+  preference: initialPreference(),
   setPreference: (preference) => {
     setJSON(THEME_PREFERENCE_KEY, preference);
     set({ preference });

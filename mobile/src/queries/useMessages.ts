@@ -48,6 +48,29 @@ function upsertMessage(pages: MessagesPage[], message: Message): MessagesPage[] 
   return [{ ...first!, items: [message, ...first!.items] }, ...rest];
 }
 
+/**
+ * Inserts a local, not-yet-uploaded media message so it shows in the chat
+ * immediately (WhatsApp-style) while the upload runs. The caller replaces or
+ * removes it once the real send resolves.
+ */
+export function insertPendingMediaMessage(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string,
+  args: { tempId: string; type: Message['type']; localUri: string; text?: string; replyToMessageId?: string },
+): void {
+  upsertMessageInCache(queryClient, conversationId, {
+    id: args.tempId,
+    conversationId,
+    direction: 'OUT',
+    type: args.type,
+    text: args.text,
+    localUri: args.localUri,
+    replyToMessageId: args.replyToMessageId,
+    status: 'QUEUED',
+    createdAt: new Date().toISOString(),
+  });
+}
+
 export function upsertMessageInCache(
   queryClient: ReturnType<typeof useQueryClient>,
   conversationId: string,
