@@ -20,6 +20,7 @@ function ChatListItemImpl({ conversation, onPress, onTogglePin, onArchive }: Cha
   const handlePress = useCallback(() => onPress(conversation), [onPress, conversation]);
   const handleTogglePin = useCallback(() => onTogglePin(conversation), [onTogglePin, conversation]);
   const handleArchive = useCallback(() => onArchive(conversation), [onArchive, conversation]);
+  const isArchived = conversation.status === 'ARCHIVED';
   const { colors, spacing, typography } = useTheme();
   const label = conversation.contact?.name || conversation.contact?.phone || 'Unknown contact';
   const unread = conversation.unreadCount > 0;
@@ -68,12 +69,12 @@ function ChatListItemImpl({ conversation, onPress, onTogglePin, onArchive }: Cha
           accessibilityLabel={conversation.pinned ? 'Unpin conversation' : 'Pin conversation'}
         />
         <IconButton
-          name="archive-outline"
+          name={isArchived ? 'arrow-undo-outline' : 'archive-outline'}
           size={17}
           color={colors.textTertiary}
           touchSize={touchTarget.compact}
           onPress={handleArchive}
-          accessibilityLabel="Archive conversation"
+          accessibilityLabel={isArchived ? 'Restore conversation' : 'Archive conversation'}
         />
       </View>
     </Pressable>

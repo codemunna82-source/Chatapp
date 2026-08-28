@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { File, Paths } from 'expo-file-system';
 import { mediaUrl } from '../../api/endpoints/media';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -9,30 +10,55 @@ import { useTheme } from '../../theme/ThemeProvider';
  * Inline authenticated image — the media proxy (backend GET /api/media/:id)
  * requires the same bearer token as every other request, since the bytes
  * come from Meta and the Meta access token itself never reaches the client
- * (architecture doc §4). React Native's Image supports per-request headers
- * for network sources, including on Android.
+ * (architecture doc §4).
+ *
+ * The file is downloaded once into the cache directory and rendered from
+ * disk afterwards. Previously this pointed RN's Image straight at the proxy
+ * URL, so every mount — every time a bubble scrolled back into view —
+ * re-fetched the full image over the network. Same approach
+ * AudioMessageBubble already uses for voice notes.
  */
 function MediaImageImpl({ mediaId }: { mediaId: string }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const { colors, radius } = useTheme();
   const { width } = useWindowDimensions();
+  const [localUri, setLocalUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
 
-  // Sized from the live window rather than a fixed 220dp: the enclosing
-  // bubble is maxWidth 80%, so a hardcoded square overflowed the bubble on
-  // a 320dp-wide phone and left dead space on a 430dp one. Recomputed on
-  // window/orientation change because useWindowDimensions subscribes.
+  // Sized from the live window rather than a fixed square: the enclosing
+  // bubble is maxWidth 80%, so a hardcoded size overflowed on a 320dp phone
+  // and left dead space on a 430dp one.
   const side = Math.round(Math.min(Math.max(width * 0.58, 160), 280));
-  // Memoized so the style object and the image source keep a stable identity
-  // between renders — a new source object makes RN re-request the image
-  // through the authenticated media proxy, which on a chat full of photos
-  // means repeated network work and visible reload flicker while scrolling.
-  const box = useMemo(() => ({ width: side, height: side }), [side]);
-  const source = useMemo(
-    () => ({ uri: mediaUrl(mediaId), headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined }),
-    [mediaId, accessToken],
-  );
+  const box = { width: side, height: side };
+
+  useEffect(() => {
+    let cancelled = false;
+    const target = new File(Paths.cache, `voxo-media-${mediaId}.img`);
+
+    (async () => {
+      try {
+        // Already cached from a previous mount (or an earlier session) —
+        // skip the network entirely.
+        if (target.exists) {
+          if (!cancelled) setLocalUri(target.uri);
+          return;
+        }
+        const result = await File.downloadFileAsync(mediaUrl(mediaId), target, {
+          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+          idempotent: true,
+        });
+        if (!cancelled) setLocalUri(result.uri);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+
+    return () => {
+      // The component can unmount mid-download while scrolling; don't set
+      // state on it afterwards.
+      cancelled = true;
+    };
+  }, [mediaId, accessToken]);
 
   if (failed) {
     return (
@@ -44,18 +70,13 @@ function MediaImageImpl({ mediaId }: { mediaId: string }) {
 
   return (
     <View style={[box, { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surfaceAlt }]}>
-      <Image
-        source={source}
-        style={box}
-        resizeMode="cover"
-        onError={() => setFailed(true)}
-        onLoadEnd={() => setLoaded(true)}
-      />
-      {!loaded ? (
+      {localUri ? (
+        <Image source={{ uri: localUri }} style={box} resizeMode="cover" onError={() => setFailed(true)} />
+      ) : (
         <View style={[StyleSheet.absoluteFill, styles.center]}>
           <ActivityIndicator color={colors.primary} />
         </View>
-      ) : null}
+      )}
     </View>
   );
 }
