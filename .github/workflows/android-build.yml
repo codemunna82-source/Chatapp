@@ -26,12 +26,15 @@ on:
         description: "Socket.IO server URL — usually the same host as api_url."
         required: false
         default: "https://chatapp-0orj.onrender.com"
-  push:
-    branches:
-      - claude/voxo-android-whatsapp-txghqq
-    paths:
-      - "mobile/**"
-      - ".github/workflows/android-build.yml"
+  # Deliberately manual-only: this workflow no longer auto-builds on push.
+  # Pushing code and cutting an APK are separate decisions — the owner asked
+  # to confirm before each build rather than get one on every change. Start
+  # a build from the Actions tab ("Run workflow"), or restore the `push:`
+  # trigger below if you want an APK on every mobile/ change again:
+  #
+  #   push:
+  #     branches: [claude/voxo-android-whatsapp-txghqq]
+  #     paths: ["mobile/**", ".github/workflows/android-build.yml"]
 
 jobs:
   build:
