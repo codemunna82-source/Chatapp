@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -16,6 +16,7 @@ import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { MessageActionSheet } from './MessageActionSheet';
 import { TemplatePickerSheet } from './TemplatePickerSheet';
 import { AttachmentSheet } from './AttachmentSheet';
+import { ForwardSheet, buildForwardBody } from './ForwardSheet';
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
 import { useMessages, flattenMessages, useSendMessage, removeMessageFromCache } from '../../queries/useMessages';
@@ -24,10 +25,12 @@ import { useSocketEvent } from '../../sockets/useSocketEvent';
 import { emitConversationRead } from '../../sockets/actions';
 import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage } from '../../api/client';
+import * as Clipboard from 'expo-clipboard';
 import { ThemeProvider, useResolvedScheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
 import { chatLightColors, chatDarkColors, chatHeaderBackground } from '../../theme/chatTheme';
 import { dayKey } from '../../utils/formatTime';
+import type { Edge } from 'react-native-safe-area-context';
 import type { ChatsStackParamList } from '../../navigation/types';
 import type { Message } from '../../api/types';
 import type { SendMessageBody } from '../../api/endpoints/messages';
@@ -52,6 +55,7 @@ function buildRenderItems(renderableNewestFirst: Message[]): RenderItem[] {
 }
 
 const TYPING_AUTO_CLEAR_MS = 6000;
+const SCREEN_EDGES: Edge[] = ['top'];
 
 export function ConversationDetailScreen({ route, navigation }: Props) {
   const { conversationId } = route.params;
@@ -67,6 +71,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
   const [attachSheetOpen, setAttachSheetOpen] = useState(false);
   const [templateSheetOpen, setTemplateSheetOpen] = useState(false);
+  const [forwardTarget, setForwardTarget] = useState<Message | null>(null);
+  // Short-lived confirmation for copy/forward — both are silent otherwise.
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const typingClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -180,6 +188,27 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   const canReactTo = (message: Message) => !message.id.startsWith('temp-') && message.status !== 'FAILED';
 
+  const showToast = useCallback((text: string) => {
+    setToast(text);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
+
+  const handleCopy = useCallback(async () => {
+    const target = actionTarget;
+    setActionTarget(null);
+    if (!target?.text) return;
+    await Clipboard.setStringAsync(target.text);
+    showToast('Copied to clipboard');
+  }, [actionTarget, showToast]);
+
   const conversation = conversationQuery.data;
 
   if (messagesQuery.isLoading || conversationQuery.isLoading) {
@@ -191,11 +220,19 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     // this subtree only, and itself following Settings' light/dark/system
     // preference (via chatColors above) same as every other screen does.
     <ThemeProvider colors={chatColors}>
-      <Screen padded={false}>
+      {/* edges={['top']}: the composer applies the bottom inset itself so it
+          can drop it while the keyboard is up — see useKeyboardVisible. */}
+      <Screen padded={false} edges={SCREEN_EDGES}>
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          // 'padding' on Android too, deliberately: this app runs
+          // edge-to-edge (targetSdk 36), where Android ignores
+          // windowSoftInputMode="adjustResize" and delivers the keyboard as
+          // a window inset instead. Leaving behavior undefined here — the
+          // old value — meant no avoidance at all on Android, which is why
+          // the keyboard covered the composer. The view sits below the
+          // navigator's header, so no vertical offset is needed.
+          behavior="padding"
         >
           <View style={styles.flex}>
             <ChatWallpaper />
@@ -218,6 +255,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
                     reactions={view.reactionsByTarget.get(item.message.id)}
                     onLongPress={() => setActionTarget(item.message)}
                     onRetry={() => handleRetry(item.message)}
+                    onReply={() => setReplyingTo(item.message)}
                   />
                 )
               }
@@ -242,7 +280,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               onAttach={() => setAttachSheetOpen(true)}
               onUseTemplate={() => setTemplateSheetOpen(true)}
               replyToMessageId={replyingTo?.id}
-              onVoiceSent={() => setReplyingTo(null)}
+              onSent={() => setReplyingTo(null)}
             />
           </View>
         </KeyboardAvoidingView>
@@ -250,7 +288,14 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         <MessageActionSheet
           visible={Boolean(actionTarget)}
           canReact={Boolean(actionTarget && canReactTo(actionTarget))}
+          canCopy={Boolean(actionTarget?.text)}
+          canForward={Boolean(actionTarget && buildForwardBody(actionTarget))}
           onClose={() => setActionTarget(null)}
+          onCopy={handleCopy}
+          onForward={() => {
+            setForwardTarget(actionTarget);
+            setActionTarget(null);
+          }}
           onReply={() => {
             if (actionTarget) setReplyingTo(actionTarget);
             setActionTarget(null);
@@ -269,6 +314,25 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           onSent={() => setReplyingTo(null)}
           conversationId={conversationId}
         />
+
+        <ForwardSheet
+          visible={Boolean(forwardTarget)}
+          message={forwardTarget}
+          currentConversationId={conversationId}
+          onClose={() => setForwardTarget(null)}
+          onForwarded={(name) => {
+            setForwardTarget(null);
+            showToast(`Forwarded to ${name}`);
+          }}
+        />
+
+        {toast ? (
+          <View style={styles.toastWrap} pointerEvents="none">
+            <View style={[styles.toast, { backgroundColor: chatColors.surfaceElevated, borderColor: chatColors.border }]}>
+              <Text style={{ color: chatColors.textPrimary }}>{toast}</Text>
+            </View>
+          </View>
+        ) : null}
 
         <TemplatePickerSheet
           visible={templateSheetOpen}
@@ -289,5 +353,7 @@ const styles = StyleSheet.create({
   // Real 48dp target for the header action — hitSlop was being clipped by
   // the navigator's own tight headerRight container.
   headerAction: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
+  toastWrap: { position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center' },
+  toast: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth },
   listContent: { paddingVertical: 8 },
 });

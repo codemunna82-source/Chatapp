@@ -1,17 +1,29 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View, type NativeSyntheticEvent, type TextInputSelectionChangeEventData } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type NativeSyntheticEvent,
+  type TextInputContentSizeChangeEventData,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
+  useAudioPlayer,
+  useAudioPlayerStatus,
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
 import { File } from 'expo-file-system';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
 import { emitTypingStart, emitTypingStop } from '../../sockets/actions';
@@ -19,7 +31,8 @@ import { useUploadMedia } from '../../queries/useUploadMedia';
 import { useSendMessage } from '../../queries/useMessages';
 import { getApiErrorMessage } from '../../api/client';
 import { formatDuration } from '../../utils/formatTime';
-import { EmojiPicker } from './EmojiPicker';
+import { useKeyboardVisible } from '../../utils/useKeyboardVisible';
+import { MediaSourceSheet } from './MediaSourceSheet';
 
 interface ComposerProps {
   conversationId: string;
@@ -30,18 +43,22 @@ interface ComposerProps {
   onUseTemplate: () => void;
   sending: boolean;
   replyToMessageId: string | undefined;
-  onVoiceSent: () => void;
+  /** Fired after any send this component performs itself, so the screen can clear the reply target. */
+  onSent: () => void;
+}
+
+/** An image picked but not yet sent — shown as a removable thumbnail above the input. */
+interface PendingImage {
+  uri: string;
+  name: string;
+  mimeType: string;
 }
 
 const TYPING_STOP_DELAY_MS = 2500;
 const RECORDER_POLL_MS = 100;
-// Drag distance (px) that commits a cancel/lock while holding the mic —
-// matches the familiar WhatsApp-style gesture (spec §10).
-const CANCEL_THRESHOLD_X = -90;
-const LOCK_THRESHOLD_Y = -70;
-// The relative emphasis of each waveform bar, center-peaked — turns a single
-// live metering reading into a small "voice memo" silhouette instead of five
-// bars bouncing in lockstep.
+const MAX_IMAGES_PER_SEND = 10;
+const INPUT_MIN_HEIGHT = 22;
+const INPUT_MAX_HEIGHT = 120;
 const BAR_FACTORS = [0.45, 0.75, 1, 0.75, 0.45];
 // expo-audio reports metering in dBFS — roughly -60 (near silence) up to 0
 // (peak). There's no fixed noise floor across devices, so this is a
@@ -59,9 +76,7 @@ function WaveformBar({ level, color }: { level: number; color: string }) {
   const height = useSharedValue(4);
 
   useEffect(() => {
-    // Mutating .value inside useEffect is Reanimated's documented pattern —
-    // eslint-plugin-react-hooks' immutability check accepts it here (unlike
-    // the same mutation inside a plain event handler elsewhere in this file).
+    // Mutating .value inside useEffect is Reanimated's documented pattern.
     height.value = withTiming(4 + level * 22, { duration: RECORDER_POLL_MS });
   }, [level, height]);
 
@@ -88,168 +103,257 @@ export function Composer({
   onUseTemplate,
   sending,
   replyToMessageId,
-  onVoiceSent,
+  onSent,
 }: ComposerProps) {
-  const { colors, spacing, radius, shadow, typography } = useTheme();
+  const { colors, spacing, radius, typography } = useTheme();
+  const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
+  // The screen hands the bottom safe area to the composer (Screen
+  // edges={['top']}) so it can be dropped while the keyboard is up —
+  // otherwise the navigation-bar inset stacks above the keyboard as a dead
+  // gap. See useKeyboardVisible for why edge-to-edge makes this necessary.
+  const bottomPad = keyboardVisible ? 6 : Math.max(6, insets.bottom);
   const [text, setText] = useState('');
-  const [selection, setSelection] = useState({ start: 0, end: 0 });
-  const [emojiPickerVisible, setEmojiPickerVisible] = useState(false);
+  const [inputHeight, setInputHeight] = useState(INPUT_MIN_HEIGHT);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const canSend = Boolean(text.trim()) && !sending;
 
-  const sendScale = useSharedValue(0.8);
-  const sendOpacity = useSharedValue(0);
-  const micScale = useSharedValue(1);
-  const micOpacity = useSharedValue(1);
-  // Live drag offset while holding the mic (unlocked) — drives both the
-  // button's own translate and the cancel/lock hints' visibility.
-  const micTranslateX = useSharedValue(0);
-  const micTranslateY = useSharedValue(0);
-  // Worklet-side lock flag, checked inside the gesture callbacks (which run
-  // on the UI thread and can't safely read React state).
-  const lockedSV = useSharedValue(0);
+  const uploadMedia = useUploadMedia();
+  const sendMessage = useSendMessage(conversationId);
 
-  const sendAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: sendScale.value }],
-    opacity: sendOpacity.value,
-  }));
-  const micAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: micOpacity.value,
-    transform: [{ scale: micScale.value }, { translateX: micTranslateX.value }, { translateY: micTranslateY.value }],
-  }));
-  const lockHintStyle = useAnimatedStyle(() => ({
-    opacity: Math.min(1, Math.abs(micTranslateY.value) / Math.abs(LOCK_THRESHOLD_Y)),
-  }));
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
 
-  // Mutating .value is Reanimated's documented, intentional API for driving
-  // a UI-thread animation from an event handler — not a real React state
-  // mutation. eslint-plugin-react-hooks' immutability check doesn't yet
-  // recognize this pattern outside useEffect, hence the disables below.
-  const setSendButtonVisible = (visible: boolean) => {
-    /* eslint-disable react-hooks/immutability */
-    sendScale.value = withTiming(visible ? 1 : 0.8, { duration: 140 });
-    sendOpacity.value = withTiming(visible ? 1 : 0, { duration: 140 });
-    micScale.value = withTiming(visible ? 0.8 : 1, { duration: 140 });
-    micOpacity.value = withTiming(visible ? 0 : 1, { duration: 140 });
-    /* eslint-enable react-hooks/immutability */
-  };
+  const canSend = (Boolean(text.trim()) || pendingImages.length > 0) && !sending && !mediaBusy;
 
   const handleChangeText = (value: string) => {
     setText(value);
-    setSendButtonVisible(Boolean(value.trim()));
     emitTypingStart(conversationId);
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => emitTypingStop(conversationId), TYPING_STOP_DELAY_MS);
   };
 
-  const handleSend = () => {
+  const handleContentSizeChange = (e: NativeSyntheticEvent<TextInputContentSizeChangeEventData>) => {
+    // Grow the input with its content up to a cap, then let it scroll —
+    // keeps the icon row on one line no matter how long the message is.
+    const next = Math.min(INPUT_MAX_HEIGHT, Math.max(INPUT_MIN_HEIGHT, e.nativeEvent.contentSize.height));
+    setInputHeight(next);
+  };
+
+  useEffect(
+    () => () => {
+      if (typingTimeout.current) clearTimeout(typingTimeout.current);
+    },
+    [],
+  );
+
+  // ---------------------------------------------------------------- images
+  const addAssets = (assets: ImagePicker.ImagePickerAsset[]) => {
+    const picked: PendingImage[] = assets.map((asset, i) => ({
+      uri: asset.uri,
+      name: asset.fileName ?? `image-${Date.now()}-${i}.jpg`,
+      mimeType: asset.mimeType ?? 'image/jpeg',
+    }));
+    // Selection order is preserved, and the cap is enforced across repeated
+    // picks rather than per pick.
+    setPendingImages((prev) => [...prev, ...picked].slice(0, MAX_IMAGES_PER_SEND));
+  };
+
+  const pickFromGallery = async () => {
+    setMediaError(null);
+    setMediaSheetOpen(false);
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsMultipleSelection: true,
+      selectionLimit: MAX_IMAGES_PER_SEND,
+      quality: 0.8,
+    });
+    if (result.canceled) return;
+    addAssets(result.assets);
+  };
+
+  const captureFromCamera = async () => {
+    setMediaError(null);
+    setMediaSheetOpen(false);
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      setMediaError('Camera permission was denied — enable it in Android Settings to take photos.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+    if (result.canceled) return;
+    addAssets(result.assets);
+  };
+
+  const removePendingImage = (index: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  /** Uploads and sends each pending image in order. Returns false if it bailed. */
+  const sendPendingImages = async (caption: string): Promise<boolean> => {
+    if (!whatsappPhoneNumberId) {
+      setMediaError('This conversation has no connected WhatsApp number yet.');
+      return false;
+    }
+    setMediaBusy(true);
+    setMediaError(null);
+    try {
+      // Sequential on purpose: it preserves the order the user picked, and
+      // the caption belongs on the first image only (same as WhatsApp).
+      for (let i = 0; i < pendingImages.length; i++) {
+        const image = pendingImages[i];
+        if (!image) continue;
+        const uploaded = await uploadMedia.mutateAsync({ whatsappPhoneNumberId, file: image });
+        sendMessage.mutate({
+          type: 'image',
+          mediaId: uploaded.id,
+          caption: i === 0 && caption ? caption : undefined,
+          replyToMessageId,
+        });
+      }
+      setPendingImages([]);
+      onSent();
+      return true;
+    } catch (err) {
+      setMediaError(getApiErrorMessage(err, 'Could not send those photos.'));
+      return false;
+    } finally {
+      setMediaBusy(false);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!canSend || sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      await performSend();
+    } finally {
+      sendingRef.current = false;
+    }
+  };
+
+  const performSend = async () => {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
-    onSendText(trimmed);
-    setText('');
-    setSendButtonVisible(false);
+
+    if (pendingImages.length > 0) {
+      // The typed text rides along as the first image's caption rather than
+      // being sent as a separate message.
+      const ok = await sendPendingImages(trimmed);
+      if (ok) {
+        setText('');
+        setInputHeight(INPUT_MIN_HEIGHT);
+      }
+    } else {
+      onSendText(trimmed);
+      setText('');
+      setInputHeight(INPUT_MIN_HEIGHT);
+    }
+
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     emitTypingStop(conversationId);
   };
 
-  const handleSelectionChange = (e: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
-    setSelection(e.nativeEvent.selection);
-  };
-
-  const handleSelectEmoji = (char: string) => {
-    const next = `${text.slice(0, selection.start)}${char}${text.slice(selection.end)}`;
-    const cursor = selection.start + char.length;
-    setSelection({ start: cursor, end: cursor });
-    handleChangeText(next);
-  };
-
-  // --- Media/camera quick action + voice messages: real mic capture via
-  // expo-audio, uploaded and sent through the same media pipeline
-  // AttachmentSheet uses (POST /media/upload → POST .../messages). --------
-  const uploadMedia = useUploadMedia();
-  const sendMessage = useSendMessage(conversationId);
-
-  const [cameraBusy, setCameraBusy] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-
-  const pickFromCameraQuick = async () => {
-    setCameraError(null);
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      setCameraError('Camera permission was denied.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
-    const asset = result.canceled ? undefined : result.assets[0];
-    if (!asset) return;
-    if (!whatsappPhoneNumberId) {
-      setCameraError('This conversation has no connected WhatsApp number yet.');
-      return;
-    }
-    setCameraBusy(true);
-    try {
-      const uploaded = await uploadMedia.mutateAsync({
-        whatsappPhoneNumberId,
-        file: { uri: asset.uri, name: asset.fileName ?? 'photo.jpg', mimeType: asset.mimeType ?? 'image/jpeg' },
-      });
-      sendMessage.mutate({ type: 'image', mediaId: uploaded.id, replyToMessageId });
-      onVoiceSent();
-    } catch (err) {
-      setCameraError(getApiErrorMessage(err, 'Could not send that photo.'));
-    } finally {
-      setCameraBusy(false);
-    }
-  };
-
+  // ----------------------------------------------------------- voice notes
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder, RECORDER_POLL_MS);
-  const recordingRef = useRef(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [isLocked, setIsLocked] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
+  const [recordedMs, setRecordedMs] = useState(0);
 
+  const previewPlayer = useAudioPlayer(previewUri ?? undefined);
+  const previewStatus = useAudioPlayerStatus(previewPlayer);
+
+  // Mirrors of live state that the unmount cleanup below needs to read
+  // without re-subscribing (an effect with these in its dep list would tear
+  // down and re-arm the cleanup on every recorder poll).
+  const isRecordingRef = useRef(false);
+  const previewUriRef = useRef<string | null>(null);
+  // Synchronous re-entry guards: `mediaBusy`/`isRecording` only update on the
+  // next render, so a fast double tap can slip a second call through before
+  // either flips. Refs close that window.
+  const startingRef = useRef(false);
+  const sendingRef = useRef(false);
   useEffect(() => {
-    recordingRef.current = recorderState.isRecording;
+    isRecordingRef.current = recorderState.isRecording;
   }, [recorderState.isRecording]);
+  useEffect(() => {
+    previewUriRef.current = previewUri;
+  }, [previewUri]);
 
-  useEffect(
-    () => () => {
-      // Safety net if the screen unmounts mid-recording (e.g. back
-      // navigation) — don't leave the mic session dangling.
-      if (recordingRef.current) recorder.stop().catch(() => undefined);
-    },
-    [recorder],
-  );
-
-  const cleanupFile = async (uri: string) => {
+  const deleteFile = useCallback(async (uri: string) => {
     try {
       await new File(uri).delete();
     } catch {
       // Best-effort cache cleanup — a leftover temp file isn't worth surfacing.
     }
-  };
+  }, []);
+
+  useEffect(
+    () => () => {
+      // Leaving the screen mid-recording (or with an unsent take) must
+      // release the mic and not strand a temp file in the cache.
+      if (isRecordingRef.current) {
+        recorder.stop().catch(() => undefined);
+        setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
+      }
+      const stranded = previewUriRef.current;
+      if (stranded) {
+        try {
+          new File(stranded).delete();
+        } catch {
+          // Best-effort — the OS clears the cache dir anyway.
+        }
+      }
+    },
+    [recorder],
+  );
 
   const startRecording = async () => {
+    if (startingRef.current || recorderState.isRecording) return;
+    startingRef.current = true;
     setVoiceError(null);
-    setIsLocked(false);
     setIsPaused(false);
-    lockedSV.value = 0;
-    const permission = await requestRecordingPermissionsAsync();
-    if (!permission.granted) {
-      setVoiceError('Microphone permission was denied — enable it in Android Settings to send voice messages.');
-      return;
-    }
     try {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        setVoiceError('Microphone permission was denied — enable it in Android Settings to send voice messages.');
+        return;
+      }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
       recorder.record();
     } catch {
-      setVoiceError('Could not start recording.');
+      setVoiceError('Could not start recording on this device.');
+      // Never leave the audio session in record mode after a failed start.
+      await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
+    } finally {
+      startingRef.current = false;
     }
   };
 
-  const handleLock = () => setIsLocked(true);
+  /** Stops the recorder and moves to the preview state — the mic is released here. */
+  const stopRecording = async () => {
+    const duration = recorderState.durationMillis;
+    try {
+      await recorder.stop();
+    } catch {
+      setVoiceError('Recording stopped unexpectedly.');
+    }
+    setIsPaused(false);
+    // Back out of record mode so playback routes to the speaker rather than
+    // the earpiece, and the mic indicator clears.
+    await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
+    const uri = recorder.uri;
+    if (!uri) {
+      setVoiceError('That recording came back empty — try again.');
+      return;
+    }
+    setRecordedMs(duration);
+    setPreviewUri(uri);
+  };
 
   const togglePauseResume = () => {
     if (isPaused) {
@@ -261,144 +365,86 @@ export function Composer({
     }
   };
 
+  const togglePreviewPlayback = async () => {
+    if (previewStatus.playing) {
+      previewPlayer.pause();
+      return;
+    }
+    if (previewStatus.duration > 0 && previewStatus.currentTime >= previewStatus.duration) {
+      await previewPlayer.seekTo(0);
+    }
+    previewPlayer.play();
+  };
+
+  /** Throws away the take (recording or preview) and releases everything. */
   const discardRecording = async () => {
-    const uri = recorder.uri;
-    await recorder.stop();
-    setIsLocked(false);
+    if (recorderState.isRecording) {
+      await recorder.stop().catch(() => undefined);
+      await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
+    }
     setIsPaused(false);
-    if (uri) await cleanupFile(uri);
+    setVoiceError(null);
+    const uri = previewUri ?? recorder.uri;
+    setPreviewUri(null);
+    setRecordedMs(0);
+    if (uri) await deleteFile(uri);
   };
 
   const sendRecording = async () => {
+    if (!previewUri || sendingRef.current) return;
+    sendingRef.current = true;
     if (!whatsappPhoneNumberId) {
       setVoiceError('This conversation has no connected WhatsApp number yet.');
-      await discardRecording();
       return;
     }
-    // Set busy before stop() resolves so the recording UI stays mounted
-    // continuously — otherwise there's a frame where isRecording has
-    // flipped false but voiceBusy hasn't flipped true yet, and the
-    // composer would flash back to its idle state mid-send.
     setVoiceBusy(true);
-    await recorder.stop();
-    setIsLocked(false);
-    setIsPaused(false);
-    const uri = recorder.uri;
-    if (!uri) {
-      setVoiceBusy(false);
-      return;
-    }
+    const uri = previewUri;
     try {
       const uploaded = await uploadMedia.mutateAsync({
         whatsappPhoneNumberId,
         file: { uri, name: `voice-${Date.now()}.m4a`, mimeType: 'audio/mp4' },
       });
       sendMessage.mutate({ type: 'audio', mediaId: uploaded.id, replyToMessageId });
-      onVoiceSent();
+      setPreviewUri(null);
+      setRecordedMs(0);
+      onSent();
+      await deleteFile(uri);
     } catch (err) {
+      // Keep the take on failure so the recording isn't lost — the user can
+      // retry the send or discard it deliberately.
       setVoiceError(getApiErrorMessage(err, 'Could not send that voice message.'));
     } finally {
       setVoiceBusy(false);
-      await cleanupFile(uri);
+      sendingRef.current = false;
     }
   };
 
-  // The gesture's worklet callbacks (below) always need the LATEST version
-  // of these handlers, but the Gesture object itself must stay referentially
-  // stable across renders — recreating it on every one of the ~100ms
-  // recorderState-driven re-renders during an active hold would tear down
-  // and reconfigure the native gesture recognizer mid-touch, which is what
-  // broke start/stop/animation in the first build of this feature. A plain
-  // ref mirrors the current handlers (updated every render, a normal JS
-  // assignment — no cross-thread concerns since it's only ever read from
-  // plain JS-thread dispatcher functions below, never from worklet code
-  // directly), and the dispatchers themselves are the stable, memoized
-  // things the gesture's runOnJS calls actually reference.
-  const handlersRef = useRef({ startRecording, handleLock, discardRecording, sendRecording });
-  useEffect(() => {
-    handlersRef.current = { startRecording, handleLock, discardRecording, sendRecording };
-  });
-
-  const dispatchStart = useCallback(() => handlersRef.current.startRecording(), []);
-  const dispatchLock = useCallback(() => handlersRef.current.handleLock(), []);
-  const dispatchCancel = useCallback(() => handlersRef.current.discardRecording(), []);
-  const dispatchSend = useCallback(() => handlersRef.current.sendRecording(), []);
-
-  // Press-and-hold to record, swipe left to cancel, swipe up to lock —
-  // spec §10. onBegin fires the instant the finger touches down (before the
-  // gesture is even "recognized"), which is what makes the recording feel
-  // instantaneous rather than starting after a deliberate drag. Memoized
-  // with stable deps only (see handlersRef above) so this is the same
-  // Gesture instance for the whole component lifetime — critical for the
-  // in-progress touch to survive the frequent re-renders a live recording
-  // causes (see the comment above handlersRef for why recreating this per
-  // render broke recording in the first version of this feature).
-  //
-  // eslint-plugin-react-hooks' "refs" check flags every runOnJS(dispatchX)
-  // call below as "may read a ref during render", because dispatchStart /
-  // dispatchLock / dispatchCancel / dispatchSend transitively read
-  // handlersRef.current — but they only do that when actually invoked as
-  // gesture callbacks (touch-driven), never during this render. The whole
-  // point of routing through these stable dispatchers is to keep this
-  // useMemo's dependency array free of anything that changes every render;
-  // the static check can't trace that the ref read is deferred behind them.
-  /* eslint-disable react-hooks/refs */
-  const micGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .minDistance(0)
-        .onBegin(() => {
-          runOnJS(dispatchStart)();
-        })
-        .onUpdate((e) => {
-          // Mutating shared values inside a gesture worklet is the
-          // documented Reanimated/Gesture Handler pattern for driving
-          // UI-thread feedback from a drag — not a real React state
-          // mutation. eslint-plugin-react-hooks' immutability check
-          // doesn't yet recognize this pattern inside worklets.
-          /* eslint-disable react-hooks/immutability */
-          micTranslateX.value = Math.min(0, e.translationX);
-          micTranslateY.value = Math.min(0, e.translationY);
-          if (lockedSV.value === 0 && e.translationY < LOCK_THRESHOLD_Y) {
-            lockedSV.value = 1;
-            runOnJS(dispatchLock)();
-          }
-          /* eslint-enable react-hooks/immutability */
-        })
-        .onEnd((e) => {
-          if (lockedSV.value === 0) {
-            if (e.translationX < CANCEL_THRESHOLD_X) {
-              runOnJS(dispatchCancel)();
-            } else {
-              runOnJS(dispatchSend)();
-            }
-          }
-          /* eslint-disable react-hooks/immutability */
-          micTranslateX.value = withTiming(0);
-          micTranslateY.value = withTiming(0);
-          /* eslint-enable react-hooks/immutability */
-        }),
-    [dispatchStart, dispatchLock, dispatchCancel, dispatchSend, micTranslateX, micTranslateY, lockedSV],
-  );
-  /* eslint-enable react-hooks/refs */
+  // ------------------------------------------------------------ rendering
+  const shellStyle = [
+    styles.shell,
+    {
+      backgroundColor: colors.surfaceElevated,
+      borderTopColor: colors.divider,
+      paddingHorizontal: spacing.sm,
+      paddingTop: spacing.sm,
+      paddingBottom: bottomPad,
+    },
+  ];
 
   // Spec §18: outside the 24h window, only an approved template may be
   // sent — enforced server-side regardless, but the composer shouldn't
-  // invite a free-form send (text or voice) that's guaranteed to be rejected.
+  // invite a free-form send that's guaranteed to be rejected.
   if (!withinWindow) {
     return (
-      <View
-        style={[
-          styles.blockedBar,
-          { backgroundColor: colors.surfaceElevated, borderTopColor: colors.divider, padding: spacing.md },
-        ]}
-      >
+      <View style={[shellStyle, { paddingBottom: bottomPad + spacing.sm }]}>
         <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: spacing.sm }]}>
           It&apos;s been over 24 hours since this contact last messaged you — send an approved template to continue.
         </Text>
         <Pressable
           onPress={onUseTemplate}
           style={[styles.templateButton, { backgroundColor: colors.primary, borderRadius: radius.md, padding: spacing.sm }]}
+          accessibilityRole="button"
+          accessibilityLabel="Use a template"
         >
           <Text style={[typography.bodyMedium, { color: colors.textOnPrimary, textAlign: 'center' }]}>Use a template</Text>
         </Pressable>
@@ -406,220 +452,282 @@ export function Composer({
     );
   }
 
-  const rowBase = [styles.row, shadow.sm, { backgroundColor: colors.surfaceElevated, borderTopColor: colors.divider, padding: spacing.sm }];
+  const errorText = mediaError ?? voiceError;
 
-  // Sending the recorded clip (upload in flight) — the gesture has already
-  // fully ended by this point (this only happens after onEnd fired), so
-  // it's safe for this to be a separate tree from the gesture-holding one.
-  if (voiceBusy) {
+  // --- recording in progress: an explicit, always-visible Stop button ---
+  if (recorderState.isRecording) {
     return (
-      <View style={rowBase}>
-        <View style={[styles.recordingRow, { marginHorizontal: spacing.sm }]}>
-          <View style={[styles.recordingDot, { backgroundColor: colors.danger, opacity: 0.4 }]} />
-          <Text style={[typography.bodyMedium, { color: colors.textPrimary }]}>Sending…</Text>
-        </View>
-      </View>
-    );
-  }
-
-  // Locked recording — hands-free: pause/resume, delete, send. Also safe as
-  // a separate tree: once locked, this composer no longer cares about
-  // further updates from that gesture instance (onEnd's cancel/send branch
-  // is gated on !locked), so losing it here doesn't drop any functionality.
-  if (isLocked && recorderState.isRecording) {
-    return (
-      <View style={rowBase}>
-        <Pressable onPress={discardRecording} style={styles.attachButton} accessibilityRole="button" accessibilityLabel="Discard recording">
-          {({ pressed }) => (
-            <Ionicons name="trash-outline" size={22} color={colors.danger} style={{ opacity: pressed ? 0.5 : 1 }} />
-          )}
-        </Pressable>
-        <View style={[styles.recordingRow, { marginHorizontal: spacing.sm }]}>
-          <View style={[styles.recordingDot, { backgroundColor: colors.danger }]} />
-          <Text style={[typography.bodyMedium, { color: colors.textPrimary, marginRight: spacing.sm }]}>
-            {formatDuration(recorderState.durationMillis / 1000)}
-          </Text>
-          <RecordingWaveform metering={recorderState.metering} color={colors.primary} />
-        </View>
-        <Pressable
-          onPress={togglePauseResume}
-          style={styles.attachButton}
-          accessibilityRole="button"
-          accessibilityLabel={isPaused ? 'Resume recording' : 'Pause recording'}
-        >
-          {({ pressed }) => (
-            <Ionicons name={isPaused ? 'mic' : 'pause'} size={20} color={colors.textSecondary} style={{ opacity: pressed ? 0.5 : 1 }} />
-          )}
-        </Pressable>
-        <Pressable onPress={sendRecording} style={styles.actionTouch} accessibilityRole="button" accessibilityLabel="Send voice message">
-          {({ pressed }) => (
-            <View
-              style={[
-                styles.sendButton,
-                { backgroundColor: colors.primary, borderRadius: radius.full, opacity: pressed ? 0.6 : 1 },
-              ]}
-            >
-              <Ionicons name="checkmark" size={19} color={colors.textOnPrimary} />
-            </View>
-          )}
-        </Pressable>
-      </View>
-    );
-  }
-
-  // Idle and "holding the mic, not yet locked" share ONE tree below — the
-  // GestureDetector must stay mounted continuously across that specific
-  // transition, since it's the exact same physical touch: starting the
-  // recording (via onBegin) causes recorderState.isRecording to flip true
-  // a moment later, and if that swapped in a *different* JSX subtree here,
-  // the gesture's underlying native view would be torn down mid-touch —
-  // orphaning it, so onUpdate/onEnd would never fire again (no drag
-  // animation, no cancel, no lock, no send-on-release). Only the content
-  // *around* the gesture button differs between the two states.
-  const isHolding = recorderState.isRecording && !isLocked;
-
-  return (
-    <View style={rowBase}>
-      {isHolding ? (
-        <View style={[styles.recordingRow, { marginHorizontal: spacing.sm }]}>
-          <View style={[styles.recordingDot, { backgroundColor: colors.danger }]} />
-          <Text style={[typography.bodyMedium, { color: colors.textPrimary, marginRight: spacing.sm }]}>
-            {formatDuration(recorderState.durationMillis / 1000)}
-          </Text>
-          <RecordingWaveform metering={recorderState.metering} color={colors.primary} />
-          <Ionicons name="chevron-back" size={14} color={colors.textTertiary} />
-          <Text style={[typography.caption, { color: colors.textTertiary }]}> Slide to cancel</Text>
-        </View>
-      ) : (
-        <>
+      <View style={shellStyle}>
+        {errorText ? <Text style={[typography.caption, { color: colors.danger, marginBottom: 4 }]}>{errorText}</Text> : null}
+        <View style={styles.row}>
           <Pressable
-            onPress={() => setEmojiPickerVisible(true)}
-            style={styles.emojiButton}
+            onPress={discardRecording}
+            style={styles.iconButton}
             accessibilityRole="button"
-            accessibilityLabel="Choose an emoji"
+            accessibilityLabel="Discard recording"
           >
-            {({ pressed }) => <Text style={[styles.emojiGlyph, { opacity: pressed ? 0.5 : 1 }]}>😊</Text>}
+            {({ pressed }) => (
+              <Ionicons name="trash-outline" size={22} color={colors.danger} style={{ opacity: pressed ? 0.5 : 1 }} />
+            )}
           </Pressable>
 
-          <View style={[styles.pill, { backgroundColor: colors.surfaceAlt, borderRadius: radius.xl, paddingLeft: spacing.md }]}>
-            <TextInput
-              value={text}
-              onChangeText={handleChangeText}
-              onSelectionChange={handleSelectionChange}
-              placeholder="Message"
-              placeholderTextColor={colors.textTertiary}
-              multiline
-              style={[styles.input, typography.body, { color: colors.textPrimary }]}
-            />
-            <Pressable onPress={onAttach} style={styles.pillIcon} accessibilityRole="button" accessibilityLabel="Add attachment">
-              {({ pressed }) => (
-                <Ionicons name="attach-outline" size={21} color={colors.textSecondary} style={{ opacity: pressed ? 0.5 : 1 }} />
-              )}
-            </Pressable>
+          <View style={styles.recordingRow}>
+            <View style={[styles.recordingDot, { backgroundColor: isPaused ? colors.textTertiary : colors.danger }]} />
+            <Text style={[typography.bodyMedium, { color: colors.textPrimary, marginRight: spacing.sm }]}>
+              {formatDuration(recorderState.durationMillis / 1000)}
+            </Text>
+            <RecordingWaveform metering={isPaused ? 0 : recorderState.metering} color={colors.primary} />
+          </View>
+
+          <Pressable
+            onPress={togglePauseResume}
+            style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel={isPaused ? 'Resume recording' : 'Pause recording'}
+          >
+            {({ pressed }) => (
+              <Ionicons
+                name={isPaused ? 'play' : 'pause'}
+                size={20}
+                color={colors.textSecondary}
+                style={{ opacity: pressed ? 0.5 : 1 }}
+              />
+            )}
+          </Pressable>
+
+          <Pressable
+            onPress={stopRecording}
+            style={styles.actionTouch}
+            accessibilityRole="button"
+            accessibilityLabel="Stop recording"
+          >
+            {({ pressed }) => (
+              <View style={[styles.actionCircle, { backgroundColor: colors.danger, opacity: pressed ? 0.6 : 1 }]}>
+                <Ionicons name="stop" size={18} color={colors.textOnPrimary} />
+              </View>
+            )}
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // --- recorded, not yet sent: play / discard / send ---
+  if (previewUri) {
+    return (
+      <View style={shellStyle}>
+        {errorText ? <Text style={[typography.caption, { color: colors.danger, marginBottom: 4 }]}>{errorText}</Text> : null}
+        <View style={styles.row}>
+          <Pressable
+            onPress={discardRecording}
+            disabled={voiceBusy}
+            style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Delete recording"
+          >
+            {({ pressed }) => (
+              <Ionicons
+                name="trash-outline"
+                size={22}
+                color={colors.danger}
+                style={{ opacity: voiceBusy ? 0.4 : pressed ? 0.5 : 1 }}
+              />
+            )}
+          </Pressable>
+
+          <View style={[styles.previewPill, { backgroundColor: colors.surfaceAlt, borderRadius: radius.xl }]}>
             <Pressable
-              onPress={pickFromCameraQuick}
-              disabled={cameraBusy}
-              style={styles.pillIcon}
+              onPress={togglePreviewPlayback}
+              style={styles.iconButton}
               accessibilityRole="button"
-              accessibilityState={{ disabled: cameraBusy }}
-              accessibilityLabel="Take a photo"
+              accessibilityLabel={previewStatus.playing ? 'Pause playback' : 'Play recording'}
             >
               {({ pressed }) => (
                 <Ionicons
-                  name="camera-outline"
+                  name={previewStatus.playing ? 'pause' : 'play'}
                   size={20}
                   color={colors.primary}
-                  style={{ opacity: cameraBusy ? 0.4 : pressed ? 0.5 : 1 }}
+                  style={{ opacity: pressed ? 0.5 : 1 }}
                 />
               )}
             </Pressable>
+            <Text style={[typography.bodyMedium, { color: colors.textPrimary }]}>
+              {formatDuration(
+                (previewStatus.isLoaded && previewStatus.duration > 0
+                  ? previewStatus.duration - previewStatus.currentTime
+                  : recordedMs / 1000) || 0,
+              )}
+            </Text>
+            <Text style={[typography.caption, { color: colors.textTertiary, marginLeft: spacing.sm }]}>Voice message</Text>
           </View>
-        </>
-      )}
 
-      <View style={styles.actionSlot}>
-        {isHolding ? (
-          <Animated.View style={[styles.lockHint, lockHintStyle]} pointerEvents="none">
-            <Ionicons name="lock-closed-outline" size={16} color={colors.primary} />
-            <Ionicons name="chevron-up-outline" size={12} color={colors.primary} />
-          </Animated.View>
-        ) : null}
-
-        {/* This layer — and the GestureDetector inside it — must be the
-            SAME element across the idle↔holding transition above; it is
-            unconditionally rendered here (not inside the isHolding ternary)
-            specifically so React never unmounts it mid-touch. */}
-        <Animated.View style={[styles.actionSlotLayer, micAnimatedStyle]} pointerEvents={canSend ? 'none' : 'auto'}>
-          <GestureDetector gesture={micGesture}>
-            {/* Still the same element across idle<->holding (see above); it
-                is now the full 48dp touch square, with the coloured circle
-                drawn as a child so the button looks unchanged. */}
-            <Animated.View style={styles.actionTouch} accessibilityRole="button" accessibilityLabel="Hold to record a voice message">
-              <View style={[styles.sendButton, { backgroundColor: colors.primary, borderRadius: radius.full }]}>
-                <Ionicons name="mic" size={18} color={colors.textOnPrimary} />
+          <Pressable
+            onPress={sendRecording}
+            disabled={voiceBusy}
+            style={styles.actionTouch}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: voiceBusy }}
+            accessibilityLabel="Send voice message"
+          >
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.actionCircle,
+                  { backgroundColor: colors.primary, opacity: voiceBusy ? 0.5 : pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Ionicons name="send" size={17} color={colors.textOnPrimary} style={styles.sendGlyph} />
               </View>
-            </Animated.View>
-          </GestureDetector>
-        </Animated.View>
-        <Animated.View style={[styles.actionSlotLayer, sendAnimatedStyle]} pointerEvents={canSend ? 'auto' : 'none'}>
+            )}
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // --- idle: [attach] [input] [camera] [mic | send] ---
+  return (
+    <View style={shellStyle}>
+      {errorText ? <Text style={[typography.caption, { color: colors.danger, marginBottom: 4 }]}>{errorText}</Text> : null}
+
+      {pendingImages.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.previewStrip}
+          contentContainerStyle={styles.previewStripContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {pendingImages.map((image, index) => (
+            <View key={`${image.uri}-${index}`} style={[styles.thumbWrap, { borderRadius: radius.md, borderColor: colors.border }]}>
+              <Image source={{ uri: image.uri }} style={[styles.thumb, { borderRadius: radius.md }]} />
+              <Pressable
+                onPress={() => removePendingImage(index)}
+                disabled={mediaBusy}
+                style={styles.thumbRemove}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove image ${index + 1}`}
+              >
+                <View style={[styles.thumbRemoveDot, { backgroundColor: colors.overlay }]}>
+                  <Ionicons name="close" size={13} color="#FFFFFF" />
+                </View>
+              </Pressable>
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
+
+      <View style={styles.row}>
+        <Pressable onPress={onAttach} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Add attachment">
+          {({ pressed }) => (
+            <Ionicons name="add-circle-outline" size={26} color={colors.textSecondary} style={{ opacity: pressed ? 0.5 : 1 }} />
+          )}
+        </Pressable>
+
+        <View style={[styles.pill, { backgroundColor: colors.surfaceAlt, borderRadius: radius.xl, borderColor: colors.border }]}>
+          <TextInput
+            value={text}
+            onChangeText={handleChangeText}
+            onContentSizeChange={handleContentSizeChange}
+            placeholder="Type a message..."
+            placeholderTextColor={colors.textTertiary}
+            multiline
+            style={[styles.input, typography.body, { color: colors.textPrimary, height: inputHeight }]}
+          />
+        </View>
+
+        <Pressable
+          onPress={() => setMediaSheetOpen(true)}
+          disabled={mediaBusy}
+          style={styles.iconButton}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: mediaBusy }}
+          accessibilityLabel="Take a photo or choose from gallery"
+        >
+          {({ pressed }) => (
+            <Ionicons
+              name="camera-outline"
+              size={24}
+              color={colors.textSecondary}
+              style={{ opacity: mediaBusy ? 0.4 : pressed ? 0.5 : 1 }}
+            />
+          )}
+        </Pressable>
+
+        {canSend ? (
           <Pressable
             onPress={handleSend}
-            disabled={!canSend}
             style={styles.actionTouch}
             accessibilityRole="button"
             accessibilityLabel="Send message"
           >
             {({ pressed }) => (
-              <View
-                style={[
-                  styles.sendButton,
-                  { backgroundColor: colors.primary, borderRadius: radius.full, opacity: pressed ? 0.6 : 1 },
-                ]}
-              >
-                <Ionicons name="arrow-up" size={19} color={colors.textOnPrimary} />
+              <View style={[styles.actionCircle, { backgroundColor: colors.primary, opacity: pressed ? 0.6 : 1 }]}>
+                <Ionicons name="send" size={17} color={colors.textOnPrimary} style={styles.sendGlyph} />
               </View>
             )}
           </Pressable>
-        </Animated.View>
+        ) : (
+          <Pressable
+            onPress={startRecording}
+            disabled={mediaBusy}
+            style={styles.actionTouch}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: mediaBusy }}
+            accessibilityLabel="Record a voice message"
+          >
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.actionCircle,
+                  { backgroundColor: colors.primary, opacity: mediaBusy ? 0.5 : pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Ionicons name="mic" size={19} color={colors.textOnPrimary} />
+              </View>
+            )}
+          </Pressable>
+        )}
       </View>
 
-      {!isHolding && (cameraError || voiceError) ? (
-        <Text style={[typography.caption, { color: colors.danger, position: 'absolute', top: -18, left: spacing.md }]} numberOfLines={1}>
-          {cameraError || voiceError}
-        </Text>
-      ) : null}
-      {isHolding && voiceError ? (
-        <Text style={[typography.caption, { color: colors.danger, position: 'absolute', top: -18, left: spacing.md }]} numberOfLines={1}>
-          {voiceError}
-        </Text>
-      ) : null}
-
-      <EmojiPicker visible={emojiPickerVisible} onClose={() => setEmojiPickerVisible(false)} onSelect={handleSelectEmoji} />
+      <MediaSourceSheet
+        visible={mediaSheetOpen}
+        onClose={() => setMediaSheetOpen(false)}
+        onPickCamera={captureFromCamera}
+        onPickGallery={pickFromGallery}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'flex-end', borderTopWidth: StyleSheet.hairlineWidth },
-  // Every control below is sized to a real touch target (44-48dp) rather
-  // than to its icon — see touchTarget in theme/spacing.ts for why hitSlop
-  // alone could not do this job inside a row this tightly packed.
-  emojiButton: { width: touchTarget.compact, height: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
-  emojiGlyph: { fontSize: 22 },
-  attachButton: { width: touchTarget.compact, height: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
-  pill: { flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact, marginHorizontal: 2 },
-  input: { flex: 1, maxHeight: 120, paddingVertical: 9, paddingRight: 4 },
-  pillIcon: { width: touchTarget.compact, height: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
-  // The action slot is the full 48dp touch square; the coloured circle
-  // drawn inside it stays 38dp so the button looks the same as before.
-  actionSlot: { width: touchTarget.min, height: touchTarget.min },
-  actionSlotLayer: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  shell: { borderTopWidth: StyleSheet.hairlineWidth },
+  row: { flexDirection: 'row', alignItems: 'flex-end' },
+  // Every control is a real 48dp touch square regardless of its icon size —
+  // see touchTarget in theme/spacing.ts.
+  iconButton: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
+  pill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: touchTarget.min,
+    paddingHorizontal: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  input: { flex: 1, paddingTop: 0, paddingBottom: 0, textAlignVertical: 'center' },
   actionTouch: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
-  sendButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
-  lockHint: { position: 'absolute', top: -46, left: 0, right: 0, alignItems: 'center' },
-  blockedBar: { borderTopWidth: StyleSheet.hairlineWidth },
+  actionCircle: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  // Ionicons' send glyph is optically left-heavy inside a circle.
+  sendGlyph: { marginLeft: 2 },
+  previewStrip: { maxHeight: 84 },
+  previewStripContent: { paddingBottom: 8, paddingLeft: 4 },
+  thumbWrap: { marginRight: 8, borderWidth: StyleSheet.hairlineWidth },
+  thumb: { width: 64, height: 64 },
+  thumbRemove: { position: 'absolute', top: -6, right: -6, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+  thumbRemoveDot: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  previewPill: { flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.min, paddingRight: 14, marginHorizontal: 2 },
   templateButton: { alignItems: 'center' },
-  recordingRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  recordingRow: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4 },
   recordingDot: { width: 9, height: 9, borderRadius: 5, marginRight: 8 },
   waveform: { flexDirection: 'row', alignItems: 'center' },
   waveformBar: { width: 3, borderRadius: 2, marginHorizontal: 2 },

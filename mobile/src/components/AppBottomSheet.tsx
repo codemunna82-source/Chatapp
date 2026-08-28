@@ -25,8 +25,8 @@ interface AppBottomSheetProps {
 /**
  * A single themed BottomSheetModal shell — real rounded-top-corner sheet,
  * drag handle, swipe-down-to-dismiss, and tap-outside-to-dismiss backdrop
- * (spec §7's "no ugly default Alert" ask) — reused by AttachmentSheet and
- * EmojiPicker instead of each hand-rolling Modal + PanResponder gesture code.
+ * (spec §7's "no ugly default Alert" ask) — reused by AttachmentSheet, ForwardSheet and
+ * MediaSourceSheet instead of each hand-rolling Modal + PanResponder gesture code.
  */
 export const AppBottomSheet = forwardRef<BottomSheetModal, AppBottomSheetProps>(function AppBottomSheet(
   { children, snapPoints, onDismiss, onChange },

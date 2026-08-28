@@ -1,5 +1,8 @@
-import React from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatMessageTime } from '../../utils/formatTime';
 import { MessageStatusIcon } from './MessageStatusIcon';
@@ -15,7 +18,14 @@ interface MessageBubbleProps {
   reactions?: ReactionSummary;
   onLongPress: () => void;
   onRetry: () => void;
+  /** Swipe-to-reply. Omit to disable the gesture for this row. */
+  onReply?: () => void;
 }
+
+// How far the bubble must travel before the swipe counts as a reply, and how
+// far it is allowed to travel at all.
+const REPLY_TRIGGER_X = 56;
+const REPLY_MAX_X = 76;
 
 function MessageContent({ message, textColor }: { message: Message; textColor: string }) {
   const { typography } = useTheme();
@@ -37,7 +47,7 @@ function MessageContent({ message, textColor }: { message: Message; textColor: s
   return <Text style={[typography.body, { color: textColor }]}>{message.text || `[${message.type}]`}</Text>;
 }
 
-export function MessageBubble({ message, replyTarget, reactions, onLongPress, onRetry }: MessageBubbleProps) {
+export function MessageBubble({ message, replyTarget, reactions, onLongPress, onRetry, onReply }: MessageBubbleProps) {
   const { colors, spacing, radius, typography } = useTheme();
   const isOut = message.direction === 'OUT';
   const bubbleColor = isOut ? colors.bubbleSent : colors.bubbleReceived;
@@ -57,8 +67,58 @@ export function MessageBubble({ message, replyTarget, reactions, onLongPress, on
     borderBottomRightRadius: isOut ? radius.sm : radius.lg,
   };
 
+  // --- swipe-to-reply -----------------------------------------------------
+  const translateX = useSharedValue(0);
+  const triggered = useSharedValue(0);
+
+  const fireReply = useCallback(() => {
+    onReply?.();
+  }, [onReply]);
+
+  const swipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        // Only claim the touch once it is clearly horizontal: activeOffsetX
+        // lets a vertical drag through to the message list untouched, and
+        // failOffsetY hard-fails this gesture the moment the finger commits
+        // to scrolling. Without both, swipe-to-reply fights the list.
+        .activeOffsetX([-14, 14])
+        .failOffsetY([-12, 12])
+        .enabled(Boolean(onReply))
+        .onUpdate((e) => {
+          /* eslint-disable react-hooks/immutability -- shared-value writes in a worklet are Reanimated's documented pattern */
+          // Both directions swipe toward the centre of the screen, and the
+          // travel is clamped so a bubble can never be dragged off-screen.
+          const raw = isOut ? Math.min(0, e.translationX) : Math.max(0, e.translationX);
+          translateX.value = Math.abs(raw) > REPLY_MAX_X ? Math.sign(raw) * REPLY_MAX_X : raw;
+          triggered.value = Math.abs(translateX.value) >= REPLY_TRIGGER_X ? 1 : 0;
+          /* eslint-enable react-hooks/immutability */
+        })
+        .onEnd(() => {
+          if (triggered.value === 1) {
+            runOnJS(fireReply)();
+          }
+          /* eslint-disable react-hooks/immutability */
+          translateX.value = withTiming(0, { duration: 160 });
+          triggered.value = 0;
+          /* eslint-enable react-hooks/immutability */
+        }),
+    [fireReply, onReply, isOut, translateX, triggered],
+  );
+
+  const bubbleStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
+  const hintStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(1, Math.abs(translateX.value) / REPLY_TRIGGER_X),
+  }));
+
   return (
-    <View style={[styles.row, { justifyContent: isOut ? 'flex-end' : 'flex-start', paddingHorizontal: spacing.md }]}>
+    <GestureDetector gesture={swipeGesture}>
+      <Animated.View style={[styles.row, { justifyContent: isOut ? 'flex-end' : 'flex-start', paddingHorizontal: spacing.md }]}>
+        {/* The reply arrow sits behind the bubble and fades in as it slides. */}
+        <Animated.View style={[styles.replyHint, isOut ? styles.hintRight : styles.hintLeft, hintStyle]} pointerEvents="none">
+          <Ionicons name="arrow-undo" size={18} color={colors.textSecondary} />
+        </Animated.View>
+        <Animated.View style={[styles.bubbleShift, bubbleStyle, isOut ? styles.shiftOut : styles.shiftIn]}>
       <Pressable
         onLongPress={onLongPress}
         onPress={isFailed ? onRetry : undefined}
@@ -119,13 +179,21 @@ export function MessageBubble({ message, replyTarget, reactions, onLongPress, on
           </View>
         ) : null}
       </Pressable>
-    </View>
+        </Animated.View>
+      </Animated.View>
+    </GestureDetector>
   );
 }
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row' },
-  bubble: { maxWidth: '80%' },
+  bubble: { maxWidth: '100%' },
+  bubbleShift: { maxWidth: '80%' },
+  shiftOut: { alignItems: 'flex-end' },
+  shiftIn: { alignItems: 'flex-start' },
+  replyHint: { position: 'absolute', top: 0, bottom: 0, justifyContent: 'center' },
+  hintLeft: { left: 4 },
+  hintRight: { right: 4 },
   replyBlock: { borderLeftWidth: 2, paddingLeft: 6 },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4 },
   reactions: {
