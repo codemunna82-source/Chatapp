@@ -2,6 +2,8 @@ import { ApiError } from '../../lib/ApiError';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './contact.repository';
 import type { ContactDoc } from './contact.model';
+import { deleteConversationsByContact } from '../conversations/conversation.repository';
+import { deleteMessagesByConversation } from '../messages/message.repository';
 
 export interface PublicContact {
   id: string;
@@ -77,6 +79,36 @@ export interface UpdateContactBody {
   name?: string;
   avatarUrl?: string;
   tags?: string[];
+}
+
+/**
+ * Deletes a contact and everything anchored to them in this workspace: the
+ * conversations with that contact and those conversations' messages. Left
+ * behind, those would be orphans pointing at a contact that no longer
+ * exists, and would still surface in the chat list.
+ *
+ * Workspace-local, like every other delete here — nothing is withdrawn from
+ * the customer's own WhatsApp.
+ */
+export async function deleteContactForTenant(tenantId: string, id: string, actorId: string): Promise<void> {
+  const contact = await repo.findContactByIdAndTenant(id, tenantId);
+  if (!contact) {
+    throw ApiError.notFound('CONTACT_NOT_FOUND', 'That contact does not exist.');
+  }
+
+  const conversationIds = await deleteConversationsByContact(tenantId, id);
+  for (const conversationId of conversationIds) {
+    await deleteMessagesByConversation(tenantId, conversationId);
+  }
+  await repo.deleteContact(id, tenantId);
+
+  await recordAudit({
+    tenantId,
+    actorUserId: actorId,
+    action: 'CONTACT_DELETED',
+    targetType: 'Contact',
+    targetId: id,
+  });
 }
 
 export async function updateContactForTenant(

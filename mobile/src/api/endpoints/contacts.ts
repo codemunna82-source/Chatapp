@@ -32,3 +32,8 @@ export async function updateContact({ id, ...patch }: UpdateContactInput): Promi
   const res = await apiClient.patch<ApiSuccess<Contact>>(`/contacts/${id}`, patch);
   return res.data.data;
 }
+
+/** Deletes a contact along with their conversations and messages in this workspace. */
+export async function deleteContact(id: string): Promise<void> {
+  await apiClient.delete(`/contacts/${id}`);
+}

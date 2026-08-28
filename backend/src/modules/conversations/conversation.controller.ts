@@ -23,6 +23,12 @@ export const createConversationHandler = asyncHandler(async (req: Request, res: 
   res.status(200).json({ success: true, data: conversation });
 });
 
+export const deleteConversationHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  await conversationService.deleteConversationForTenant(auth.tenantId, req.params.id as string, auth.userId);
+  res.status(200).json({ success: true, data: { id: req.params.id } });
+});
+
 export const updateConversationHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const patch = req.body as conversationService.UpdateConversationBody;

@@ -1,7 +1,13 @@
 import { ApiError } from '../../lib/ApiError';
 import { findConversationByIdAndTenant, isWithinCustomerServiceWindow, recordOutboundActivity } from '../conversations/conversation.repository';
 import { findContactByIdAndTenant } from '../contacts/contact.repository';
-import { createMessage, findMessageByIdAndTenant, attachMetaMessageId, markMessageFailed } from './message.repository';
+import {
+  createMessage,
+  findMessageByIdAndTenant,
+  attachMetaMessageId,
+  markMessageFailed,
+  softDeleteMessage,
+} from './message.repository';
 import { findMediaByIdAndTenant } from '../media/media.repository';
 import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
 import { getMetaGateway, toMetaApiError, type SendableMediaType } from '../../integrations/meta';
@@ -46,6 +52,26 @@ export interface SendOutboundMessageInput {
  * /api/conversations/:id/messages) lands in Phase 5 — this is the service
  * that route will call.
  */
+/**
+ * Hides a message from this workspace's inbox ("delete for me").
+ *
+ * Deliberately has no delete-for-everyone counterpart: Meta's WhatsApp
+ * Cloud API exposes no delete or recall endpoint, so a message that has
+ * already been delivered cannot be withdrawn from the customer's WhatsApp.
+ * Offering that would remove it here while leaving it visible to them.
+ */
+export async function deleteMessageForTenant(
+  tenantId: string,
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  const message = await findMessageByIdAndTenant(messageId, tenantId);
+  if (!message || String(message.conversationId) !== conversationId) {
+    throw ApiError.notFound('MESSAGE_NOT_FOUND', 'That message does not exist.');
+  }
+  await softDeleteMessage(messageId, tenantId);
+}
+
 export async function sendOutboundMessage(input: SendOutboundMessageInput): Promise<MessageDoc> {
   const conversation = await findConversationByIdAndTenant(input.conversationId, input.tenantId);
   if (!conversation) {

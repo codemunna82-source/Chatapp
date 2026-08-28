@@ -3,6 +3,7 @@ import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './conversation.repository';
 import * as contactRepo from '../contacts/contact.repository';
 import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
+import { deleteMessagesByConversation } from '../messages/message.repository';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
 import type { ConversationDoc, ConversationStatus } from './conversation.model';
 import type { ContactDoc } from '../contacts/contact.model';
@@ -127,6 +128,27 @@ export async function startConversationForTenant(tenantId: string, contactId: st
 
   const conversation = await repo.findOrCreateConversation(tenantId, contactId, String(phoneNumber._id));
   return toPublicConversation(conversation, contact);
+}
+
+/**
+ * Deletes a chat from this workspace: the conversation and every message in
+ * it. Local to VOXO only — Meta's Cloud API cannot recall anything already
+ * delivered, so the customer's own WhatsApp thread is untouched.
+ */
+export async function deleteConversationForTenant(tenantId: string, id: string, actorId: string): Promise<void> {
+  const conversation = await repo.findConversationByIdAndTenant(id, tenantId);
+  if (!conversation) {
+    throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'That conversation does not exist.');
+  }
+  await deleteMessagesByConversation(tenantId, id);
+  await repo.deleteConversation(id, tenantId);
+  await recordAudit({
+    tenantId,
+    actorUserId: actorId,
+    action: 'CONVERSATION_DELETED',
+    targetType: 'Conversation',
+    targetId: id,
+  });
 }
 
 export async function updateConversationForTenant(

@@ -13,6 +13,7 @@ import {
   listContactsHandler,
   getContactHandler,
   updateContactHandler,
+  deleteContactHandler,
 } from './contact.controller';
 
 export const contactRouter = Router();
@@ -35,4 +36,13 @@ contactRouter.patch(
   requirePermission('CHAT_SEND'),
   validate({ params: contactIdParamSchema, body: updateContactSchema }),
   updateContactHandler,
+);
+
+// Deleting a contact also removes their conversations and messages from
+// this workspace — see contact.service.ts for why the cascade is required.
+contactRouter.delete(
+  '/:id',
+  requirePermission('CHAT_SEND'),
+  validate({ params: contactIdParamSchema }),
+  deleteContactHandler,
 );

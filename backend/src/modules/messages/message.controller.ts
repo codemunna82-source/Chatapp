@@ -5,7 +5,7 @@ import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { assertPermission } from '../../middleware/rbac.middleware';
 import { findConversationByIdAndTenant } from '../conversations/conversation.repository';
 import { listMessagesByConversation } from './message.repository';
-import { sendOutboundMessage, type SendableMessageType } from './message.service';
+import { sendOutboundMessage, deleteMessageForTenant, type SendableMessageType } from './message.service';
 import { toRealtimeMessage } from '../../realtime/serializers';
 
 const MEDIA_TYPES = new Set(['image', 'video', 'audio', 'document']);
@@ -22,6 +22,16 @@ export const listMessagesHandler = asyncHandler(async (req: Request, res: Respon
   const { cursor, limit } = req.query as { cursor?: string; limit?: number };
   const { items, nextCursor } = await listMessagesByConversation(auth.tenantId, conversationId, { cursor, limit });
   res.status(200).json({ success: true, data: items.map(toRealtimeMessage), meta: { nextCursor } });
+});
+
+export const deleteMessageHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  await deleteMessageForTenant(
+    auth.tenantId,
+    req.params.conversationId as string,
+    req.params.messageId as string,
+  );
+  res.status(200).json({ success: true, data: { id: req.params.messageId } });
 });
 
 export const sendMessageHandler = asyncHandler(async (req: Request, res: Response) => {

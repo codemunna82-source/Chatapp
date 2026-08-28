@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -8,7 +8,14 @@ import { ChatListSkeleton } from '../../components/Skeleton';
 import { EmptyState } from '../../components/EmptyState';
 import { ChatListItem } from './ChatListItem';
 import { NewChatSheet } from './NewChatSheet';
-import { useConversations, flattenConversations, usePinConversation, useArchiveConversation } from '../../queries/useConversations';
+import { ChatActionSheet } from './ChatActionSheet';
+import {
+  useConversations,
+  flattenConversations,
+  usePinConversation,
+  useArchiveConversation,
+  useDeleteConversation,
+} from '../../queries/useConversations';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
@@ -22,6 +29,7 @@ export function ChatsListScreen({ navigation }: Props) {
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
+  const [actionTarget, setActionTarget] = useState<Conversation | null>(null);
   const debouncedSearch = useDebouncedValue(search, 300);
 
   // The status filter was never sent, and the backend only filters when it
@@ -38,6 +46,7 @@ export function ChatsListScreen({ navigation }: Props) {
   const conversations = useMemo(() => flattenConversations(query.data), [query.data]);
   const pinConversation = usePinConversation();
   const archiveConversation = useArchiveConversation();
+  const deleteConversation = useDeleteConversation();
 
   // Stable per-row callbacks — inline arrows would change identity every
   // render and defeat ChatListItem's React.memo.
@@ -45,31 +54,49 @@ export function ChatsListScreen({ navigation }: Props) {
     (conversation: Conversation) => navigation.navigate('ConversationDetail', { conversationId: conversation.id }),
     [navigation],
   );
+  const handleLongPress = useCallback((conversation: Conversation) => setActionTarget(conversation), []);
+
   const handleTogglePin = useCallback(
-    (conversation: Conversation) => pinConversation.mutate({ id: conversation.id, pinned: !conversation.pinned }),
+    (conversation: Conversation) => {
+      pinConversation.mutate({ id: conversation.id, pinned: !conversation.pinned });
+      setActionTarget(null);
+    },
     [pinConversation],
   );
   // One button, both directions: archive from the open list, restore from
   // the archived one.
   const handleArchive = useCallback(
-    (conversation: Conversation) =>
+    (conversation: Conversation) => {
       archiveConversation.mutate({
         id: conversation.id,
         status: conversation.status === 'ARCHIVED' ? 'OPEN' : 'ARCHIVED',
-      }),
+      });
+      setActionTarget(null);
+    },
     [archiveConversation],
+  );
+
+  const handleDelete = useCallback(
+    (conversation: Conversation) => {
+      const label = conversation.contact?.name || conversation.contact?.phone || 'this chat';
+      setActionTarget(null);
+      Alert.alert(
+        'Delete chat?',
+        `This removes ${label} and its messages from VOXO. It cannot remove anything from the customer's own WhatsApp.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: () => deleteConversation.mutate(conversation.id) },
+        ],
+      );
+    },
+    [deleteConversation],
   );
 
   const renderItem = useCallback(
     ({ item }: { item: Conversation }) => (
-      <ChatListItem
-        conversation={item}
-        onPress={handleOpen}
-        onTogglePin={handleTogglePin}
-        onArchive={handleArchive}
-      />
+      <ChatListItem conversation={item} onPress={handleOpen} onLongPress={handleLongPress} />
     ),
-    [handleOpen, handleTogglePin, handleArchive],
+    [handleOpen, handleLongPress],
   );
 
   const showSkeleton = query.isLoading;
@@ -168,6 +195,14 @@ export function ChatsListScreen({ navigation }: Props) {
           {({ pressed }) => <Ionicons name="add" size={28} color={colors.textOnPrimary} style={{ opacity: pressed ? 0.6 : 1 }} />}
         </Pressable>
       ) : null}
+
+      <ChatActionSheet
+        conversation={actionTarget}
+        onClose={() => setActionTarget(null)}
+        onTogglePin={handleTogglePin}
+        onToggleArchive={handleArchive}
+        onDelete={handleDelete}
+      />
 
       <NewChatSheet
         visible={newChatOpen}

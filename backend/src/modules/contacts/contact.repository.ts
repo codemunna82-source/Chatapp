@@ -9,6 +9,12 @@ export interface CreateContactInput {
   tags?: string[];
 }
 
+export async function deleteContact(id: string, tenantId: string): Promise<boolean> {
+  if (!Types.ObjectId.isValid(id)) return false;
+  const result = await Contact.deleteOne({ _id: id, tenantId });
+  return result.deletedCount > 0;
+}
+
 export async function createContact(input: CreateContactInput): Promise<ContactDoc> {
   return Contact.create(input);
 }

@@ -21,6 +21,12 @@ export const getContactHandler = asyncHandler(async (req: Request, res: Response
   res.status(200).json({ success: true, data: contact });
 });
 
+export const deleteContactHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  await contactService.deleteContactForTenant(auth.tenantId, req.params.id as string, auth.userId);
+  res.status(200).json({ success: true, data: { id: req.params.id } });
+});
+
 export const updateContactHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const contact = await contactService.updateContactForTenant(

@@ -32,6 +32,11 @@ export async function startConversation(contactId: string): Promise<Conversation
   return res.data.data;
 }
 
+/** Deletes a chat and its messages from this workspace (not from the customer's WhatsApp). */
+export async function deleteConversation(id: string): Promise<void> {
+  await apiClient.delete(`/conversations/${id}`);
+}
+
 export async function setConversationStatus(id: string, status: ConversationStatus): Promise<Conversation> {
   const res = await apiClient.patch<ApiSuccess<Conversation>>(`/conversations/${id}`, { status });
   return res.data.data;

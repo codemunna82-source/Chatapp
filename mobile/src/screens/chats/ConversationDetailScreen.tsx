@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
@@ -22,7 +22,13 @@ import { ForwardSheet, buildForwardBody } from './ForwardSheet';
 import { ImageViewerModal } from './ImageViewerModal';
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
-import { useMessages, flattenMessages, useSendMessage, removeMessageFromCache } from '../../queries/useMessages';
+import {
+  useMessages,
+  flattenMessages,
+  useSendMessage,
+  useDeleteMessage,
+  removeMessageFromCache,
+} from '../../queries/useMessages';
 import { useConversationRoom } from '../../sockets/useConversationRoom';
 import { useSocketEvent } from '../../sockets/useSocketEvent';
 import { emitConversationRead } from '../../sockets/actions';
@@ -75,6 +81,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const conversationQuery = useConversation(conversationId);
   const messagesQuery = useMessages(conversationId);
   const sendMessage = useSendMessage(conversationId);
+  const deleteMessage = useDeleteMessage(conversationId);
 
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
@@ -429,6 +436,19 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           onClose={() => setActionTarget(null)}
           onCopy={handleCopy}
           canSelect={Boolean(actionTarget && buildForwardBody(actionTarget))}
+          onDelete={() => {
+            const target = actionTarget;
+            setActionTarget(null);
+            if (!target) return;
+            Alert.alert(
+              'Delete for me?',
+              "This hides the message from VOXO. It can't be removed from the customer's WhatsApp — Meta's API has no way to recall a delivered message.",
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: () => deleteMessage.mutate(target.id) },
+              ],
+            );
+          }}
           onSelectMore={() => {
             if (actionTarget) toggleSelected(actionTarget);
             setActionTarget(null);

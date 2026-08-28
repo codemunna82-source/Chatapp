@@ -43,6 +43,14 @@ const messageSchema = new Schema(
     replyToMessageId: { type: Schema.Types.ObjectId, ref: 'Message' },
     status: { type: String, enum: MESSAGE_STATUSES, default: 'QUEUED', required: true },
     error: { type: Schema.Types.Mixed },
+    /**
+     * Soft delete, tenant-side only. Meta's Cloud API exposes no way to
+     * recall a message that has already been delivered, so this hides it
+     * from this workspace's inbox and nothing more — the customer's own
+     * WhatsApp thread is unaffected. Kept as a timestamp rather than a hard
+     * delete so the row still anchors replies and status webhooks.
+     */
+    deletedAt: { type: Date },
   },
   { timestamps: true },
 );

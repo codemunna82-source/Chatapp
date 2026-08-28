@@ -64,6 +64,19 @@ export async function listConversationsByTenant(
   return { items: page, nextCursor: hasMore ? String(page[page.length - 1]!._id) : null };
 }
 
+export async function deleteConversation(id: string, tenantId: string): Promise<boolean> {
+  if (!Types.ObjectId.isValid(id)) return false;
+  const result = await Conversation.deleteOne({ _id: id, tenantId });
+  return result.deletedCount > 0;
+}
+
+export async function deleteConversationsByContact(tenantId: string, contactId: string): Promise<string[]> {
+  const docs = await Conversation.find({ tenantId, contactId }).select('_id');
+  const ids = docs.map((d) => String(d._id));
+  if (ids.length > 0) await Conversation.deleteMany({ tenantId, contactId });
+  return ids;
+}
+
 export async function setConversationPinned(
   id: string,
   tenantId: string,

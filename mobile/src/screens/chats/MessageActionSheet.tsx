@@ -21,6 +21,7 @@ interface MessageActionSheetProps {
   /** Whether this message can start a multi-message selection. */
   canSelect: boolean;
   onSelectMore: () => void;
+  onDelete: () => void;
 }
 
 /**
@@ -45,6 +46,7 @@ export function MessageActionSheet({
   onCopy,
   canSelect,
   onSelectMore,
+  onDelete,
 }: MessageActionSheetProps) {
   const { colors, spacing, radius, typography } = useTheme();
 
@@ -83,6 +85,10 @@ export function MessageActionSheet({
                 onPress: onSelectMore,
                 enabled: canSelect,
               },
+              // "Delete for me" only. Meta's Cloud API has no delete or
+              // recall endpoint, so a delete-for-everyone would clear the
+              // message here while the customer still saw it in WhatsApp.
+              { key: 'delete', label: 'Delete for me', icon: 'trash-outline', onPress: onDelete, enabled: true },
             ] as const
           )
             .filter((action) => action.enabled)
@@ -96,8 +102,19 @@ export function MessageActionSheet({
               >
                 {({ pressed }) => (
                   <View style={[styles.actionInner, { opacity: pressed ? 0.6 : 1 }]}>
-                    <Ionicons name={action.icon} size={20} color={colors.textSecondary} />
-                    <Text style={[typography.body, { color: colors.textPrimary, marginLeft: spacing.md }]}>{action.label}</Text>
+                    <Ionicons
+                      name={action.icon}
+                      size={20}
+                      color={action.key === 'delete' ? colors.danger : colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        typography.body,
+                        { color: action.key === 'delete' ? colors.danger : colors.textPrimary, marginLeft: spacing.md },
+                      ]}
+                    >
+                      {action.label}
+                    </Text>
                   </View>
                 )}
               </Pressable>

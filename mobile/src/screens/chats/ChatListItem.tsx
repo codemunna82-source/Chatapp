@@ -4,23 +4,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../components/Avatar';
 import { Badge } from '../../components/Badge';
 import { useTheme } from '../../theme/ThemeProvider';
-import { IconButton } from '../../components/IconButton';
-import { touchTarget } from '../../theme/spacing';
 import { formatChatListTime } from '../../utils/formatTime';
 import type { Conversation } from '../../api/types';
 
 interface ChatListItemProps {
   conversation: Conversation;
   onPress: (conversation: Conversation) => void;
-  onTogglePin: (conversation: Conversation) => void;
-  onArchive: (conversation: Conversation) => void;
+  /** Long-press opens the chat's action sheet (pin / archive / delete). */
+  onLongPress: (conversation: Conversation) => void;
 }
 
-function ChatListItemImpl({ conversation, onPress, onTogglePin, onArchive }: ChatListItemProps) {
+function ChatListItemImpl({ conversation, onPress, onLongPress }: ChatListItemProps) {
   const handlePress = useCallback(() => onPress(conversation), [onPress, conversation]);
-  const handleTogglePin = useCallback(() => onTogglePin(conversation), [onTogglePin, conversation]);
-  const handleArchive = useCallback(() => onArchive(conversation), [onArchive, conversation]);
-  const isArchived = conversation.status === 'ARCHIVED';
+  const handleLongPress = useCallback(() => onLongPress(conversation), [onLongPress, conversation]);
   const { colors, spacing, typography } = useTheme();
   const label = conversation.contact?.name || conversation.contact?.phone || 'Unknown contact';
   const unread = conversation.unreadCount > 0;
@@ -28,6 +24,7 @@ function ChatListItemImpl({ conversation, onPress, onTogglePin, onArchive }: Cha
   return (
     <Pressable
       onPress={handlePress}
+      onLongPress={handleLongPress}
       style={({ pressed }) => [
         styles.row,
         { paddingVertical: spacing.sm + 4, paddingHorizontal: spacing.md, backgroundColor: pressed ? colors.surface : colors.background },
@@ -59,24 +56,11 @@ function ChatListItemImpl({ conversation, onPress, onTogglePin, onArchive }: Cha
           <Badge count={conversation.unreadCount} />
         </View>
       </View>
-      <View style={styles.actions}>
-        <IconButton
-          name={conversation.pinned ? 'pin' : 'pin-outline'}
-          size={18}
-          color={conversation.pinned ? colors.primary : colors.textTertiary}
-          touchSize={touchTarget.compact}
-          onPress={handleTogglePin}
-          accessibilityLabel={conversation.pinned ? 'Unpin conversation' : 'Pin conversation'}
-        />
-        <IconButton
-          name={isArchived ? 'arrow-undo-outline' : 'archive-outline'}
-          size={18}
-          color={colors.textTertiary}
-          touchSize={touchTarget.compact}
-          onPress={handleArchive}
-          accessibilityLabel={isArchived ? 'Restore conversation' : 'Archive conversation'}
-        />
-      </View>
+      {conversation.pinned ? (
+        <View style={styles.pinnedMark}>
+          <Ionicons name="pin" size={14} color={colors.textTertiary} />
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -92,7 +76,5 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
   middle: { flex: 1 },
   topLine: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
-  // Without flexDirection these two stacked vertically (a 44x88 column),
-  // which is what threw the row's alignment and made the icons look wrong.
-  actions: { flexDirection: 'row', alignItems: 'center', marginLeft: 2 },
+  pinnedMark: { marginLeft: 6 },
 });

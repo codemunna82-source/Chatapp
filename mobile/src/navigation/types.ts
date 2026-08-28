@@ -18,6 +18,7 @@ export type SettingsStackParamList = {
   Notifications: undefined;
   Wallet: undefined;
   Team: undefined;
+  ManageContacts: undefined;
 };
 
 export type MainTabParamList = {

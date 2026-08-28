@@ -115,6 +115,17 @@ function makeTempId(): string {
  * FAILED (not removed) on error so the composer/bubble can offer retry —
  * never silently drops a message the user believes they sent.
  */
+/** "Delete for me" — drops the message from the cache once the server confirms. */
+export function useDeleteMessage(conversationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (messageId: string) => messagesApi.deleteMessage(conversationId, messageId),
+    onSuccess: (_result, messageId) => {
+      removeMessageFromCache(queryClient, conversationId, messageId);
+    },
+  });
+}
+
 export function useSendMessage(conversationId: string) {
   const queryClient = useQueryClient();
 

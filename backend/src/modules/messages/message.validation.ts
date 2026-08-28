@@ -45,3 +45,8 @@ export const listMessagesQuerySchema = z.object({
 export const conversationIdParamSchema = z.object({
   conversationId: z.string().min(1),
 });
+
+export const messageIdParamSchema = z.object({
+  conversationId: z.string().min(1),
+  messageId: z.string().min(1),
+});

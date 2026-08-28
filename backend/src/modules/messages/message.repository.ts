@@ -54,7 +54,8 @@ export async function listMessagesByConversation(
   opts: ListMessagesOptions = {},
 ): Promise<{ items: MessageDoc[]; nextCursor: string | null }> {
   const limit = Math.min(opts.limit ?? 30, 100);
-  const filter: Record<string, unknown> = { tenantId, conversationId };
+  // Soft-deleted messages never come back down the wire.
+  const filter: Record<string, unknown> = { tenantId, conversationId, deletedAt: { $exists: false } };
   if (opts.cursor && Types.ObjectId.isValid(opts.cursor)) {
     filter._id = { $lt: new Types.ObjectId(opts.cursor) };
   }
@@ -65,6 +66,17 @@ export async function listMessagesByConversation(
   const hasMore = items.length > limit;
   const page = hasMore ? items.slice(0, limit) : items;
   return { items: page, nextCursor: hasMore ? String(page[page.length - 1]!._id) : null };
+}
+
+/** Soft-deletes one message for this tenant (see the model's deletedAt note). */
+export async function softDeleteMessage(id: string, tenantId: string): Promise<MessageDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Message.findOneAndUpdate({ _id: id, tenantId }, { $set: { deletedAt: new Date() } }, { new: true });
+}
+
+/** Hard-deletes every message in a conversation — used when the chat itself is deleted. */
+export async function deleteMessagesByConversation(tenantId: string, conversationId: string): Promise<void> {
+  await Message.deleteMany({ tenantId, conversationId });
 }
 
 export async function updateMessageStatusByMetaId(

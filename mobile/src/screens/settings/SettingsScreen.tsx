@@ -212,6 +212,13 @@ export function SettingsScreen({ navigation }: Props) {
           badgeCount={unreadCount}
           onPress={() => navigation.navigate('Notifications')}
         />
+        {/* Contacts are chat-surface, gated on CHAT_READ/CHAT_SEND rather
+            than MASTER_ADMIN, so this row is visible to every member. */}
+        <SettingsRow
+          icon="people-circle-outline"
+          label="Contacts"
+          onPress={() => navigation.navigate('ManageContacts')}
+        />
         {isMasterAdmin ? (
           <SettingsRow icon="wallet-outline" label="Wallet" onPress={() => navigation.navigate('Wallet')} />
         ) : null}

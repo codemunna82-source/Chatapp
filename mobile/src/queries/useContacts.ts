@@ -37,3 +37,15 @@ export function useUpdateContact() {
     },
   });
 }
+
+/** Deletes a contact (and, server-side, their conversations and messages). */
+export function useDeleteContact() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => contactsApi.deleteContact(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+    },
+  });
+}

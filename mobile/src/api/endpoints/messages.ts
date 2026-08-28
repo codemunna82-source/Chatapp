@@ -32,3 +32,11 @@ export async function sendMessage(conversationId: string, body: SendMessageBody)
   const res = await apiClient.post<ApiSuccess<Message>>(`/conversations/${conversationId}/messages`, body);
   return res.data.data;
 }
+
+/**
+ * "Delete for me" — hides the message from this workspace only. There is no
+ * delete-for-everyone: Meta's Cloud API cannot recall a delivered message.
+ */
+export async function deleteMessage(conversationId: string, messageId: string): Promise<void> {
+  await apiClient.delete(`/conversations/${conversationId}/messages/${messageId}`);
+}

@@ -13,6 +13,7 @@ import {
   getConversationHandler,
   createConversationHandler,
   updateConversationHandler,
+  deleteConversationHandler,
 } from './conversation.controller';
 import { messageRouter } from '../messages/message.routes';
 
@@ -35,6 +36,16 @@ conversationRouter.patch(
   '/:id',
   validate({ params: conversationIdParamSchema, body: updateConversationSchema }),
   updateConversationHandler,
+);
+
+// Deleting a chat removes it and its messages from this workspace only —
+// nothing is recalled from the customer's WhatsApp (Meta's Cloud API has no
+// such capability). Gated on CHAT_SEND rather than CHAT_READ.
+conversationRouter.delete(
+  '/:id',
+  requirePermission('CHAT_SEND'),
+  validate({ params: conversationIdParamSchema }),
+  deleteConversationHandler,
 );
 
 // GET/POST /api/conversations/:id/messages — nested, own permission checks

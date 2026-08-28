@@ -42,6 +42,17 @@ export function useStartConversation() {
   });
 }
 
+export function useDeleteConversation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => conversationsApi.deleteConversation(id),
+    onSuccess: (_result, id) => {
+      queryClient.removeQueries({ queryKey: queryKeys.conversation(id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+    },
+  });
+}
+
 export function usePinConversation() {
   const queryClient = useQueryClient();
   return useMutation({
