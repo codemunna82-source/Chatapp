@@ -33,3 +33,9 @@ keystore.properties
 # It IS committed so every clone (including CI) gets byte-identical debug
 # builds instead of `:app:validateSigningDebug` failing on a missing file.
 !app/debug.keystore
+
+# Firebase config for FCM — identifies one specific Firebase project, so
+# each deployment supplies its own (see PUSH_SETUP.md). Gradle reads it
+# from here; the CI build copies it in from the GOOGLE_SERVICES_JSON
+# repository secret.
+app/google-services.json

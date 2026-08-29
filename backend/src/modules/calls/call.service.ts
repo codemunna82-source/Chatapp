@@ -1,5 +1,7 @@
 import { ApiError } from '../../lib/ApiError';
 import { recordAudit } from '../audit/auditLog.service';
+import { findUserByIdAndTenant } from '../users/user.repository';
+import { pushCallStarted } from '../notifications/push.service';
 import * as repo from './callLog.repository';
 import * as contactRepo from '../contacts/contact.repository';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
@@ -104,6 +106,19 @@ export async function initiateWhatsAppCall(
     targetType: 'CallLog',
     targetId: doc._id,
     metadata: { contactId },
+  });
+
+  // Tells the REST of the team, not the person who pressed the button. In
+  // a shared inbox two agents calling the same customer minutes apart is a
+  // real failure mode, and this is the only call event that exists here —
+  // see pushCallStarted for why there is no incoming-call notification.
+  const actor = await findUserByIdAndTenant(actorUserId, tenantId);
+  await pushCallStarted({
+    tenantId,
+    actorUserId,
+    actorName: actor?.displayName || actor?.email || 'A teammate',
+    contactName: contact.name || contact.phone,
+    contactId: String(contact._id),
   });
 
   const digits = contact.phone.replace(/^\+/, '');

@@ -45,3 +45,8 @@ yarn-error.log*
 
 # Artifacts (built APKs are distributed, not committed)
 artifacts/
+
+# Firebase config — identifies one specific Firebase project, so each
+# deployment supplies its own (see PUSH_SETUP.md). The CI build writes it
+# from the GOOGLE_SERVICES_JSON repository secret.
+mobile/google-services.json

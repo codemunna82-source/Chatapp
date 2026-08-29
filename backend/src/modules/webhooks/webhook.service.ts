@@ -5,7 +5,13 @@ import { findPhoneNumberByMetaId } from '../whatsapp/whatsapp.repository';
 import type { WhatsAppPhoneNumberDoc } from '../whatsapp/whatsappPhoneNumber.model';
 import { findOrCreateContactByPhone } from '../contacts/contact.repository';
 import { findOrCreateConversation, recordInboundActivity } from '../conversations/conversation.repository';
-import { createMessage, updateMessageStatusByMetaId, findMessageByMetaIdAndTenant } from '../messages/message.repository';
+import {
+  createMessage,
+  updateMessageStatusByMetaId,
+  findMessageByMetaIdAndTenant,
+  findMessageByIdAndTenant,
+} from '../messages/message.repository';
+import { pushIncomingMessage, pushReaction } from '../notifications/push.service';
 import { createMedia } from '../media/media.repository';
 import type { MessageStatus } from '../messages/message.model';
 import { getRealtimeEmitter } from '../../realtime/events';
@@ -86,6 +92,32 @@ async function handleIncomingMessage(
   realtime.emitMessageNew(tenantId, toRealtimeMessage(message));
   if (updatedConversation) {
     realtime.emitConversationUpdated(tenantId, toRealtimeConversation(updatedConversation));
+  }
+
+  // Push last, and never awaited for its result beyond its own internal
+  // error handling: the message is already stored and already delivered to
+  // every open app over the socket. A push failure must not fail this
+  // handler, because Meta would then retry the whole delivery and the
+  // message would be processed twice.
+  const contactName = contact.name || contact.phone;
+  if (item.messageType === 'reaction') {
+    const raw = item.raw as { reaction?: { emoji?: string } };
+    const target = replyToMessageId ? await findMessageByIdAndTenant(replyToMessageId, tenantId) : null;
+    await pushReaction({
+      tenantId,
+      conversationId: String(conversation._id),
+      contactName,
+      emoji: raw.reaction?.emoji,
+      targetPreview: target?.text ?? undefined,
+    });
+  } else {
+    await pushIncomingMessage({
+      tenantId,
+      conversationId: String(conversation._id),
+      contactName,
+      messageType: item.messageType,
+      text: item.text,
+    });
   }
 }
 

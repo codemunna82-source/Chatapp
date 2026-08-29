@@ -3,6 +3,12 @@
   "compilerOptions": {
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    // app.config.ts is a build-time Node script (it reads the filesystem to
+    // detect google-services.json), and it is deliberately inside
+    // "include" so it is typechecked like everything else. Without this it
+    // fails on node:fs/node:path/__dirname, which are perfectly valid in
+    // the only context that file ever runs in.
+    "types": ["node"],
     "paths": {
       "@/*": ["./src/*"]
     }

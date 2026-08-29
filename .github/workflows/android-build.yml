@@ -72,6 +72,29 @@ jobs:
           echo "EXPO_PUBLIC_API_URL=${{ github.event.inputs.api_url || 'https://chatapp-0orj.onrender.com' }}" >> .env
           echo "EXPO_PUBLIC_SOCKET_URL=${{ github.event.inputs.socket_url || 'https://chatapp-0orj.onrender.com' }}" >> .env
 
+      - name: Write google-services.json (Firebase / push notifications)
+        # Optional. The file identifies one specific Firebase project, so it
+        # is not committed — add its contents as the GOOGLE_SERVICES_JSON
+        # repository secret to enable push (see PUSH_SETUP.md). Without the
+        # secret the build still succeeds and the app still works; push just
+        # never registers and messages arrive over Socket.IO only, which is
+        # exactly how the app behaved before push existed. Failing the build
+        # here would make an optional feature mandatory.
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > google-services.json
+            # android/app/ is where the Gradle plugin reads it. This build
+            # runs Gradle directly with no prebuild step, so nothing else
+            # would put it there. Written to both paths so the two stay in
+            # step whether or not a prebuild is ever added.
+            cp google-services.json android/app/google-services.json
+            echo "google-services.json written — push notifications enabled in this build"
+          else
+            echo "GOOGLE_SERVICES_JSON secret not set — building without push notifications"
+          fi
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

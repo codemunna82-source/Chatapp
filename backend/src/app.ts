@@ -22,6 +22,7 @@ import { subscriptionRouter } from './modules/subscriptions/subscription.routes'
 import { dashboardRouter } from './modules/dashboard/dashboard.routes';
 import { callRouter } from './modules/calls/call.routes';
 import { quickReplyRouter } from './modules/quickReplies/quickReply.routes';
+import { deviceRouter } from './modules/devices/deviceToken.routes';
 
 export function createApp(): Express {
   const app = express();
@@ -75,6 +76,7 @@ export function createApp(): Express {
   app.use('/api/dashboard', dashboardRouter);
   app.use('/api/calls', callRouter);
   app.use('/api/quick-replies', quickReplyRouter);
+  app.use('/api/devices', deviceRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

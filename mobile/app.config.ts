@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import type { ExpoConfig, ConfigContext } from 'expo/config';
 
 // Android-only (spec §3) — no ios block is defined here on purpose, and no
@@ -7,7 +9,12 @@ import type { ExpoConfig, ConfigContext } from 'expo/config';
 // every build so far — bumping it here since an unchanged versionCode on a
 // same-package/same-signature reinstall can make Android's installer treat
 // a new APK as a no-op if the previous copy isn't uninstalled first.
-const ANDROID_VERSION_CODE = 2;
+const ANDROID_VERSION_CODE = 3;
+
+// Resolved from this file's own directory rather than the working
+// directory, so the config behaves the same whether Expo is invoked from
+// mobile/ or from the repo root.
+const GOOGLE_SERVICES_PATH = path.join(__dirname, 'google-services.json');
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -30,16 +37,31 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Minimal permission set for what the app actually implements. Camera/
     // gallery access (Phase 7 media attachments) is granted by
     // expo-image-picker's own manifest merge + the runtime permission
-    // prompts it makes at call time — it needs no entry here. Push
-    // notifications (and the exact-alarm/foreground-service permissions
-    // that would come with them) were never built — Phase 8's Notifications
-    // screen is an in-app REST inbox, not FCM — so still nothing to add for
-    // that. RECORD_AUDIO + MODIFY_AUDIO_SETTINGS were added for the
-    // composer's real voice-message recorder (expo-audio) — background
-    // recording/playback are explicitly off below, so no foreground-service
-    // permissions are pulled in. Never request a permission the app
-    // doesn't actually use.
-    permissions: ['INTERNET', 'ACCESS_NETWORK_STATE', 'RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS'],
+    // prompts it makes at call time — it needs no entry here.
+    // RECORD_AUDIO + MODIFY_AUDIO_SETTINGS back the composer's voice
+    // recorder (expo-audio) — background recording/playback are explicitly
+    // off below, so no foreground-service permissions are pulled in.
+    // POST_NOTIFICATIONS is required from Android 13 (API 33) for FCM push;
+    // below that, notification access is granted at install and the runtime
+    // request is a no-op. Never request a permission the app doesn't use.
+    permissions: [
+      'INTERNET',
+      'ACCESS_NETWORK_STATE',
+      'RECORD_AUDIO',
+      'MODIFY_AUDIO_SETTINGS',
+      'POST_NOTIFICATIONS',
+    ],
+    /**
+     * Firebase config for FCM. Not committed — it identifies one specific
+     * Firebase project, so each deployment supplies its own by placing the
+     * file downloaded from the Firebase console at mobile/google-services.json
+     * (see PUSH_SETUP.md).
+     *
+     * Left undefined when the file is absent so the app still builds and
+     * runs without Firebase: push simply never registers, and messages
+     * arrive live over Socket.IO exactly as they did before push existed.
+     */
+    googleServicesFile: existsSync(GOOGLE_SERVICES_PATH) ? GOOGLE_SERVICES_PATH : undefined,
   },
   plugins: [
     'expo-secure-store',
@@ -54,12 +76,27 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       // Phase 7 added this dependency but never registered its config
       // plugin — fixed in Phase 11 while regenerating the native project.
-      // microphonePermission: false because the app only ever captures
-      // still photos (AttachmentSheet's launchCameraAsync), never records
-      // video with audio through the picker itself — voice messages are
-      // recorded separately via expo-audio below.
+      //
+      // This was `microphonePermission: false`, reasoning that the picker
+      // itself only ever captures still photos. That reasoning was right
+      // about the picker and wrong about the manifest: `false` does not
+      // merely decline to ADD the permission, it emits
+      // tools:node="remove" for RECORD_AUDIO, which strips the permission
+      // expo-audio needs for the composer's voice messages — silently
+      // breaking recording in any build regenerated from this config.
+      // The app genuinely uses the microphone, so it declares it.
       'expo-image-picker',
-      { microphonePermission: false },
+      { microphonePermission: 'Allow VOXO to access your microphone to record voice messages.' },
+    ],
+    [
+      // Push notifications. The icon is the existing monochrome adaptive
+      // icon: Android renders a notification's small icon as a silhouette,
+      // so a full-colour one comes out as a white blob.
+      'expo-notifications',
+      {
+        icon: './assets/android-icon-monochrome.png',
+        color: '#26344D',
+      },
     ],
     [
       // Composer voice messages (Phase 12). Background playback/recording

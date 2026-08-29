@@ -2,6 +2,39 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+/**
+ * Firebase Cloud Messaging, wired only when a google-services.json is
+ * actually present.
+ *
+ * Applied here by hand rather than by `expo prebuild`: this project commits
+ * its android/ directory and the CI build runs Gradle directly without a
+ * prebuild step, so the wiring Expo's config plugin would generate never
+ * gets a chance to appear.
+ *
+ * The conditional is not optional. The google-services plugin FAILS the
+ * build outright when the JSON is missing, so applying it unconditionally
+ * would make Firebase mandatory for everyone — including anyone who just
+ * wants to build the app without setting up push, which is a supported
+ * state (see PUSH_SETUP.md).
+ *
+ * The file is authored at mobile/google-services.json (one place for the
+ * user to put it, and where app.config.ts looks too) and copied to where
+ * the Gradle plugin expects it.
+ */
+def googleServicesSource = file("$projectDir/../../google-services.json")
+def googleServicesTarget = file("$projectDir/google-services.json")
+if (googleServicesSource.exists() && !googleServicesTarget.exists()) {
+    googleServicesTarget.bytes = googleServicesSource.bytes
+}
+if (googleServicesTarget.exists()) {
+    apply plugin: "com.google.gms.google-services"
+} else {
+    logger.lifecycle(
+        "[VOXO] No google-services.json — building without push notifications. " +
+        "See PUSH_SETUP.md to enable them."
+    )
+}
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
@@ -86,10 +119,12 @@ def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
  * android/app/keystore.properties, a gitignored file this repo never
  * contains. See android/app/keystore.properties.example and BUILD.md for
  * how to create it with a real keystore. When it's absent — which it always
- * is in a fresh checkout, including this environment — release builds fall
- * back to debug signing so a smoke build still works, and this prints a
- * loud warning so that fallback is never mistaken for a real release
- * signature.
+ * is in a fresh checkout, including CI — release builds fall back to debug
+ * signing so a smoke build still works, and this prints a loud warning so
+ * that fallback is never mistaken for a real release signature.
+ *
+ * Restored by hand after `expo prebuild` regenerated this file, which
+ * reverts it to the React Native template's plain debug signing.
  */
 def keystorePropertiesFile = rootProject.file('app/keystore.properties')
 def releaseKeystoreConfigured = keystorePropertiesFile.exists()
@@ -116,7 +151,7 @@ android {
         applicationId 'com.voxo.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode 3
         versionName "0.1.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""

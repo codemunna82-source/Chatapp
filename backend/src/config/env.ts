@@ -47,6 +47,15 @@ const envSchema = z.object({
   // touches this degrades gracefully when unset — see integrations/cloudinary.ts.
   CLOUDINARY_URL: z.string().optional(),
 
+  /**
+   * The full Firebase service-account JSON, pasted as one value. Enables
+   * push notifications; everything degrades to socket-only delivery when
+   * it is unset (see integrations/fcm/index.ts). Not trimmed the way the
+   * META_* values are — this is JSON, and its own parser handles
+   * surrounding whitespace.
+   */
+  FCM_SERVICE_ACCOUNT_JSON: z.string().optional().default(''),
+
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
 

@@ -9,6 +9,14 @@ buildscript {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+    // Firebase Cloud Messaging. Present unconditionally because a
+    // buildscript classpath cannot be added conditionally per module;
+    // app/build.gradle decides whether to actually APPLY the plugin, based
+    // on whether a google-services.json exists. Pinned rather than
+    // floating: this runs at build-configuration time, and a silently
+    // upgraded build plugin is the kind of thing that breaks CI on a day
+    // nobody changed anything.
+    classpath('com.google.gms:google-services:4.4.2')
   }
 }
 
