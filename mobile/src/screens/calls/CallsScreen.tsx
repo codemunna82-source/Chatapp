@@ -4,6 +4,7 @@ import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/Screen';
 import { EmptyState } from '../../components/EmptyState';
+import { CallListSkeleton } from '../../components/Skeleton';
 import { CallLogItem } from './CallLogItem';
 import { NewCallSheet } from './NewCallSheet';
 import { useCallHistory, flattenCalls } from '../../queries/useCalls';
@@ -30,7 +31,9 @@ export function CallsScreen() {
         <Text style={[typography.heading, { color: colors.textPrimary }]}>Calls</Text>
       </View>
 
-      {showEmpty ? (
+      {query.isLoading ? (
+        <CallListSkeleton />
+      ) : showEmpty ? (
         <EmptyState
           icon="call-outline"
           title="No calls yet"

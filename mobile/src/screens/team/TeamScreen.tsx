@@ -3,6 +3,7 @@ import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import { EmptyState } from '../../components/EmptyState';
+import { ChatListSkeleton } from '../../components/Skeleton';
 import { TeamMemberItem } from './TeamMemberItem';
 import { TeamMemberFormSheet } from './TeamMemberFormSheet';
 import { useTeamMembers, flattenTeamMembers } from '../../queries/useTeam';
@@ -53,7 +54,9 @@ export function TeamScreen() {
         </Pressable>
       </View>
 
-      {showEmpty ? (
+      {query.isLoading ? (
+        <ChatListSkeleton />
+      ) : showEmpty ? (
         <EmptyState
           icon="people-outline"
           title="No team members yet"

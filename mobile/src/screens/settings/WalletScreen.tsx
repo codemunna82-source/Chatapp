@@ -30,7 +30,7 @@ export function WalletScreen() {
   const transactions = useWalletTransactions();
   const items = flattenWalletTransactions(transactions.data);
 
-  if (wallet.isLoading) return <LoadingIndicator fullscreen />;
+  if (wallet.isLoading) return <LoadingIndicator fullscreen label="Loading wallet" />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

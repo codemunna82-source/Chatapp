@@ -12,6 +12,8 @@ export interface PublicContact {
   name?: string;
   avatarUrl?: string;
   tags: string[];
+  /** Seeded sample data — see contact.model.ts. */
+  isDemo: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,6 +26,7 @@ export function toPublicContact(doc: ContactDoc): PublicContact {
     name: doc.name ?? undefined,
     avatarUrl: doc.avatarUrl ?? undefined,
     tags: doc.tags ?? [],
+    isDemo: doc.isDemo ?? false,
     createdAt: doc.get('createdAt'),
     updatedAt: doc.get('updatedAt'),
   };

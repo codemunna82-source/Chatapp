@@ -11,14 +11,51 @@ const VIBRATION_PATTERN = [0, 60, 90, 60];
 const MIN_GAP_MS = 1500;
 
 /**
- * Plays the in-app new-message alert.
+ * Players are module-level, not per-hook.
  *
- * The player is created lazily and kept for the session rather than mounted
- * per component: this fires from a socket event, not from a render, and a
- * hook-bound player would be torn down and rebuilt on every screen change.
+ * Both sounds fire from callbacks (a socket event, a send completing), not
+ * from a render, and a hook-bound player would be torn down and rebuilt on
+ * every screen change — leaving the first sound after each navigation to
+ * miss while the file loaded.
  */
+let incomingPlayer: AudioPlayer | null = null;
+let sentPlayer: AudioPlayer | null = null;
+let audioModeSet = false;
+
+function play(which: 'incoming' | 'sent'): void {
+  try {
+    if (!audioModeSet) {
+      // playsInSilentMode false: a phone switched to silent should stay
+      // silent. That is the user's explicit instruction to the device and
+      // outranks this app's preference toggle.
+      void setAudioModeAsync({ playsInSilentMode: false });
+      audioModeSet = true;
+    }
+    if (which === 'incoming') {
+      if (!incomingPlayer) {
+        incomingPlayer = createAudioPlayer(require('../../assets/notification.wav'));
+        incomingPlayer.volume = 0.6;
+      }
+      incomingPlayer.seekTo(0);
+      incomingPlayer.play();
+    } else {
+      if (!sentPlayer) {
+        sentPlayer = createAudioPlayer(require('../../assets/sent.wav'));
+        // Quieter than the incoming chime: confirming your own action
+        // should register without asking for attention.
+        sentPlayer.volume = 0.35;
+      }
+      sentPlayer.seekTo(0);
+      sentPlayer.play();
+    }
+  } catch {
+    // A failed sound must never take down the caller — the message it was
+    // announcing has already been delivered or sent.
+  }
+}
+
+/** Plays the in-app new-message alert (sound + vibration, per Settings). */
 export function useMessageAlert(): () => void {
-  const playerRef = useRef<AudioPlayer | null>(null);
   const lastAlertAt = useRef(0);
 
   return useCallback(() => {
@@ -27,26 +64,22 @@ export function useMessageAlert(): () => void {
     lastAlertAt.current = now;
 
     const { sound, vibrate } = useAlertPreferenceStore.getState();
-
     if (vibrate) {
       Vibration.vibrate(VIBRATION_PATTERN);
     }
-
-    if (!sound) return;
-    try {
-      if (!playerRef.current) {
-        // playsInSilentMode false: a phone switched to silent should stay
-        // silent. That is the user's explicit instruction to the device and
-        // outranks this app's preference toggle.
-        void setAudioModeAsync({ playsInSilentMode: false });
-        playerRef.current = createAudioPlayer(require('../../assets/notification.wav'));
-        playerRef.current.volume = 0.6;
-      }
-      playerRef.current.seekTo(0);
-      playerRef.current.play();
-    } catch {
-      // A failed chime must never take down the socket handler that called
-      // it — the message itself has already been delivered to the cache.
-    }
+    if (sound) play('incoming');
   }, []);
+}
+
+/**
+ * The outgoing counterpart, played when a send succeeds.
+ *
+ * No vibration and no rate limit: this answers a deliberate action the user
+ * just took, one sound per send is exactly right, and buzzing the phone in
+ * your own hand for your own tap is noise. It shares the Settings sound
+ * toggle — someone who silenced the app silenced all of it.
+ */
+export function playSentSound(): void {
+  if (!useAlertPreferenceStore.getState().sound) return;
+  play('sent');
 }

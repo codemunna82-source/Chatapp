@@ -7,6 +7,9 @@ interface ChatHeaderTitleProps {
   /** Meta's 24-hour customer-service window expiry, from the conversation. */
   windowExpiresAt?: string;
   withinWindow: boolean;
+  /** Sample data — the window is not a real constraint there, so none of
+   *  it is shown. See the Conversation type's isDemo. */
+  isDemo?: boolean;
 }
 
 /** Re-checked once a minute — enough to keep an hours/minutes label honest
@@ -24,16 +27,16 @@ const TICK_MS = 60_000;
  * Only warns near the end. A full green "23h left" badge on every chat is
  * noise; what matters is the last stretch.
  */
-export function ChatHeaderTitle({ name, windowExpiresAt, withinWindow }: ChatHeaderTitleProps) {
+export function ChatHeaderTitle({ name, windowExpiresAt, withinWindow, isDemo = false }: ChatHeaderTitleProps) {
   const [, setTick] = useState(0);
 
   useEffect(() => {
-    if (!withinWindow) return;
+    if (!withinWindow || isDemo) return;
     const id = setInterval(() => setTick((t) => t + 1), TICK_MS);
     return () => clearInterval(id);
-  }, [withinWindow]);
+  }, [withinWindow, isDemo]);
 
-  const remaining = withinWindow ? formatWindowRemaining(windowExpiresAt) : null;
+  const remaining = withinWindow && !isDemo ? formatWindowRemaining(windowExpiresAt) : null;
   // "Urgent" is under two hours: still comfortably actionable, but close
   // enough that the reply should not wait for tomorrow.
   const urgent = remaining !== null && remaining.endsWith('m left');
@@ -43,7 +46,11 @@ export function ChatHeaderTitle({ name, windowExpiresAt, withinWindow }: ChatHea
       <Text style={styles.name} numberOfLines={1}>
         {name}
       </Text>
-      {!withinWindow ? (
+      {isDemo ? (
+        <Text style={[styles.subtitle, styles.normal]} numberOfLines={1}>
+          Sample chat
+        </Text>
+      ) : !withinWindow ? (
         <Text style={[styles.subtitle, styles.closed]} numberOfLines={1}>
           Reply window closed · template only
         </Text>

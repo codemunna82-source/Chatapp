@@ -12,6 +12,7 @@ import {
 import { findMediaByIdAndTenant } from '../media/media.repository';
 import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
 import { getMetaGateway, toMetaApiError, type SendableMediaType } from '../../integrations/meta';
+import { mockMetaGateway } from '../../integrations/meta/mock/mockMetaGateway';
 import { getRealtimeEmitter } from '../../realtime/events';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
 import type { MessageDoc } from './message.model';
@@ -107,8 +108,15 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     throw ApiError.notFound('CONTACT_NOT_FOUND', 'Contact not found');
   }
 
+  // A demo contact is a local sandbox: the number is not on WhatsApp, so
+  // neither the window rule nor a real send means anything on it. Both are
+  // bypassed together on purpose — bypassing only the window would leave a
+  // composer that opens and then fails at Meta instead, which is worse than
+  // the template prompt it replaced. See contact.model.ts.
+  const isDemoContact = contact.isDemo === true;
+
   // Server-side 24h window enforcement — never trust an Android countdown.
-  if (input.type !== 'template' && !isWithinCustomerServiceWindow(conversation)) {
+  if (!isDemoContact && input.type !== 'template' && !isWithinCustomerServiceWindow(conversation)) {
     throw new ApiError(
       422,
       'MESSAGE_TEMPLATE_REQUIRED',
@@ -150,7 +158,8 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
       input.tenantId,
       String(conversation.whatsappPhoneNumberId),
     );
-    const gateway = getMetaGateway();
+    // Demo sends never leave this server, whatever META_MOCK_MODE is set to.
+    const gateway = isDemoContact ? mockMetaGateway : getMetaGateway();
 
     const metaMessageId = await dispatch(gateway, credentials, contact.phone, input, replyToMetaMessageId);
 

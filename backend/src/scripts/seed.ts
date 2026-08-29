@@ -51,8 +51,12 @@ async function seedDemoWorkspaceData(tenantId: string): Promise<void> {
     qualityRating: 'GREEN',
   });
 
-  const contactA = await createContact({ tenantId, phone: '+15550002222', name: 'Alex Rivera' });
-  await createContact({ tenantId, phone: '+15550003333', name: 'Jordan Lee' });
+  // isDemo marks these as sample data: chats with them skip the 24-hour
+  // window UI and route sends through the mock gateway, because these
+  // numbers are not on WhatsApp and neither rule means anything on them
+  // (see contact.model.ts).
+  const contactA = await createContact({ tenantId, phone: '+15550002222', name: 'Alex Rivera', isDemo: true });
+  await createContact({ tenantId, phone: '+15550003333', name: 'Jordan Lee', isDemo: true });
 
   const conversation = await findOrCreateConversation(tenantId, String(contactA._id), String(phoneNumber._id));
 

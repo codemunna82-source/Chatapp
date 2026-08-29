@@ -19,6 +19,12 @@ export interface PublicConversation {
   lastCustomerMessageAt?: Date;
   conversationWindowExpiresAt?: Date;
   withinCustomerServiceWindow: boolean;
+  /**
+   * True when this chat is with a seeded demo contact. The client uses it
+   * to drop the 24-hour window UI entirely — see contact.model.ts for why
+   * that window is meaningless on demo data.
+   */
+  isDemo: boolean;
   unreadCount: number;
   manuallyUnread: boolean;
   pinned: boolean;
@@ -40,6 +46,10 @@ function toPublicConversation(doc: ConversationDoc, contact?: ContactDoc): Publi
     lastCustomerMessageAt: doc.lastCustomerMessageAt ?? undefined,
     conversationWindowExpiresAt: doc.conversationWindowExpiresAt ?? undefined,
     withinCustomerServiceWindow: repo.isWithinCustomerServiceWindow(doc),
+    // Absent contact (a conversation listed before its contact loads)
+    // defaults to NOT demo — the safe direction, since it keeps the real
+    // window rules on anything we cannot positively identify as sample data.
+    isDemo: contact?.isDemo ?? false,
     unreadCount: doc.unreadCount,
     manuallyUnread: doc.manuallyUnread,
     pinned: doc.pinned,

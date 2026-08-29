@@ -1,7 +1,7 @@
 import React from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Screen } from '../../components/Screen';
-import { LoadingIndicator } from '../../components/LoadingIndicator';
+import { DashboardSkeleton } from '../../components/Skeleton';
 import { InlineBanner } from '../../components/InlineBanner';
 import { StatCard } from '../../components/StatCard';
 import { MessagesBarChart } from './MessagesBarChart';
@@ -14,7 +14,14 @@ export function DashboardScreen() {
   const dashboard = useDashboard();
 
   if (dashboard.isLoading) {
-    return <LoadingIndicator fullscreen />;
+    // A skeleton in the real layout rather than a centred spinner: the
+    // dashboard's shape is what the user is waiting to read, and matching
+    // it means nothing jumps when the numbers land.
+    return (
+      <Screen>
+        <DashboardSkeleton />
+      </Screen>
+    );
   }
 
   return (

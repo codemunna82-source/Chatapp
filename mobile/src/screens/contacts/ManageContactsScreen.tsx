@@ -4,6 +4,7 @@ import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import { SearchBar } from '../../components/SearchBar';
 import { EmptyState } from '../../components/EmptyState';
+import { ChatListSkeleton } from '../../components/Skeleton';
 import { Avatar } from '../../components/Avatar';
 import { ContactFormSheet } from './ContactFormSheet';
 import { useContacts, flattenContacts, useDeleteContact } from '../../queries/useContacts';
@@ -188,7 +189,11 @@ export function ManageContactsScreen() {
         <Text style={[typography.caption, { color: colors.danger, paddingHorizontal: spacing.md, paddingBottom: 4 }]}>{error}</Text>
       ) : null}
 
-      {query.isLoading ? null : contacts.length === 0 ? (
+      {/* Was `null` — a blank screen reads as "nothing here" rather than
+          "loading", which is the wrong answer while a request is in flight. */}
+      {query.isLoading ? (
+        <ChatListSkeleton />
+      ) : contacts.length === 0 ? (
         <EmptyState
           icon={debouncedSearch ? 'search-outline' : 'people-outline'}
           title={debouncedSearch ? 'No contacts match your search' : 'No contacts yet'}

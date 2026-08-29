@@ -4,6 +4,7 @@ import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/ThemeProvider';
 import { EmptyState } from '../../components/EmptyState';
+import { ChatListSkeleton } from '../../components/Skeleton';
 import {
   useNotifications,
   flattenNotifications,
@@ -87,7 +88,9 @@ export function NotificationsScreen() {
         </Pressable>
       ) : null}
 
-      {query.isLoading ? null : notifications.length === 0 ? (
+      {query.isLoading ? (
+        <ChatListSkeleton />
+      ) : notifications.length === 0 ? (
         <EmptyState icon="checkmark-circle-outline" title="You're all caught up" subtitle="No notifications right now." />
       ) : (
         <FlashList

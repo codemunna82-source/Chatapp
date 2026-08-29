@@ -54,6 +54,7 @@ export interface Contact {
   name?: string;
   avatarUrl?: string;
   tags: string[];
+  isDemo: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -71,6 +72,13 @@ export interface Conversation {
   lastCustomerMessageAt?: string;
   conversationWindowExpiresAt?: string;
   withinCustomerServiceWindow: boolean;
+  /**
+   * Seeded sample data. The 24-hour window UI is dropped entirely for these
+   * — the number is not on WhatsApp, so neither the countdown nor the
+   * template prompt describes anything real (the backend treats them as a
+   * local sandbox to match).
+   */
+  isDemo: boolean;
   unreadCount: number;
   /**
    * Set by "mark as unread". Kept separate from unreadCount so the badge

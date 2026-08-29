@@ -3,6 +3,7 @@ import * as messagesApi from '../api/endpoints/messages';
 import type { SendMessageBody } from '../api/endpoints/messages';
 import type { Message } from '../api/types';
 import { queryKeys } from './keys';
+import { playSentSound } from '../sockets/useMessageAlert';
 
 type MessagesPage = { items: Message[]; nextCursor: string | null };
 type MessagesData = InfiniteData<MessagesPage, string | undefined>;
@@ -202,6 +203,9 @@ export function useSendMessage(conversationId: string) {
         })),
       );
       upsertMessageInCache(queryClient, conversationId, message);
+      // On success only. A sound for a send that then fails would be a
+      // false confirmation — the FAILED bubble is the honest signal there.
+      playSentSound();
     },
     onError: (_err, _body, context) => {
       if (!context) return;

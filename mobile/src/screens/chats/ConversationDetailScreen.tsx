@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { Screen } from '../../components/Screen';
-import { LoadingIndicator } from '../../components/LoadingIndicator';
+import { MessageListSkeleton } from '../../components/Skeleton';
 import { InlineBanner } from '../../components/InlineBanner';
 import { MessageBubble } from './MessageBubble';
 import { ChatWallpaper } from './ChatWallpaper';
@@ -436,6 +436,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           name={contactLabel}
           windowExpiresAt={conversationQuery.data?.conversationWindowExpiresAt}
           withinWindow={conversationQuery.data?.withinCustomerServiceWindow ?? true}
+          isDemo={conversationQuery.data?.isDemo ?? false}
         />
       ),
       // The header itself stays a fixed navy in both schemes (matches both
@@ -556,7 +557,18 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   }, [messagesQuery]);
 
   if (messagesQuery.isLoading || conversationQuery.isLoading) {
-    return <LoadingIndicator fullscreen />;
+    // Bubble-shaped placeholders over the real wallpaper, so the screen the
+    // user is arriving at is already recognisably this chat.
+    return (
+      <ThemeProvider colors={chatColors}>
+        <Screen padded={false} edges={SCREEN_EDGES}>
+          <View style={styles.flex}>
+            <ChatWallpaper />
+            <MessageListSkeleton />
+          </View>
+        </Screen>
+      </ThemeProvider>
+    );
   }
 
   return (
@@ -616,7 +628,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
             <Composer
               conversationId={conversationId}
               whatsappPhoneNumberId={conversation?.whatsappPhoneNumberId}
-              withinWindow={conversation?.withinCustomerServiceWindow ?? false}
+              // A demo chat always has an open composer: the backend skips
+              // the window rule for it too, so this is not the client
+              // deciding to ignore a server constraint.
+              withinWindow={(conversation?.isDemo ?? false) || (conversation?.withinCustomerServiceWindow ?? false)}
               sending={sendMessage.isPending}
               onSendText={handleSendText}
               onAttach={() => setAttachSheetOpen(true)}
