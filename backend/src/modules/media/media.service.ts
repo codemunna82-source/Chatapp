@@ -97,7 +97,37 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
  * or a Cloudinary error, and opportunistically writes the cache afterward
  * so the next read is fast — that write never blocks or fails this response.
  */
+/**
+ * Fetches in flight, keyed by tenant and media id.
+ *
+ * A photo arriving in a shared inbox is opened by several people within
+ * seconds of each other, and every one of those requests used to run its
+ * own pair of Meta round trips (retrieve the location, then download the
+ * bytes) for the identical file. Now the first request does the work and
+ * the rest await its promise.
+ *
+ * The entry is removed as soon as the fetch settles, so this is a
+ * de-duplicator and not a cache — nothing is held in memory beyond the
+ * request that asked for it, which matters when the payload is a video.
+ */
+const inFlightFetches = new Map<string, Promise<{ buffer: Buffer; mimeType: string }>>();
+
 export async function getMediaBytesForTenant(
+  tenantId: string,
+  mediaId: string,
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  const key = `${tenantId}:${mediaId}`;
+  const inFlight = inFlightFetches.get(key);
+  if (inFlight) return inFlight;
+
+  const fetch = fetchMediaBytes(tenantId, mediaId).finally(() => {
+    inFlightFetches.delete(key);
+  });
+  inFlightFetches.set(key, fetch);
+  return fetch;
+}
+
+async function fetchMediaBytes(
   tenantId: string,
   mediaId: string,
 ): Promise<{ buffer: Buffer; mimeType: string }> {

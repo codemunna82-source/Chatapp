@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as conversationsApi from '../api/endpoints/conversations';
 import type { ListConversationsParams } from '../api/endpoints/conversations';
 import type { Conversation, ConversationStatus } from '../api/types';
@@ -11,6 +11,13 @@ export function useConversations(params: Omit<ListConversationsParams, 'cursor'>
       conversationsApi.listConversations({ ...params, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    // The search text is part of the query key, so every debounced change
+    // starts a query with an empty cache — which threw the list back to a
+    // full-screen skeleton on each one. Holding the previous page keeps
+    // the results on screen, greyed by isFetching, while the next set
+    // loads: the same data arrives at the same time, but the screen stops
+    // flashing between them.
+    placeholderData: keepPreviousData,
   });
 }
 

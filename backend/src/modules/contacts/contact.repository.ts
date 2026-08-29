@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { Contact, type ContactDoc } from './contact.model';
+import { Contact, type ContactDoc, type ContactLean } from './contact.model';
 
 export interface CreateContactInput {
   tenantId: string;
@@ -26,10 +26,11 @@ export async function findContactByIdAndTenant(id: string, tenantId: string): Pr
 }
 
 /** Batch lookup for enriching a page of conversations/messages without an N+1 query per row. */
-export async function findContactsByIdsAndTenant(ids: string[], tenantId: string): Promise<ContactDoc[]> {
+/** Batch lookup behind the chat list's contact enrichment — read-only, so lean. */
+export async function findContactsByIdsAndTenant(ids: string[], tenantId: string): Promise<ContactLean[]> {
   const validIds = ids.filter((id) => Types.ObjectId.isValid(id));
   if (validIds.length === 0) return [];
-  return Contact.find({ _id: { $in: validIds }, tenantId });
+  return Contact.find({ _id: { $in: validIds }, tenantId }).lean<ContactLean[]>();
 }
 
 export async function findContactByPhoneAndTenant(phone: string, tenantId: string): Promise<ContactDoc | null> {
@@ -56,7 +57,7 @@ export interface ListContactsOptions {
 export async function listContactsByTenant(
   tenantId: string,
   opts: ListContactsOptions = {},
-): Promise<{ items: ContactDoc[]; nextCursor: string | null }> {
+): Promise<{ items: ContactLean[]; nextCursor: string | null }> {
   const limit = Math.min(opts.limit ?? 30, 100);
   const filter: Record<string, unknown> = { tenantId };
   if (opts.search) {
@@ -69,7 +70,8 @@ export async function listContactsByTenant(
 
   const items = await Contact.find(filter)
     .sort({ _id: -1 })
-    .limit(limit + 1);
+    .limit(limit + 1)
+    .lean<ContactLean[]>();
   const hasMore = items.length > limit;
   const page = hasMore ? items.slice(0, limit) : items;
   return { items: page, nextCursor: hasMore ? String(page[page.length - 1]!._id) : null };

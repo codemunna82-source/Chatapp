@@ -16,7 +16,12 @@ const walletTransactionSchema = new Schema(
   { timestamps: { createdAt: true, updatedAt: false } },
 );
 
-walletTransactionSchema.index({ tenantId: 1, createdAt: -1 });
+// Keyed on _id because that is what the list actually sorts and paginates
+// by (`.sort({_id:-1})` with an `_id < cursor` range). The createdAt index
+// this replaces matched the filter but not the sort, so every page loaded
+// the whole matching set and sorted it in memory. ObjectId order is
+// insertion order, so the rows come back in exactly the same sequence.
+walletTransactionSchema.index({ tenantId: 1, _id: -1 });
 walletTransactionSchema.index({ walletId: 1, createdAt: -1 });
 
 export type WalletTransactionDoc = HydratedDocument<InferSchemaType<typeof walletTransactionSchema>>;

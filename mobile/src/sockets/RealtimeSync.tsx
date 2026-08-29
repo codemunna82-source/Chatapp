@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { focusManager, onlineManager, useQueryClient } from '@tanstack/react-query';
@@ -9,6 +9,11 @@ import { useActiveConversationStore } from '../store/activeConversationStore';
 import { upsertMessageInCache, patchMessageStatusInCache } from '../queries/useMessages';
 import { queryKeys } from '../queries/keys';
 import type { Message, Conversation, MessageStatus } from '../api/types';
+
+/** Long enough to absorb a burst of webhooks, short enough that the list
+ *  still feels live — the bubble itself already updated instantly from the
+ *  socket payload, so this only governs the list row behind it. */
+const CONVERSATION_LIST_COALESCE_MS = 700;
 
 interface MessageStatusPayload {
   conversationId: string;
@@ -24,6 +29,35 @@ interface MessageStatusPayload {
  */
 export function RealtimeSync(): null {
   const queryClient = useQueryClient();
+
+  /**
+   * Refetches the chat list at most once per burst.
+   *
+   * Every inbound message, every status change and every read receipt
+   * touches the chat list, and each one used to invalidate it
+   * immediately — so a customer sending five messages in a row, or a
+   * batch of status webhooks landing together, cost five full refetches
+   * of a screen that only ends up rendering once. The list is a tab and
+   * is almost always mounted, so those all went to the network.
+   *
+   * A trailing window rather than a leading one: the last event in a
+   * burst is the one whose state the list should end up showing.
+   */
+  const listRefetch = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const invalidateConversations = useCallback(() => {
+    if (listRefetch.current) return;
+    listRefetch.current = setTimeout(() => {
+      listRefetch.current = null;
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+    }, CONVERSATION_LIST_COALESCE_MS);
+  }, [queryClient]);
+
+  useEffect(
+    () => () => {
+      if (listRefetch.current) clearTimeout(listRefetch.current);
+    },
+    [],
+  );
 
   // React Query ships browser implementations of both managers; in React
   // Native nothing drives them unless it is wired here, which is why
@@ -67,7 +101,7 @@ export function RealtimeSync(): null {
     'message:new',
     (message) => {
       upsertMessageInCache(queryClient, message.conversationId, message);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+      invalidateConversations();
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversation(message.conversationId) });
 
       // Only for messages FROM the customer, and only when the user is not
@@ -79,7 +113,7 @@ export function RealtimeSync(): null {
         alert();
       }
     },
-    [queryClient, alert],
+    [queryClient, alert, invalidateConversations],
   );
 
   useSocketEvent<Message>(
@@ -107,17 +141,17 @@ export function RealtimeSync(): null {
       queryClient.setQueryData<Conversation>(queryKeys.conversation(conversation.id), (old) =>
         old ? { ...old, ...conversation, contact: old.contact } : conversation,
       );
-      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+      invalidateConversations();
     },
-    [queryClient],
+    [queryClient, invalidateConversations],
   );
 
   useSocketEvent<{ conversationId: string; byUserId: string }>(
     'conversation:read',
     () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+      invalidateConversations();
     },
-    [queryClient],
+    [invalidateConversations],
   );
 
   return null;

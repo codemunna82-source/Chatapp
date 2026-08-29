@@ -2,8 +2,26 @@ import { Types } from 'mongoose';
 import { Contact } from '../contacts/contact.model';
 import { Conversation } from '../conversations/conversation.model';
 import { Message } from '../messages/message.model';
+import { createTtlCache } from '../../lib/ttlCache';
 
 const TIME_SERIES_DAYS = 14;
+
+/**
+ * The whole summary, per tenant, for half a minute.
+ *
+ * This endpoint runs seven aggregations, two of which touch every message
+ * the tenant has ever exchanged, and the screen behind it refetches on
+ * every foreground and every pull-to-refresh. Recomputing lifetime totals
+ * because someone switched apps and came back is work nobody asked for.
+ *
+ * Thirty seconds is chosen so that a number can never be visibly wrong for
+ * long: it is shorter than the time it takes to read the screen. There is
+ * deliberately no bypass — a "force refresh" that re-runs a full-collection
+ * scan on demand is exactly the button that takes a busy tenant's database
+ * down.
+ */
+const SUMMARY_TTL_MS = 30_000;
+const summaryCache = createTtlCache<DashboardSummary>({ ttlMs: SUMMARY_TTL_MS, maxEntries: 500 });
 
 export interface DashboardSummary {
   contactsTotal: number;
@@ -41,6 +59,9 @@ export interface DashboardSummary {
  * The mobile dashboard screen fetches those separately, gated by role.
  */
 export async function getDashboardSummary(tenantId: string): Promise<DashboardSummary> {
+  const cached = summaryCache.get(tenantId);
+  if (cached) return cached;
+
   const tenantObjectId = new Types.ObjectId(tenantId);
   const since = new Date(Date.now() - TIME_SERIES_DAYS * 24 * 60 * 60 * 1000);
 
@@ -90,7 +111,9 @@ export async function getDashboardSummary(tenantId: string): Promise<DashboardSu
     // window so a long-dead chat cannot skew the current picture.
     Message.aggregate<{ minutes: number }>([
       { $match: { tenantId: tenantObjectId, createdAt: { $gte: since } } },
-      { $sort: { createdAt: 1 } },
+      // No $sort here: $min scans the whole group regardless of input
+      // order, so sorting first was a blocking sort of every message in
+      // the window whose result the very next stage discarded.
       {
         $group: {
           _id: '$conversationId',
@@ -199,7 +222,7 @@ export async function getDashboardSummary(tenantId: string): Promise<DashboardSu
     messages: row.messages,
   }));
 
-  return {
+  const summary: DashboardSummary = {
     today,
     medianFirstResponseMinutes,
     topContacts,
@@ -208,4 +231,15 @@ export async function getDashboardSummary(tenantId: string): Promise<DashboardSu
     messages,
     messagesByDay,
   };
+  summaryCache.set(tenantId, summary);
+  return summary;
+}
+
+/**
+ * Empties the summary cache. Exported for tests, which share one process
+ * across suites and would otherwise be able to read a previous test's
+ * numbers back out of it.
+ */
+export function resetDashboardCache(): void {
+  summaryCache.clear();
 }

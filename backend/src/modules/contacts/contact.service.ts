@@ -1,7 +1,7 @@
 import { ApiError } from '../../lib/ApiError';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './contact.repository';
-import type { ContactDoc } from './contact.model';
+import type { ContactLean } from './contact.model';
 import { deleteConversationsByContact } from '../conversations/conversation.repository';
 import { deleteMessagesByConversation } from '../messages/message.repository';
 import {
@@ -35,7 +35,9 @@ export interface PublicContact {
   updatedAt: Date;
 }
 
-export function toPublicContact(doc: ContactDoc): PublicContact {
+// Takes the lean shape; a hydrated ContactDoc satisfies it too, so create
+// and update paths keep passing their own documents straight in.
+export function toPublicContact(doc: ContactLean): PublicContact {
   return {
     id: String(doc._id),
     tenantId: String(doc.tenantId),
@@ -44,8 +46,8 @@ export function toPublicContact(doc: ContactDoc): PublicContact {
     avatarUpdatedAt: doc.avatarUpdatedAt ?? undefined,
     tags: doc.tags ?? [],
     isDemo: doc.isDemo ?? false,
-    createdAt: doc.get('createdAt'),
-    updatedAt: doc.get('updatedAt'),
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
   };
 }
 

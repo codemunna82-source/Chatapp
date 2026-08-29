@@ -6,7 +6,7 @@ import * as repo from './callLog.repository';
 import * as contactRepo from '../contacts/contact.repository';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
 import type { CallLogDoc } from './callLog.model';
-import type { ContactDoc } from '../contacts/contact.model';
+import type { ContactLean } from '../contacts/contact.model';
 
 const WHATSAPP_DEEPLINK_PROVIDER = 'whatsapp_deeplink';
 
@@ -24,7 +24,7 @@ export interface PublicCallLog {
   createdAt: Date;
 }
 
-function toPublicCallLog(doc: CallLogDoc, contact?: ContactDoc): PublicCallLog {
+function toPublicCallLog(doc: CallLogDoc, contact?: ContactLean): PublicCallLog {
   return {
     id: String(doc._id),
     tenantId: String(doc.tenantId),

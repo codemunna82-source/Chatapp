@@ -1,6 +1,7 @@
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import compression from 'compression';
 import swaggerUi from 'swagger-ui-express';
 import { env } from './config/env';
 import { openApiSpec } from './docs/openapi';
@@ -29,6 +30,17 @@ export function createApp(): Express {
 
   app.disable('x-powered-by');
   app.set('trust proxy', 1); // needed for correct req.ip behind a reverse proxy/load balancer
+
+  // gzip before anything writes a body. The API's payloads are JSON lists
+  // of highly repetitive documents — a page of conversations or messages
+  // compresses to roughly a quarter of its size, which on a phone on
+  // mobile data is the single largest factor in how long a screen takes to
+  // appear.
+  //
+  // `compression` consults the `compressible` table, so already-compressed
+  // media (JPEG, MP4, audio) passing through the media proxy is left
+  // alone rather than being re-compressed for nothing.
+  app.use(compression());
 
   app.use(helmet());
   app.use(

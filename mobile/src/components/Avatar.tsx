@@ -29,18 +29,12 @@ function InitialsCircle({ label, size }: { label: string; size: number }) {
  * changes, so a new lookup always starts from `failed=false` — the React-
  * recommended way to reset state on a prop change without a setState-in-
  * effect (see react-hooks/set-state-in-effect).
+ *
+ * Only ever mounted for someone who actually HAS a photo — see Avatar
+ * below. Its `failed` fallback is for a photo that has since been deleted
+ * or cannot be fetched right now, not for the ordinary no-photo case.
  */
-function AvatarPhoto({
-  url,
-  version,
-  label,
-  size,
-}: {
-  url: string;
-  version?: string;
-  label: string;
-  size: number;
-}) {
+function AvatarPhoto({ url, label, size }: { url: string; label: string; size: number }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const [failed, setFailed] = useState(false);
 
@@ -86,7 +80,12 @@ interface AvatarProps {
    * exposes no way to read a customer's WhatsApp profile picture.
    */
   contactId?: string;
-  /** Cache-busting token (e.g. the user's or contact's avatarUpdatedAt) — bump it after a re-upload so a stale cached image isn't shown at the same URL. */
+  /**
+   * The subject's `avatarUpdatedAt`. Does double duty: it busts the cache
+   * after a re-upload (the URL is otherwise unchanged), AND its presence is
+   * what says a photo exists at all — omitted, this renders initials with
+   * no request made.
+   */
   version?: string;
 }
 
@@ -99,23 +98,27 @@ interface AvatarProps {
  * surfacing: most contacts will never have a photo.
  */
 export function Avatar({ label, size = 48, userId, contactId, version }: AvatarProps) {
+  // `version` is the subject's avatarUpdatedAt, which the server sets only
+  // when a photo is actually uploaded — so its absence means there is no
+  // photo to fetch, and this renders initials without touching the network.
+  //
+  // Without this check every row of every list fired an authenticated
+  // request that 404'd: a 30-row chat list cost 30 round trips to render
+  // the initials it was going to draw anyway, and each one held a socket
+  // and a slot in the connection pool while doing it.
+  if (!version) {
+    return <InitialsCircle label={label} size={size} />;
+  }
   if (userId) {
     return (
-      <AvatarPhoto
-        key={`u:${userId}:${version ?? ''}`}
-        url={userAvatarUrl(userId, version)}
-        version={version}
-        label={label}
-        size={size}
-      />
+      <AvatarPhoto key={`u:${userId}:${version}`} url={userAvatarUrl(userId, version)} label={label} size={size} />
     );
   }
   if (contactId) {
     return (
       <AvatarPhoto
-        key={`c:${contactId}:${version ?? ''}`}
+        key={`c:${contactId}:${version}`}
         url={contactAvatarUrl(contactId, version)}
-        version={version}
         label={label}
         size={size}
       />

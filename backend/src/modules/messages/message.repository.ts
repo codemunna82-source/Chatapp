@@ -1,5 +1,12 @@
 import { Types } from 'mongoose';
-import { Message, type MessageDoc, type MessageStatus, type MessageType, type MessageDirection } from './message.model';
+import {
+  Message,
+  type MessageDoc,
+  type MessageLean,
+  type MessageStatus,
+  type MessageType,
+  type MessageDirection,
+} from './message.model';
 
 export interface CreateMessageInput {
   tenantId: string;
@@ -66,7 +73,7 @@ export async function listMessagesByConversation(
   tenantId: string,
   conversationId: string,
   opts: ListMessagesOptions = {},
-): Promise<{ items: MessageDoc[]; nextCursor: string | null }> {
+): Promise<{ items: MessageLean[]; nextCursor: string | null }> {
   const limit = Math.min(opts.limit ?? 30, 100);
   // Soft-deleted messages never come back down the wire.
   const filter: Record<string, unknown> = { tenantId, conversationId, deletedAt: { $exists: false } };
@@ -85,9 +92,13 @@ export async function listMessagesByConversation(
     filter.text = { $regex: escapeRegex(opts.search), $options: 'i' };
   }
 
+  // .lean(): this page is serialised straight to JSON and no document
+  // method is ever called on it, so the Mongoose document wrapper around
+  // each of up to 100 rows is pure overhead.
   const items = await Message.find(filter)
     .sort({ _id: -1 })
-    .limit(limit + 1);
+    .limit(limit + 1)
+    .lean<MessageLean[]>();
   const hasMore = items.length > limit;
   const page = hasMore ? items.slice(0, limit) : items;
   return { items: page, nextCursor: hasMore ? String(page[page.length - 1]!._id) : null };

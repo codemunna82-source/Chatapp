@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { ApiError } from '../../lib/ApiError';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
+import { serveCachedAsset, IMMUTABLE_MAX_AGE_SECONDS } from '../../lib/httpAssetCache';
 import * as userService from './user.service';
 
 export const createUserHandler = asyncHandler(async (req: Request, res: Response) => {
@@ -51,8 +52,27 @@ export const updateOwnAvatarHandler = asyncHandler(async (req: Request, res: Res
 
 export const getUserAvatarHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  const { data, contentType } = await userService.getUserAvatarForTenant(auth.tenantId, req.params.id as string);
+  const userId = req.params.id as string;
+  const version = typeof req.query.v === 'string' ? req.query.v : undefined;
+
+  // The client requests this with ?v=<avatarUpdatedAt> (see Avatar.tsx),
+  // which makes each version of the photo its own URL and therefore
+  // immutable. Without that param the URL means "whatever the current
+  // photo is", so it only gets a short freshness window and must
+  // revalidate — the ETag still turns that revalidation into a 304
+  // rather than a re-download.
+  if (
+    serveCachedAsset(req, res, {
+      etag: `"user-avatar-${userId}-${version ?? 'current'}"`,
+      immutable: Boolean(version),
+      maxAgeSeconds: version ? IMMUTABLE_MAX_AGE_SECONDS : 300,
+    })
+  ) {
+    return;
+  }
+
+  const { data, contentType } = await userService.getUserAvatarForTenant(auth.tenantId, userId);
   res.setHeader('Content-Type', contentType);
-  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.setHeader('Content-Length', String(data.length));
   res.status(200).send(data);
 });

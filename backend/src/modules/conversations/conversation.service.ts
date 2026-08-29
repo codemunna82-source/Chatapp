@@ -5,8 +5,8 @@ import * as contactRepo from '../contacts/contact.repository';
 import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
 import { deleteMessagesByConversation } from '../messages/message.repository';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
-import type { ConversationDoc, ConversationStatus } from './conversation.model';
-import type { ContactDoc } from '../contacts/contact.model';
+import type { ConversationLean, ConversationStatus } from './conversation.model';
+import type { ContactLean } from '../contacts/contact.model';
 
 export interface PublicConversation {
   id: string;
@@ -38,7 +38,7 @@ export interface PublicConversation {
   updatedAt: Date;
 }
 
-function toPublicConversation(doc: ConversationDoc, contact?: ContactDoc): PublicConversation {
+function toPublicConversation(doc: ConversationLean, contact?: ContactLean): PublicConversation {
   return {
     id: String(doc._id),
     tenantId: String(doc.tenantId),
@@ -56,18 +56,24 @@ function toPublicConversation(doc: ConversationDoc, contact?: ContactDoc): Publi
     // defaults to NOT demo — the safe direction, since it keeps the real
     // window rules on anything we cannot positively identify as sample data.
     isDemo: contact?.isDemo ?? false,
-    unreadCount: doc.unreadCount,
-    manuallyUnread: doc.manuallyUnread,
-    pinned: doc.pinned,
+    // These four carry schema defaults, and this list is read with
+    // .lean() — which returns the document exactly as stored and does NOT
+    // apply defaults the way a hydrated document does. A conversation
+    // written before one of these fields existed (manuallyUnread is newer
+    // than the collection) would otherwise come back undefined here rather
+    // than as its default.
+    unreadCount: doc.unreadCount ?? 0,
+    manuallyUnread: doc.manuallyUnread ?? false,
+    pinned: doc.pinned ?? false,
     pinnedAt: doc.pinnedAt ?? undefined,
-    status: doc.status,
-    createdAt: doc.get('createdAt'),
-    updatedAt: doc.get('updatedAt'),
+    status: doc.status ?? 'OPEN',
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
   };
 }
 
 /** Batch-fetches contacts for a page of conversations — one query, not N. */
-async function enrichWithContacts(tenantId: string, conversations: ConversationDoc[]): Promise<PublicConversation[]> {
+async function enrichWithContacts(tenantId: string, conversations: ConversationLean[]): Promise<PublicConversation[]> {
   const contactIds = [...new Set(conversations.map((c) => String(c.contactId)))];
   const contacts = await contactRepo.findContactsByIdsAndTenant(contactIds, tenantId);
   const byId = new Map(contacts.map((c) => [String(c._id), c]));

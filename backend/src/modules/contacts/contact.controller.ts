@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
+import { serveCachedAsset, IMMUTABLE_MAX_AGE_SECONDS } from '../../lib/httpAssetCache';
 import { ApiError } from '../../lib/ApiError';
 import * as contactService from './contact.service';
 
@@ -57,13 +58,27 @@ export const updateContactAvatarHandler = asyncHandler(async (req: Request, res:
 
 export const getContactAvatarHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  const { data, contentType } = await contactService.getContactAvatarForTenant(
-    auth.tenantId,
-    req.params.id as string,
-  );
+  const contactId = req.params.id as string;
+  const version = typeof req.query.v === 'string' ? req.query.v : undefined;
+
+  // The client requests this with ?v=<avatarUpdatedAt> (see Avatar.tsx),
+  // which makes each version of the photo its own URL and therefore
+  // immutable. Without that param the URL means "whatever the current
+  // photo is", so it only gets a short freshness window and must
+  // revalidate — the ETag still turns that revalidation into a 304
+  // rather than a re-download.
+  if (
+    serveCachedAsset(req, res, {
+      etag: `"contact-avatar-${contactId}-${version ?? 'current'}"`,
+      immutable: Boolean(version),
+      maxAgeSeconds: version ? IMMUTABLE_MAX_AGE_SECONDS : 300,
+    })
+  ) {
+    return;
+  }
+
+  const { data, contentType } = await contactService.getContactAvatarForTenant(auth.tenantId, contactId);
   res.setHeader('Content-Type', contentType);
-  // Short private cache: the client already busts this with
-  // avatarUpdatedAt, so this only spares repeat fetches within one session.
-  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.setHeader('Content-Length', String(data.length));
   res.status(200).send(data);
 });

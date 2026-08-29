@@ -1,4 +1,5 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mongoose';
+import type { Timestamps, Lean } from '../../lib/modelTypes';
 
 const contactSchema = new Schema(
   {
@@ -46,7 +47,16 @@ const contactSchema = new Schema(
 contactSchema.index({ tenantId: 1, phone: 1 }, { unique: true });
 // Name-prefix search for the contacts screen's search box.
 contactSchema.index({ tenantId: 1, name: 1 });
-contactSchema.index({ tenantId: 1, createdAt: -1 });
+// Keyed on _id because that is what the list actually sorts and paginates
+// by (`.sort({_id:-1})` with an `_id < cursor` range). The createdAt index
+// this replaces matched the filter but not the sort, so every page loaded
+// the whole matching set and sorted it in memory. ObjectId order is
+// insertion order, so the rows come back in exactly the same sequence.
+contactSchema.index({ tenantId: 1, _id: -1 });
 
-export type ContactDoc = HydratedDocument<InferSchemaType<typeof contactSchema>>;
+type ContactAttrs = InferSchemaType<typeof contactSchema> & Timestamps;
+export type ContactDoc = HydratedDocument<ContactAttrs>;
+/** A `.lean()` row — see lib/modelTypes.ts. Structurally a superset-compatible
+ *  match for ContactDoc, so serialisers accept either. */
+export type ContactLean = Lean<ContactAttrs>;
 export const Contact = model('Contact', contactSchema);

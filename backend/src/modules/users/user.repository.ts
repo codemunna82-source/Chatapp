@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { User, type UserDoc, type UserRole, type UserStatus } from './user.model';
 import type { Permission } from './permission';
+import { invalidateAuthContext } from '../auth/authContext.service';
 
 /**
  * Every method here takes tenantId explicitly and folds it into the Mongo
@@ -80,7 +81,18 @@ export async function updateUserByIdAndTenant(
   patch: UpdateUserPatch,
 ): Promise<UserDoc | null> {
   if (!Types.ObjectId.isValid(id)) return null;
-  return User.findOneAndUpdate({ _id: id, tenantId }, { $set: patch }, { new: true });
+  const updated = await User.findOneAndUpdate({ _id: id, tenantId }, { $set: patch }, { new: true });
+
+  // Every field this patch can carry — status, role, permissions, the
+  // validity window — is one the request-time auth check reads. Dropping
+  // the cached context here is what makes disabling a user, or narrowing
+  // their permissions, take effect on their very next request rather than
+  // whenever the entry happened to expire.
+  //
+  // Unconditional: cheap, and a cache left holding stale authority after a
+  // failed conditional is a security bug, not a performance one.
+  invalidateAuthContext(id, tenantId);
+  return updated;
 }
 
 /** Soft-disable — never hard-delete a user, to preserve audit/message history integrity. */

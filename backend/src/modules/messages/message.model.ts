@@ -1,4 +1,5 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mongoose';
+import type { Timestamps, Lean } from '../../lib/modelTypes';
 
 export const MESSAGE_DIRECTIONS = ['IN', 'OUT'] as const;
 export type MessageDirection = (typeof MESSAGE_DIRECTIONS)[number];
@@ -82,9 +83,24 @@ const messageSchema = new Schema(
   { timestamps: true },
 );
 
-// Paginated chat history, newest-first within a conversation — the
-// single most frequently hit query pattern in the whole app.
-messageSchema.index({ tenantId: 1, conversationId: 1, createdAt: -1 });
+// Paginated chat history, newest-first within a conversation — the single
+// most frequently hit query pattern in the whole app.
+//
+// Keyed on _id, not createdAt, because that is what the query actually
+// sorts and paginates by (see listMessagesByConversation: `.sort({_id:-1})`
+// with an `_id < cursor` range). With the createdAt index Mongo could use
+// the index to FIND the conversation's messages but then had to load and
+// sort every one of them in memory to order by _id — a blocking SORT stage
+// on the app's hottest read, which also fails outright past 32MB on a long
+// thread. An ObjectId's leading bytes are a timestamp, so _id order is
+// insertion order: nothing is lost by ordering on it.
+messageSchema.index({ tenantId: 1, conversationId: 1, _id: -1 });
+// The dashboard's lifetime totals group every message by direction and
+// status. With only the (tenantId, createdAt) index below, that meant
+// fetching each full document — text, error payloads and all — off disk
+// purely to read two short fields. This index carries both, so the scan
+// stays in the index and never touches the documents.
+messageSchema.index({ tenantId: 1, direction: 1, status: 1 });
 // Recent-activity feeds / dashboards.
 messageSchema.index({ tenantId: 1, createdAt: -1 });
 // Starred-only listing. Partial rather than sparse so the index holds only
@@ -98,5 +114,9 @@ messageSchema.index(
 // but IN messages/failed sends may briefly lack it).
 messageSchema.index({ metaMessageId: 1 }, { unique: true, sparse: true });
 
-export type MessageDoc = HydratedDocument<InferSchemaType<typeof messageSchema>>;
+type MessageAttrs = InferSchemaType<typeof messageSchema> & Timestamps;
+export type MessageDoc = HydratedDocument<MessageAttrs>;
+/** A `.lean()` row — see lib/modelTypes.ts. Structurally a superset-compatible
+ *  match for MessageDoc, so serialisers accept either. */
+export type MessageLean = Lean<MessageAttrs>;
 export const Message = model('Message', messageSchema);

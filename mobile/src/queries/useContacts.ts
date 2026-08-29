@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as contactsApi from '../api/endpoints/contacts';
 import type { ListContactsParams } from '../api/endpoints/contacts';
 import type { Contact } from '../api/types';
@@ -11,6 +11,9 @@ export function useContacts(params: Omit<ListContactsParams, 'cursor'> = {}) {
       contactsApi.listContacts({ ...params, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    // Same reasoning as useConversations: keep the current results visible
+    // while a search refines rather than blanking the list per keystroke.
+    placeholderData: keepPreviousData,
   });
 }
 

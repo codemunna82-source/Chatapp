@@ -4,11 +4,18 @@ import { createTestTenant, createTestUser, createTestChatFixture } from '../../.
 import { signAccessToken } from '../../lib/jwt';
 import { useMongoMemoryServer } from '../../../test/withMongo';
 import { Message } from '../messages/message.model';
+import { resetDashboardCache } from './dashboard.service';
 
 useMongoMemoryServer();
 const app = createApp();
 
 describe('Dashboard REST', () => {
+  // The summary is cached per tenant for 30s (see dashboard.service.ts).
+  // Tenants are freshly created per test so a collision is unlikely, but
+  // an assertion that silently reads a cached rollup is the kind of test
+  // failure that costs an afternoon.
+  beforeEach(() => resetDashboardCache());
+
   it('aggregates tenant-scoped counts only', async () => {
     const tenantA = await createTestTenant('Tenant A');
     const tenantB = await createTestTenant('Tenant B');

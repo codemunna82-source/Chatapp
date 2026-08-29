@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { ApiError } from '../../lib/ApiError';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
+import { serveCachedAsset, IMMUTABLE_MAX_AGE_SECONDS } from '../../lib/httpAssetCache';
 import { uploadMediaForTenant, getMediaBytesForTenant } from './media.service';
 
 export const uploadMediaHandler = asyncHandler(async (req: Request, res: Response) => {
@@ -34,8 +35,25 @@ export const uploadMediaHandler = asyncHandler(async (req: Request, res: Respons
 
 export const getMediaHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  const { buffer, mimeType } = await getMediaBytesForTenant(auth.tenantId, req.params.id as string);
+  const mediaId = req.params.id as string;
+
+  // The bytes behind a media id never change — WhatsApp media is written
+  // once and referenced by an immutable id — so the id IS the validator,
+  // and this answers before the fetch below ever runs. It used to be
+  // max-age=3600 with no validator, which had every device re-downloading
+  // every photo in a thread once an hour for bytes that had not moved.
+  if (
+    serveCachedAsset(req, res, {
+      etag: `"media-${mediaId}"`,
+      immutable: true,
+      maxAgeSeconds: IMMUTABLE_MAX_AGE_SECONDS,
+    })
+  ) {
+    return;
+  }
+
+  const { buffer, mimeType } = await getMediaBytesForTenant(auth.tenantId, mediaId);
   res.setHeader('Content-Type', mimeType);
-  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.setHeader('Content-Length', String(buffer.length));
   res.status(200).send(buffer);
 });

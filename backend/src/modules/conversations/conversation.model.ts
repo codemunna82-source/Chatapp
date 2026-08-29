@@ -1,4 +1,5 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mongoose';
+import type { Timestamps, Lean } from '../../lib/modelTypes';
 
 export const CONVERSATION_STATUSES = ['OPEN', 'ARCHIVED'] as const;
 export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
@@ -54,10 +55,22 @@ const conversationSchema = new Schema(
 
 // One conversation per (tenant, contact) — matches spec's Conversation-per-Contact model.
 conversationSchema.index({ tenantId: 1, contactId: 1 }, { unique: true });
-// Chat list sorted by recent activity.
-conversationSchema.index({ tenantId: 1, updatedAt: -1 });
-// Pinned-first chat list.
-conversationSchema.index({ tenantId: 1, pinned: 1, lastMessageAt: -1 });
+// The chat list, exactly as it is sorted and paginated: pinned first, then
+// most recent, with _id breaking ties and carrying the keyset cursor (see
+// listConversationsByTenant). All four fields in the sort's own order and
+// direction, so Mongo walks the index and stops at the page size instead of
+// loading the tenant's whole chat list to sort it.
+//
+// This replaces two indexes that each covered part of the query — one on
+// updatedAt that could not express "pinned first", and one on
+// (pinned, lastMessageAt) that sorted by a field the list does not order
+// by — so neither could serve the sort and every page paid a blocking
+// SORT stage.
+conversationSchema.index({ tenantId: 1, pinned: -1, updatedAt: -1, _id: -1 });
 
-export type ConversationDoc = HydratedDocument<InferSchemaType<typeof conversationSchema>>;
+type ConversationAttrs = InferSchemaType<typeof conversationSchema> & Timestamps;
+export type ConversationDoc = HydratedDocument<ConversationAttrs>;
+/** A `.lean()` row — see lib/modelTypes.ts. Structurally a superset-compatible
+ *  match for ConversationDoc, so serialisers accept either. */
+export type ConversationLean = Lean<ConversationAttrs>;
 export const Conversation = model('Conversation', conversationSchema);

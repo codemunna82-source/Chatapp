@@ -3,7 +3,7 @@ import { asyncHandler } from '../../lib/asyncHandler';
 import { ApiError } from '../../lib/ApiError';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { assertPermission } from '../../middleware/rbac.middleware';
-import { findConversationByIdAndTenant } from '../conversations/conversation.repository';
+import { conversationExistsForTenant } from '../conversations/conversation.repository';
 import { listMessagesByConversation } from './message.repository';
 import {
   sendOutboundMessage,
@@ -19,8 +19,9 @@ export const listMessagesHandler = asyncHandler(async (req: Request, res: Respon
   const auth = getTenantContext(req);
   const conversationId = req.params.conversationId as string;
 
-  const conversation = await findConversationByIdAndTenant(conversationId, auth.tenantId);
-  if (!conversation) {
+  // Existence check only: the message query below is already scoped to
+  // this tenant, so this decides 404-vs-empty-list and nothing else.
+  if (!(await conversationExistsForTenant(conversationId, auth.tenantId))) {
     throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
   }
 
