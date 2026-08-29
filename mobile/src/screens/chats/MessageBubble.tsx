@@ -44,26 +44,43 @@ function MessageContent({
   message,
   textColor,
   onOpenImage,
+  onLongPress,
 }: {
   message: Message;
   textColor: string;
   onOpenImage?: (localUri: string) => void;
+  /**
+   * Forwarded into every media child that renders its own Pressable.
+   *
+   * A nested Pressable becomes the touch responder and swallows the long
+   * press, so the bubble's own onLongPress never fires — which is why the
+   * action sheet worked on text messages (no inner Pressable) but not on a
+   * photo, a voice note or a file. Handing the same handler down is what
+   * makes long-press work everywhere; the children keep their own onPress
+   * for opening, playing and sharing.
+   */
+  onLongPress: () => void;
 }) {
   const { typography } = useTheme();
 
   if (message.type === 'image' && (message.mediaId || message.localUri)) {
     return (
       <View>
-        <MediaImage mediaId={message.mediaId} localUri={message.localUri} onOpen={onOpenImage} />
+        <MediaImage
+          mediaId={message.mediaId}
+          localUri={message.localUri}
+          onOpen={onOpenImage}
+          onLongPress={onLongPress}
+        />
         {message.text ? <Text style={[typography.body, { color: textColor, marginTop: 6 }]}>{message.text}</Text> : null}
       </View>
     );
   }
   if (message.type === 'audio' && message.mediaId) {
-    return <AudioMessageBubble mediaId={message.mediaId} tint={textColor} />;
+    return <AudioMessageBubble mediaId={message.mediaId} tint={textColor} onLongPress={onLongPress} />;
   }
   if ((message.type === 'video' || message.type === 'document') && message.mediaId) {
-    return <MediaFileChip mediaId={message.mediaId} type={message.type} />;
+    return <MediaFileChip mediaId={message.mediaId} type={message.type} onLongPress={onLongPress} />;
   }
   return <Text style={[typography.body, { color: textColor }]}>{message.text || `[${message.type}]`}</Text>;
 }
@@ -239,7 +256,12 @@ function MessageBubbleImpl({
           </View>
         ) : null}
 
-        <MessageContent message={message} textColor={textColor} onOpenImage={onOpenImage} />
+        <MessageContent
+          message={message}
+          textColor={textColor}
+          onOpenImage={onOpenImage}
+          onLongPress={handleLongPress}
+        />
 
         <View style={styles.footer}>
           {message.starredAt ? (

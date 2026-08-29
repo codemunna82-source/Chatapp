@@ -1,8 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { Image, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/ThemeProvider';
-import { useChatWallpaperStore, type WallpaperStyle } from '../../store/chatWallpaperStore';
+import {
+  useChatWallpaperStore,
+  CUSTOM_WALLPAPER_DIM,
+  type WallpaperStyle,
+} from '../../store/chatWallpaperStore';
 
 const DOODLE_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
   'chatbubble-outline',
@@ -140,7 +144,13 @@ function PatternLayer({ style, width, height, tint }: { style: WallpaperStyle; w
 function ChatWallpaperImpl() {
   const { colors } = useTheme();
   const style = useChatWallpaperStore((s) => s.style);
+  const customUri = useChatWallpaperStore((s) => s.customUri);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  // A picked file can disappear underneath us (storage cleared, a restore
+  // onto another device). Falling back to the plain themed background beats
+  // a blank screen where the chat used to be.
+  const [customFailed, setCustomFailed] = useState(false);
+  const showCustom = style === 'custom' && Boolean(customUri) && !customFailed;
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -160,7 +170,36 @@ function ChatWallpaperImpl() {
       // would have no view left to apply to.
       collapsable={false}
     >
-      <PatternLayer style={style} width={size.width} height={size.height} tint={colors.primary} />
+      {showCustom ? (
+        <>
+          <Image
+            source={{ uri: customUri as string }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            onError={() => setCustomFailed(true)}
+          />
+          {/* A photo cannot be legible by construction — a bright or busy
+              one behind dark text is unreadable. The scrim takes the
+              contrast decision away from whatever was picked, using the
+              theme's own surface colour so it dims correctly in light AND
+              dark rather than always darkening. */}
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: colors.surface, opacity: CUSTOM_WALLPAPER_DIM },
+            ]}
+          />
+        </>
+      ) : (
+        <PatternLayer
+          // Reached only when 'custom' is selected but unusable (no file, or
+          // it failed to load) — plain is the honest fallback.
+          style={style === 'custom' ? 'plain' : style}
+          width={size.width}
+          height={size.height}
+          tint={colors.primary}
+        />
+      )}
     </View>
   );
 }

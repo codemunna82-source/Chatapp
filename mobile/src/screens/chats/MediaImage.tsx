@@ -22,11 +22,15 @@ function MediaImageImpl({
   mediaId,
   localUri: providedUri,
   onOpen,
+  onLongPress,
 }: {
   mediaId?: string;
   /** A local file to render directly — used for a just-picked, still-uploading photo. */
   localUri?: string;
   onOpen?: (localUri: string) => void;
+  /** The bubble's action sheet. Handled here because this Pressable would
+   *  otherwise swallow the long press before the bubble ever sees it. */
+  onLongPress?: () => void;
 }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const { colors, radius } = useTheme();
@@ -90,7 +94,11 @@ function MediaImageImpl({
       // Opening the viewer passes the already-cached file, so a full-screen
       // photo costs no extra request and works offline.
       onPress={displayUri && onOpen ? () => onOpen(displayUri) : undefined}
-      disabled={!displayUri || !onOpen}
+      // Long-press has to reach the bubble's action sheet even while the
+      // photo is still downloading, so this Pressable is never `disabled`:
+      // a disabled Pressable stops responding entirely, which would take
+      // React/Reply/Forward away for as long as the image is loading.
+      onLongPress={onLongPress}
       accessibilityRole={onOpen ? 'imagebutton' : 'image'}
       accessibilityLabel="Photo"
       style={[box, { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surfaceAlt }]}

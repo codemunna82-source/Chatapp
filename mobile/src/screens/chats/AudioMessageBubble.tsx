@@ -29,7 +29,17 @@ const BAR_HEIGHTS = Array.from({ length: BAR_COUNT }, (_, i) => {
  * to local cache, then plays it in place with a tap-to-scrub-free progress
  * waveform driven by expo-audio's live playback status.
  */
-export function AudioMessageBubble({ mediaId, tint }: { mediaId: string; tint: string }) {
+export function AudioMessageBubble({
+  mediaId,
+  tint,
+  onLongPress,
+}: {
+  mediaId: string;
+  tint: string;
+  /** Forwarded to the row's Pressable so long-press reaches the bubble's
+   *  action sheet instead of being swallowed here. */
+  onLongPress?: () => void;
+}) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const { spacing, typography } = useTheme();
   const { width } = useWindowDimensions();
@@ -73,6 +83,11 @@ export function AudioMessageBubble({ mediaId, tint }: { mediaId: string; tint: s
   }, [status.isLoaded, player]);
 
   const handlePress = async () => {
+    // Guards its own re-entry now that the Pressable is no longer
+    // `disabled` during the download (see the comment on onLongPress
+    // below) — without this, a second tap would start a second download of
+    // the same file.
+    if (downloading) return;
     setError(false);
     if (!localUri) {
       setDownloading(true);
@@ -106,7 +121,15 @@ export function AudioMessageBubble({ mediaId, tint }: { mediaId: string; tint: s
   const remaining = status.isLoaded && status.duration > 0 ? status.duration - status.currentTime : status.duration;
 
   return (
-    <Pressable onPress={handlePress} disabled={downloading} style={[styles.row, { minWidth: rowMinWidth }]}>
+    <Pressable
+      onPress={handlePress}
+      // Not `disabled` while downloading: a disabled Pressable stops
+      // responding entirely, which would take the bubble's action sheet
+      // away for as long as the file is being fetched. handlePress guards
+      // its own re-entry instead.
+      onLongPress={onLongPress}
+      style={[styles.row, { minWidth: rowMinWidth }]}
+    >
       <View style={[styles.playButton, { backgroundColor: `${tint}22` }]}>
         {downloading ? (
           <ActivityIndicator color={tint} size="small" />

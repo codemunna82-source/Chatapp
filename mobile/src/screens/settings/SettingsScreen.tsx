@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { File, Paths } from 'expo-file-system';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Screen } from '../../components/Screen';
 import { Button } from '../../components/Button';
@@ -158,17 +159,74 @@ function AppearanceSection() {
   );
 }
 
+/** See pickWallpaper for why there are exactly two, and why they alternate. */
+const WALLPAPER_SLOT_A = 'voxo-wallpaper-a.jpg';
+const WALLPAPER_SLOT_B = 'voxo-wallpaper-b.jpg';
+
 const WALLPAPER_ICONS: Record<WallpaperStyle, keyof typeof Ionicons.glyphMap> = {
   doodles: 'color-wand-outline',
   plain: 'square-outline',
   dots: 'ellipsis-horizontal-outline',
   grid: 'grid-outline',
+  custom: 'image-outline',
 };
 
 function ChatWallpaperSection() {
   const { colors, spacing, radius, typography } = useTheme();
   const style = useChatWallpaperStore((s) => s.style);
   const setStyle = useChatWallpaperStore((s) => s.setStyle);
+  const setCustomWallpaper = useChatWallpaperStore((s) => s.setCustomWallpaper);
+  const [wallpaperError, setWallpaperError] = useState<string | null>(null);
+  const [pickingWallpaper, setPickingWallpaper] = useState(false);
+
+  const pickWallpaper = async () => {
+    if (pickingWallpaper) return;
+    setPickingWallpaper(true);
+    setWallpaperError(null);
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setWallpaperError('Photo access is needed to choose a wallpaper.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets[0]) return;
+
+      // Copied into the app's own document directory rather than pointing
+      // at the picker's temporary URI: that one is a short-lived cache
+      // entry Android reclaims, so the wallpaper would vanish days later
+      // for no reason the user could connect to anything they did.
+      //
+      // Two fixed slots, alternating, instead of a timestamped name. The
+      // name has to CHANGE between picks — React Native's Image caches by
+      // URI, so reusing one filename would keep showing the old photo —
+      // but it also has to be predictable, so old files cannot accumulate.
+      const previous = useChatWallpaperStore.getState().customUri;
+      const nextSlot = previous?.endsWith(WALLPAPER_SLOT_A) ? WALLPAPER_SLOT_B : WALLPAPER_SLOT_A;
+      const destination = new File(Paths.document, nextSlot);
+      if (destination.exists) destination.delete();
+      await new File(result.assets[0].uri).copy(destination);
+      setCustomWallpaper(destination.uri);
+
+      // Only after the new one is in place, so a failed copy never leaves
+      // the user with neither.
+      if (previous) {
+        try {
+          const old = new File(previous);
+          if (old.exists) old.delete();
+        } catch {
+          // An already-missing previous file is not worth reporting.
+        }
+      }
+    } catch {
+      setWallpaperError('Could not use that image.');
+    } finally {
+      setPickingWallpaper(false);
+    }
+  };
 
   return (
     <View style={{ marginBottom: spacing.lg }}>
@@ -179,7 +237,7 @@ function ChatWallpaperSection() {
           return (
             <Pressable
               key={option}
-              onPress={() => setStyle(option)}
+              onPress={() => (option === 'custom' ? void pickWallpaper() : setStyle(option))}
               style={[
                 styles.appearanceOption,
                 {
@@ -207,6 +265,14 @@ function ChatWallpaperSection() {
           );
         })}
       </View>
+      {wallpaperError ? (
+        <Text style={[typography.caption, { color: colors.danger, marginTop: spacing.xs }]}>{wallpaperError}</Text>
+      ) : null}
+      {style === 'custom' ? (
+        <Text style={[typography.caption, { color: colors.textTertiary, marginTop: spacing.xs }]}>
+          Your photo is dimmed behind the chat so message text stays readable. Tap Photo again to change it.
+        </Text>
+      ) : null}
     </View>
   );
 }

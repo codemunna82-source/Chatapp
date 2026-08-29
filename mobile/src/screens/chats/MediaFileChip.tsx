@@ -26,7 +26,16 @@ const LABELS: Partial<Record<MessageType, string>> = {
  * working way to view a video/audio/document without building a custom
  * in-app player for every format Meta can deliver.
  */
-export function MediaFileChip({ mediaId, type }: { mediaId: string; type: MessageType }) {
+export function MediaFileChip({
+  mediaId,
+  type,
+  onLongPress,
+}: {
+  mediaId: string;
+  type: MessageType;
+  /** Forwarded to the chip's Pressable — see MediaImage for why. */
+  onLongPress?: () => void;
+}) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const { colors, spacing, radius, typography } = useTheme();
   const [busy, setBusy] = useState(false);
@@ -54,6 +63,7 @@ export function MediaFileChip({ mediaId, type }: { mediaId: string; type: Messag
   return (
     <Pressable
       onPress={handlePress}
+      onLongPress={onLongPress}
       disabled={busy}
       style={[styles.row, { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm, padding: spacing.sm }]}
     >
