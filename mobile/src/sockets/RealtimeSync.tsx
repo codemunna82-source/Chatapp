@@ -4,6 +4,8 @@ import NetInfo from '@react-native-community/netinfo';
 import { focusManager, onlineManager, useQueryClient } from '@tanstack/react-query';
 import { useSocketEvent } from './useSocketEvent';
 import { useSocketConnection } from './useSocketConnected';
+import { useMessageAlert } from './useMessageAlert';
+import { useActiveConversationStore } from '../store/activeConversationStore';
 import { upsertMessageInCache, patchMessageStatusInCache } from '../queries/useMessages';
 import { queryKeys } from '../queries/keys';
 import type { Message, Conversation, MessageStatus } from '../api/types';
@@ -59,14 +61,25 @@ export function RealtimeSync(): null {
     void queryClient.invalidateQueries({ queryKey: queryKeys.messagesAll });
   }, [generation, queryClient]);
 
+  const alert = useMessageAlert();
+
   useSocketEvent<Message>(
     'message:new',
     (message) => {
       upsertMessageInCache(queryClient, message.conversationId, message);
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversation(message.conversationId) });
+
+      // Only for messages FROM the customer, and only when the user is not
+      // already looking at that conversation. An echo of your own send, or
+      // a chime for the bubble appearing in front of you, is noise — and
+      // noise is what makes people turn alerts off entirely.
+      const activeId = useActiveConversationStore.getState().activeConversationId;
+      if (message.direction === 'IN' && message.conversationId !== activeId) {
+        alert();
+      }
     },
-    [queryClient],
+    [queryClient, alert],
   );
 
   useSocketEvent<Message>(

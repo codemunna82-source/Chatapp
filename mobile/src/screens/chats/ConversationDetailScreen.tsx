@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FlashList } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
+import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
@@ -18,6 +19,8 @@ import { Composer } from './Composer';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { MessageActionSheet } from './MessageActionSheet';
 import { TemplatePickerSheet } from './TemplatePickerSheet';
+import { ChatHeaderTitle } from './ChatHeaderTitle';
+import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { AttachmentSheet } from './AttachmentSheet';
 import { ForwardSheet, buildForwardBody } from './ForwardSheet';
 import { ImageViewerModal } from './ImageViewerModal';
@@ -34,6 +37,7 @@ import { useConversationRoom } from '../../sockets/useConversationRoom';
 import { useSocketEvent } from '../../sockets/useSocketEvent';
 import { emitConversationRead } from '../../sockets/actions';
 import { useSocketConnection } from '../../sockets/useSocketConnected';
+import { useActiveConversationStore } from '../../store/activeConversationStore';
 import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage } from '../../api/client';
 import * as Clipboard from 'expo-clipboard';
@@ -70,6 +74,10 @@ const SCREEN_EDGES: Edge[] = ['top'];
 
 // Module scope so these never change identity between renders.
 const keyExtractor = (item: RenderItem) => item.id;
+/** Far enough up that the user is clearly reading history, not just
+ *  overscrolling past the newest bubble. */
+const SCROLLED_UP_THRESHOLD = 220;
+
 // Lets FlashList recycle separators and bubbles into separate pools instead
 // of reusing one cell type for both.
 const getItemType = (item: RenderItem) => item.kind;
@@ -79,6 +87,15 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const queryClient = useQueryClient();
 
   useConversationRoom(conversationId);
+
+  // Tells the alert layer to stay quiet for this chat while it is on
+  // screen — see useMessageAlert. Cleared on unmount so backing out to the
+  // list restores the chime for it.
+  useEffect(() => {
+    const { setActiveConversation } = useActiveConversationStore.getState();
+    setActiveConversation(conversationId);
+    return () => setActiveConversation(null);
+  }, [conversationId]);
 
   const conversationQuery = useConversation(conversationId);
   const messagesQuery = useMessages(conversationId);
@@ -158,6 +175,41 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // toast, a keystroke). Key off the query data itself, whose identity
   // react-query only changes when the messages actually change.
   const messages = useMemo(() => flattenMessages(messagesQuery.data), [messagesQuery.data]);
+
+  // --- scroll-to-bottom + new-message count --------------------------------
+  // The list is inverted, so "at the bottom" is scroll offset ~0.
+  const listRef = useRef<FlashListRef<RenderItem>>(null);
+  // The newest message at the moment the user scrolled away from the bottom.
+  // Storing an anchor rather than a counter means the count is derived from
+  // the list itself, so it cannot drift out of sync with what is rendered —
+  // and it is set from a scroll event rather than written back by an effect.
+  const [anchorMessageId, setAnchorMessageId] = useState<string | null>(null);
+  const [scrolledUp, setScrolledUp] = useState(false);
+
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const away = e.nativeEvent.contentOffset.y > SCROLLED_UP_THRESHOLD;
+      setScrolledUp((wasAway) => {
+        if (away && !wasAway) setAnchorMessageId(messages[0]?.id ?? null);
+        if (!away && wasAway) setAnchorMessageId(null);
+        return away;
+      });
+    },
+    [messages],
+  );
+
+  const scrollToBottom = useCallback(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    setAnchorMessageId(null);
+  }, []);
+
+  // messages is newest-first, so the anchor's index IS how many arrived
+  // after it. -1 (anchor paged out or was deleted) means don't guess.
+  const newSinceAnchor = useMemo(() => {
+    if (!anchorMessageId) return 0;
+    const idx = messages.findIndex((m) => m.id === anchorMessageId);
+    return idx > 0 ? idx : 0;
+  }, [messages, anchorMessageId]);
 
   // Re-sent on every reconnect and on every incoming message, not just at
   // mount. Two ways the old mount-only version left a stale unread badge:
@@ -261,6 +313,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       // close and a forward action on the right.
       navigation.setOptions({
         title: `${selectedIds.length} selected`,
+        // Explicitly cleared: a custom headerTitle set on the previous pass
+        // would otherwise survive and keep showing the contact name here.
+        headerTitle: undefined,
         headerStyle: { backgroundColor: chatHeaderBackground },
         headerTintColor: '#FFFFFF',
         headerTitleStyle: { color: '#FFFFFF' },
@@ -290,9 +345,21 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       return;
     }
 
+    const contactLabel =
+      conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Conversation';
     navigation.setOptions({
       headerLeft: undefined,
-      title: conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Conversation',
+      title: contactLabel,
+      // Replaces the plain title so the 24-hour reply window is visible
+      // while it still matters, instead of only surfacing as a rejected
+      // send once it has already closed.
+      headerTitle: () => (
+        <ChatHeaderTitle
+          name={contactLabel}
+          windowExpiresAt={conversationQuery.data?.conversationWindowExpiresAt}
+          withinWindow={conversationQuery.data?.withinCustomerServiceWindow ?? true}
+        />
+      ),
       // The header itself stays a fixed navy in both schemes (matches both
       // reference images identically) — hardcoded rather than theme-driven
       // since headerStyle/headerTintColor render through React Navigation's
@@ -414,6 +481,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               </View>
             ) : null}
             <FlashList
+              ref={listRef}
               data={renderItems}
               inverted
               keyExtractor={keyExtractor}
@@ -421,9 +489,13 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               renderItem={renderItem}
               onEndReached={handleEndReached}
               onEndReachedThreshold={0.5}
+              onScroll={handleScroll}
+              scrollEventThrottle={64}
               ListHeaderComponent={isTyping ? <TypingIndicator /> : null}
               contentContainerStyle={styles.listContent}
             />
+
+            <ScrollToBottomButton visible={scrolledUp} newCount={newSinceAnchor} onPress={scrollToBottom} />
 
             {replyingTo ? <ReplyPreviewBar target={replyingTo} onCancel={() => setReplyingTo(null)} /> : null}
 

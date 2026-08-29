@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
@@ -8,6 +8,10 @@ import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
 import { formatDuration } from '../../utils/formatTime';
+
+/** Tapping cycles through these. Kept to three: a long press-and-hold menu
+ *  for a control this small would cost more taps than it saves. */
+const SPEEDS = [1, 1.5, 2] as const;
 
 const BAR_COUNT = 22;
 // A fixed, deterministic silhouette (no real waveform decoding — that needs
@@ -40,10 +44,26 @@ export function AudioMessageBubble({ mediaId, tint }: { mediaId: string; tint: s
   const [localUri, setLocalUri] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(false);
+  const [speedIndex, setSpeedIndex] = useState(0);
   const autoPlayRef = useRef(false);
 
   const player = useAudioPlayer(localUri ?? undefined);
   const status = useAudioPlayerStatus(player);
+  const speed = SPEEDS[speedIndex]!;
+
+  // Re-applied whenever the player is (re)loaded, not only when the user
+  // taps: the rate lives on the native player, so a file that finishes
+  // downloading after the choice was made would otherwise start at 1x.
+  useEffect(() => {
+    if (!status.isLoaded) return;
+    // 'high' keeps the voice from turning chipmunky at 2x, which is the
+    // whole point of a speed control on voice notes.
+    player.setPlaybackRate(speed, 'high');
+  }, [player, speed, status.isLoaded]);
+
+  const cycleSpeed = useCallback(() => {
+    setSpeedIndex((i) => (i + 1) % SPEEDS.length);
+  }, []);
 
   useEffect(() => {
     if (autoPlayRef.current && status.isLoaded) {
@@ -111,6 +131,24 @@ export function AudioMessageBubble({ mediaId, tint }: { mediaId: string; tint: s
           {error ? 'Failed to load — tap to retry' : formatDuration(remaining || 0)}
         </Text>
       </View>
+
+      {/* Only once there is something to play — before that it would just
+          be a dead control on a bubble that has not downloaded yet. */}
+      {localUri ? (
+        <Pressable
+          onPress={cycleSpeed}
+          hitSlop={8}
+          style={[styles.speedButton, { borderColor: tint }]}
+          accessibilityRole="button"
+          accessibilityLabel={`Playback speed ${speed}x, tap to change`}
+        >
+          {({ pressed }) => (
+            <Text style={[typography.caption, { color: tint, opacity: pressed ? 0.5 : 1, fontWeight: '600' }]}>
+              {speed}x
+            </Text>
+          )}
+        </Pressable>
+      ) : null}
     </Pressable>
   );
 }
@@ -121,6 +159,17 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact },
   playButton: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   playIconNudge: { marginLeft: 2 },
+  speedButton: {
+    marginLeft: 8,
+    minWidth: 34,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.8,
+  },
   waveform: { flexDirection: 'row', alignItems: 'center', height: 20 },
   bar: { width: 2.5, borderRadius: 1.5, marginRight: 2.5 },
 });

@@ -50,3 +50,20 @@ export function dayKey(iso: string): string {
   const d = new Date(iso);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
+
+/**
+ * How much of Meta's 24-hour customer-service window is left, as a short
+ * label ("18h left", "45m left"), or null once it has closed or was never
+ * opened. Deliberately coarse: the exact second does not change what the
+ * user should do, and a ticking countdown would re-render the header every
+ * second for no benefit.
+ */
+export function formatWindowRemaining(expiresAtIso: string | undefined): string | null {
+  if (!expiresAtIso) return null;
+  const msLeft = new Date(expiresAtIso).getTime() - Date.now();
+  if (!Number.isFinite(msLeft) || msLeft <= 0) return null;
+
+  const minutes = Math.floor(msLeft / 60_000);
+  if (minutes < 60) return `${Math.max(1, minutes)}m left`;
+  return `${Math.floor(minutes / 60)}h left`;
+}

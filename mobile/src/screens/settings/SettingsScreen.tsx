@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,6 +9,13 @@ import { Badge } from '../../components/Badge';
 import { Avatar } from '../../components/Avatar';
 import { useAuthStore } from '../../store/authStore';
 import { useThemePreferenceStore, type ThemePreference } from '../../store/themePreferenceStore';
+import {
+  useChatWallpaperStore,
+  WALLPAPER_STYLES,
+  WALLPAPER_LABELS,
+  type WallpaperStyle,
+} from '../../store/chatWallpaperStore';
+import { useAlertPreferenceStore } from '../../store/alertPreferenceStore';
 import { useLogout, useUploadOwnAvatar } from '../../queries/useAuthMutations';
 import { useSubscription } from '../../queries/useSubscription';
 import { useNotifications, flattenNotifications } from '../../queries/useNotifications';
@@ -151,6 +158,104 @@ function AppearanceSection() {
   );
 }
 
+const WALLPAPER_ICONS: Record<WallpaperStyle, keyof typeof Ionicons.glyphMap> = {
+  doodles: 'color-wand-outline',
+  plain: 'square-outline',
+  dots: 'ellipsis-horizontal-outline',
+  grid: 'grid-outline',
+};
+
+function ChatWallpaperSection() {
+  const { colors, spacing, radius, typography } = useTheme();
+  const style = useChatWallpaperStore((s) => s.style);
+  const setStyle = useChatWallpaperStore((s) => s.setStyle);
+
+  return (
+    <View style={{ marginBottom: spacing.lg }}>
+      <Text style={[typography.label, { color: colors.textSecondary, marginBottom: spacing.xs }]}>Chat wallpaper</Text>
+      <View style={styles.appearanceRow}>
+        {WALLPAPER_STYLES.map((option) => {
+          const active = style === option;
+          return (
+            <Pressable
+              key={option}
+              onPress={() => setStyle(option)}
+              style={[
+                styles.appearanceOption,
+                {
+                  backgroundColor: active ? colors.primary : colors.surfaceAlt,
+                  borderRadius: radius.md,
+                  marginRight: spacing.sm,
+                  paddingVertical: spacing.sm,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              testID={`settings-wallpaper-${option}`}
+            >
+              <Ionicons
+                name={WALLPAPER_ICONS[option]}
+                size={18}
+                color={active ? colors.textOnPrimary : colors.textSecondary}
+              />
+              <Text
+                style={[typography.caption, { color: active ? colors.textOnPrimary : colors.textSecondary, marginTop: 2 }]}
+              >
+                {WALLPAPER_LABELS[option]}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function AlertsSection() {
+  const { colors, spacing, radius, typography } = useTheme();
+  const sound = useAlertPreferenceStore((s) => s.sound);
+  const vibrate = useAlertPreferenceStore((s) => s.vibrate);
+  const setSound = useAlertPreferenceStore((s) => s.setSound);
+  const setVibrate = useAlertPreferenceStore((s) => s.setVibrate);
+
+  const rows: { label: string; value: boolean; onChange: (v: boolean) => void }[] = [
+    { label: 'Sound', value: sound, onChange: setSound },
+    { label: 'Vibration', value: vibrate, onChange: setVibrate },
+  ];
+
+  return (
+    <View style={{ marginBottom: spacing.lg }}>
+      <Text style={[typography.label, { color: colors.textSecondary, marginBottom: spacing.xs }]}>
+        New message alerts
+      </Text>
+      <View style={[{ backgroundColor: colors.surfaceAlt, borderRadius: radius.md, paddingHorizontal: spacing.md }]}>
+        {rows.map((row, i) => (
+          <View
+            key={row.label}
+            style={[
+              styles.alertRow,
+              i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider },
+            ]}
+          >
+            <Text style={[typography.body, { color: colors.textPrimary }]}>{row.label}</Text>
+            <Switch
+              value={row.value}
+              onValueChange={row.onChange}
+              trackColor={{ true: colors.primary, false: colors.divider }}
+              accessibilityLabel={`${row.label} for new messages`}
+            />
+          </View>
+        ))}
+      </View>
+      {/* Said plainly, because the difference is not obvious and guessing
+          wrong means missing customers. */}
+      <Text style={[typography.caption, { color: colors.textTertiary, marginTop: spacing.xs }]}>
+        Plays while VOXO is open. Alerts when the app is closed need push notifications, which aren&apos;t set up yet.
+      </Text>
+    </View>
+  );
+}
+
 export function SettingsScreen({ navigation }: Props) {
   const { colors, spacing, radius, typography } = useTheme();
   const user = useAuthStore((s) => s.user);
@@ -180,6 +285,8 @@ export function SettingsScreen({ navigation }: Props) {
       </View>
 
       <AppearanceSection />
+      <ChatWallpaperSection />
+      <AlertsSection />
 
       {isMasterAdmin && subscription.data
         ? (() => {
@@ -237,6 +344,7 @@ const styles = StyleSheet.create({
   subscriptionCard: {},
   subscriptionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   statusPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  alertRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, minHeight: 48 },
   appearanceRow: { flexDirection: 'row' },
   appearanceOption: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: touchTarget.compact },
   editBadge: {

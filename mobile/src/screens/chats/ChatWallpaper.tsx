@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useChatWallpaperStore, type WallpaperStyle } from '../../store/chatWallpaperStore';
 
 const DOODLE_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
   'chatbubble-outline',
@@ -22,12 +23,23 @@ const CELL = 46;
 const ICON_SIZE = 17;
 const DEFAULT_ICON: (typeof DOODLE_ICONS)[number] = 'chatbubble-outline';
 
+/** Dots sit on a tighter lattice than doodles — at 46dp they read as sparse
+ *  specks rather than a texture. */
+const DOT_CELL = 26;
+const DOT_SIZE = 3;
+
 interface DoodleCell {
   key: string;
   icon: (typeof DOODLE_ICONS)[number];
   x: number;
   y: number;
   rotate: number;
+}
+
+interface PlainCell {
+  key: string;
+  x: number;
+  y: number;
 }
 
 function buildCells(width: number, height: number): DoodleCell[] {
@@ -47,6 +59,18 @@ function buildCells(width: number, height: number): DoodleCell[] {
   return cells;
 }
 
+function buildDots(width: number, height: number): PlainCell[] {
+  const cols = Math.ceil(width / DOT_CELL) + 1;
+  const rows = Math.ceil(height / DOT_CELL) + 1;
+  const cells: PlainCell[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      cells.push({ key: `${row}-${col}`, x: col * DOT_CELL, y: row * DOT_CELL });
+    }
+  }
+  return cells;
+}
+
 /**
  * The chat screen's "wallpaper" — a subtle, brand-tinted doodle pattern
  * behind the message list, in the spirit of WhatsApp's own chat wallpaper
@@ -55,19 +79,73 @@ function buildCells(width: number, height: number): DoodleCell[] {
  * colors.primary on light/dark switch), and only regenerates its icon grid
  * when the measured viewport size actually changes.
  */
+function PatternLayer({ style, width, height, tint }: { style: WallpaperStyle; width: number; height: number; tint: string }) {
+  const doodles = useMemo(
+    () => (style === 'doodles' && width && height ? buildCells(width, height) : []),
+    [style, width, height],
+  );
+  const dots = useMemo(
+    () => (style === 'dots' && width && height ? buildDots(width, height) : []),
+    [style, width, height],
+  );
+
+  if (style === 'plain') return null;
+
+  if (style === 'grid') {
+    // Drawn as hairlines rather than per-cell views: a grid over a full
+    // screen would be hundreds of boxes, where rows and columns are two
+    // handfuls of 1px views.
+    const cols = Math.ceil(width / CELL) + 1;
+    const rows = Math.ceil(height / CELL) + 1;
+    return (
+      <>
+        {Array.from({ length: cols }, (_, i) => (
+          <View key={`v${i}`} style={[styles.gridLine, { left: i * CELL, top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: tint }]} />
+        ))}
+        {Array.from({ length: rows }, (_, i) => (
+          <View key={`h${i}`} style={[styles.gridLine, { top: i * CELL, left: 0, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: tint }]} />
+        ))}
+      </>
+    );
+  }
+
+  if (style === 'dots') {
+    return (
+      <>
+        {dots.map((cell) => (
+          <View
+            key={cell.key}
+            style={[styles.dot, { left: cell.x, top: cell.y, backgroundColor: tint }]}
+          />
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {doodles.map((cell) => (
+        <Ionicons
+          key={cell.key}
+          name={cell.icon}
+          size={ICON_SIZE}
+          color={tint}
+          style={[styles.icon, { left: cell.x, top: cell.y, opacity: 0.05, transform: [{ rotate: `${cell.rotate}deg` }] }]}
+        />
+      ))}
+    </>
+  );
+}
+
 function ChatWallpaperImpl() {
   const { colors } = useTheme();
+  const style = useChatWallpaperStore((s) => s.style);
   const [size, setSize] = useState({ width: 0, height: 0 });
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
     setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
   };
-
-  const cells = useMemo(
-    () => (size.width && size.height ? buildCells(size.width, size.height) : []),
-    [size.width, size.height],
-  );
 
   return (
     <View
@@ -82,15 +160,7 @@ function ChatWallpaperImpl() {
       // would have no view left to apply to.
       collapsable={false}
     >
-      {cells.map((cell) => (
-        <Ionicons
-          key={cell.key}
-          name={cell.icon}
-          size={ICON_SIZE}
-          color={colors.primary}
-          style={[styles.icon, { left: cell.x, top: cell.y, opacity: 0.05, transform: [{ rotate: `${cell.rotate}deg` }] }]}
-        />
-      ))}
+      <PatternLayer style={style} width={size.width} height={size.height} tint={colors.primary} />
     </View>
   );
 }
@@ -105,4 +175,6 @@ export const ChatWallpaper = React.memo(ChatWallpaperImpl);
 
 const styles = StyleSheet.create({
   icon: { position: 'absolute' },
+  dot: { position: 'absolute', width: DOT_SIZE, height: DOT_SIZE, borderRadius: DOT_SIZE / 2, opacity: 0.14 },
+  gridLine: { position: 'absolute', opacity: 0.08 },
 });
