@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { File, Paths } from 'expo-file-system';
@@ -17,12 +17,12 @@ import {
   type WallpaperStyle,
 } from '../../store/chatWallpaperStore';
 import { useAlertPreferenceStore } from '../../store/alertPreferenceStore';
-import { useLogout, useUploadOwnAvatar } from '../../queries/useAuthMutations';
+import { useLogout } from '../../queries/useAuthMutations';
 import { useSubscription } from '../../queries/useSubscription';
 import { useNotifications, flattenNotifications } from '../../queries/useNotifications';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
-import { getApiErrorMessage } from '../../api/client';
+
 import type { SettingsStackParamList } from '../../navigation/types';
 import type { SubscriptionStatus } from '../../api/types';
 
@@ -64,52 +64,21 @@ function SettingsRow({
 }
 
 /** Tap to replace the photo — square crop, uploaded to PATCH /api/users/me/avatar. */
+/**
+ * The account's avatar, display-only.
+ *
+ * Uploading a new one was removed on request. The backend endpoint and the
+ * useUploadOwnAvatar hook are deliberately left in place — nothing else
+ * depends on them and deleting a working, tested upload path to hide one
+ * button would be the harder thing to undo. Re-adding the control is a
+ * Pressable around this Avatar calling that hook.
+ */
 function ProfileAvatar({ userId, label, version }: { userId: string; label: string; version?: string }) {
-  const { colors, spacing } = useTheme();
-  const uploadAvatar = useUploadOwnAvatar();
-  const [error, setError] = useState<string | null>(null);
-
-  const pickAndUpload = async () => {
-    setError(null);
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setError('Photo library permission was denied.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.8,
-      allowsEditing: true,
-      aspect: [1, 1],
-    });
-    const asset = result.canceled ? undefined : result.assets[0];
-    if (!asset) return;
-    try {
-      await uploadAvatar.mutateAsync({
-        uri: asset.uri,
-        name: asset.fileName ?? 'avatar.jpg',
-        mimeType: asset.mimeType ?? 'image/jpeg',
-      });
-    } catch (err) {
-      setError(getApiErrorMessage(err, 'Could not update your profile picture.'));
-    }
-  };
+  const { spacing } = useTheme();
 
   return (
     <View style={{ alignItems: 'center', marginBottom: spacing.sm }}>
-      <Pressable onPress={pickAndUpload} disabled={uploadAvatar.isPending} testID="settings-avatar">
-        <Avatar userId={userId} version={version} label={label} size={72} />
-        <View style={[styles.editBadge, { backgroundColor: colors.primary, borderColor: colors.background }]}>
-          {uploadAvatar.isPending ? (
-            <ActivityIndicator size="small" color={colors.textOnPrimary} />
-          ) : (
-            <Ionicons name="camera" size={14} color={colors.textOnPrimary} />
-          )}
-        </View>
-      </Pressable>
-      {error ? (
-        <Text style={[{ color: colors.danger, marginTop: spacing.xs, fontSize: 12 }]}>{error}</Text>
-      ) : null}
+      <Avatar userId={userId} version={version} label={label} size={72} />
     </View>
   );
 }
@@ -334,8 +303,9 @@ export function SettingsScreen({ navigation }: Props) {
 
   return (
     <Screen>
-      <Text style={[typography.heading, { color: colors.textPrimary, marginBottom: spacing.lg }]}>Settings</Text>
-
+      {/* No "Settings" heading here: the stack navigator already sets one
+          as the screen's header title (SettingsStackNavigator), so having
+          both printed the word twice, one above the other. */}
       <View style={{ marginBottom: spacing.lg, alignItems: 'center' }}>
         {user ? (
           <ProfileAvatar userId={user.id} label={user.displayName ?? user.email} version={user.avatarUpdatedAt} />
@@ -396,7 +366,14 @@ export function SettingsScreen({ navigation }: Props) {
           <SettingsRow icon="wallet-outline" label="Wallet" onPress={() => navigation.navigate('Wallet')} />
         ) : null}
         {isMasterAdmin ? (
-          <SettingsRow icon="people-outline" label="Team" onPress={() => navigation.navigate('Team')} />
+          <SettingsRow
+            icon="people-outline"
+            // "Team" was too vague to find when looking for user
+            // management. The screen creates, edits and disables members
+            // and sets their access expiry — this says so.
+            label="User management"
+            onPress={() => navigation.navigate('Team')}
+          />
         ) : null}
       </View>
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { TextField } from '../../components/TextField';
 import { Button } from '../../components/Button';
 import { InlineBanner } from '../../components/InlineBanner';
@@ -19,10 +20,37 @@ interface TeamMemberFormSheetProps {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-function defaultValidUntil(): string {
+/** Quick spans, because a fixed-term contractor or a trial account is
+ *  almost always one of these — typing a date by hand for the common case
+ *  is the slow path, not the shortcut. */
+const PRESET_DAYS = [30, 60, 90, 365] as const;
+
+function toIsoDay(d: Date): string {
+  // Built from LOCAL parts, not toISOString(): that converts to UTC first,
+  // so an evening in +05:30 would come back as the next day and quietly
+  // grant a day more (or less) access than the admin picked.
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
+function daysFromNow(days: number): string {
   const d = new Date();
-  d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString().slice(0, 10);
+  d.setDate(d.getDate() + days);
+  return toIsoDay(d);
+}
+
+function defaultValidUntil(): string {
+  return daysFromNow(365);
+}
+
+/** Parses the YYYY-MM-DD field back into a Date for the calendar, falling
+ *  back to today when the field is mid-edit and not yet a valid date. */
+function parseIsoDay(value: string): Date {
+  if (!ISO_DATE.test(value)) return new Date();
+  const [y, m, d] = value.split('-').map(Number);
+  const parsed = new Date(y!, m! - 1, d!);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
 interface FormBodyProps {
@@ -32,7 +60,7 @@ interface FormBodyProps {
 
 /** Mounted only while the sheet is visible — fields start fresh from `member` via lazy initial state, no effect-driven reset needed (same pattern as ContactFormSheet). */
 function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
-  const { colors, spacing, typography } = useTheme();
+  const { colors, spacing, radius, typography } = useTheme();
   const isEdit = Boolean(member);
   const createMember = useCreateTeamMember();
   const updateMember = useUpdateTeamMember();
@@ -45,6 +73,7 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
   const [permissions, setPermissions] = useState<Permission[]>(member?.permissions ?? []);
   const [validUntil, setValidUntil] = useState(member ? member.validUntil.slice(0, 10) : defaultValidUntil());
   const [dateError, setDateError] = useState<string | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   const mutation = isEdit ? updateMember : createMember;
   const error = mutation.error ? getApiErrorMessage(mutation.error, 'Could not save this team member.') : null;
@@ -117,13 +146,82 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
       )}
 
       <TextField label="Display name" value={displayName} onChangeText={setDisplayName} autoCapitalize="words" />
-      <TextField
-        label="Access expires (YYYY-MM-DD)"
-        value={validUntil}
-        onChangeText={setValidUntil}
-        autoCapitalize="none"
-        error={dateError ?? undefined}
-      />
+      <Text style={[typography.label, { color: colors.textSecondary, marginBottom: spacing.xs }]}>
+        Access expires
+      </Text>
+      <View style={[styles.presetRow, { marginBottom: spacing.sm }]}>
+        {PRESET_DAYS.map((days) => {
+          const value = daysFromNow(days);
+          const active = validUntil === value;
+          return (
+            <Pressable
+              key={days}
+              onPress={() => {
+                setValidUntil(value);
+                setDateError(null);
+              }}
+              style={[
+                styles.presetChip,
+                {
+                  backgroundColor: active ? colors.primary : colors.surfaceAlt,
+                  borderRadius: radius.md,
+                  marginRight: spacing.xs,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+            >
+              <Text style={[typography.caption, { color: active ? colors.textOnPrimary : colors.textPrimary }]}>
+                {days === 365 ? '1 year' : `${days} days`}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <Pressable
+        onPress={() => setCalendarOpen(true)}
+        style={[
+          styles.dateField,
+          {
+            backgroundColor: colors.surfaceAlt,
+            borderRadius: radius.md,
+            paddingHorizontal: spacing.md,
+            borderColor: dateError ? colors.danger : 'transparent',
+          },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={`Access expires ${validUntil}. Tap to pick a date.`}
+      >
+        <Text style={[typography.body, { color: colors.textPrimary, flex: 1 }]}>{validUntil}</Text>
+        <Ionicons name="calendar-outline" size={20} color={colors.textSecondary} />
+      </Pressable>
+      {dateError ? (
+        <Text style={[typography.caption, { color: colors.danger, marginTop: spacing.xs }]}>{dateError}</Text>
+      ) : null}
+      <Text style={[typography.caption, { color: colors.textTertiary, marginTop: spacing.xs, marginBottom: spacing.md }]}>
+        Access is refused from this date. The chips set a span from today; tap the date for anything else.
+      </Text>
+
+      {calendarOpen ? (
+        <DateTimePicker
+          value={parseIsoDay(validUntil)}
+          mode="date"
+          // Yesterday cannot be an expiry — it would create a member who is
+          // already locked out, which is a mistake rather than an intent.
+          minimumDate={new Date()}
+          onChange={(event, date) => {
+            // On Android the picker is a dialog that closes itself; keeping
+            // it mounted after a dismiss would re-open it on the next
+            // render.
+            setCalendarOpen(false);
+            if (event.type === 'set' && date) {
+              setValidUntil(toIsoDay(date));
+              setDateError(null);
+            }
+          }}
+        />
+      ) : null}
 
       <Text style={[typography.label, { color: colors.textSecondary, marginBottom: spacing.xs }]}>Role</Text>
       <View style={[styles.roleRow, { marginBottom: spacing.md }]}>
@@ -235,5 +333,8 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', marginTop: 8, marginBottom: 12 },
   roleRow: { flexDirection: 'row' },
   roleChip: { paddingHorizontal: 14, borderRadius: 18, minHeight: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
+  presetRow: { flexDirection: 'row', flexWrap: 'wrap' },
+  presetChip: { paddingHorizontal: 12, minHeight: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
+  dateField: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.min, borderWidth: 1 },
   permissionRow: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact },
 });
