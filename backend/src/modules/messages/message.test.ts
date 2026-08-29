@@ -270,3 +270,23 @@ describe('In-chat search and starring', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('Delivery timestamps for message info', () => {
+  it('stamps sentAt when Meta accepts the send', async () => {
+    const tenant = await createTestTenant();
+    const { conversation } = await createTestChatFixture(String(tenant._id));
+    const token = await tokenFor(String(tenant._id), ['CHAT_READ', 'CHAT_SEND']);
+
+    const res = await request(app)
+      .post(`/api/conversations/${conversation._id}/messages`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'text', text: 'when did this go out?' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.sentAt).toBeTruthy();
+    // Nothing has been delivered or read yet — these must be absent, not
+    // guessed from the send time.
+    expect(res.body.data.deliveredAt).toBeUndefined();
+    expect(res.body.data.readAt).toBeUndefined();
+  });
+});

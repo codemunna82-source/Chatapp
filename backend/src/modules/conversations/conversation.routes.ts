@@ -7,6 +7,7 @@ import {
   updateConversationSchema,
   createConversationSchema,
   conversationIdParamSchema,
+  bulkConversationSchema,
 } from './conversation.validation';
 import {
   listConversationsHandler,
@@ -14,6 +15,7 @@ import {
   createConversationHandler,
   updateConversationHandler,
   deleteConversationHandler,
+  bulkConversationsHandler,
 } from './conversation.controller';
 import { messageRouter } from '../messages/message.routes';
 
@@ -36,6 +38,18 @@ conversationRouter.patch(
   '/:id',
   validate({ params: conversationIdParamSchema, body: updateConversationSchema }),
   updateConversationHandler,
+);
+
+// Multi-select actions. POST rather than PATCH because 'delete' is one of
+// them, and a literal path rather than a method on '/:id' because it acts
+// on a set, not on one conversation. No collision with '/:id': that is
+// registered for GET, PATCH and DELETE only, never POST. Gated on
+// CHAT_SEND, matching the single-chat archive/delete it batches.
+conversationRouter.post(
+  '/bulk',
+  requirePermission('CHAT_SEND'),
+  validate({ body: bulkConversationSchema }),
+  bulkConversationsHandler,
 );
 
 // Deleting a chat removes it and its messages from this workspace only —

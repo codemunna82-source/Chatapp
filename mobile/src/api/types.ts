@@ -72,6 +72,12 @@ export interface Conversation {
   conversationWindowExpiresAt?: string;
   withinCustomerServiceWindow: boolean;
   unreadCount: number;
+  /**
+   * Set by "mark as unread". Kept separate from unreadCount so the badge
+   * can keep showing the real number of unread messages while the row still
+   * reads as unread — see the backend's conversation.model.ts.
+   */
+  manuallyUnread: boolean;
   pinned: boolean;
   pinnedAt?: string;
   status: ConversationStatus;
@@ -103,6 +109,14 @@ export interface Message {
   text?: string;
   /** Set only when starred — the API omits it otherwise. */
   starredAt?: string;
+  /**
+   * Delivery milestones, each present only once it has actually happened.
+   * readAt stays absent forever when the customer has read receipts turned
+   * off — that is an answer, not missing data.
+   */
+  sentAt?: string;
+  deliveredAt?: string;
+  readAt?: string;
   mediaId?: string;
   /**
    * Client-only: the local file behind an outgoing media message, set on the

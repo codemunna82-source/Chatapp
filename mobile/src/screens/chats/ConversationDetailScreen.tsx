@@ -20,6 +20,7 @@ import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { MessageActionSheet } from './MessageActionSheet';
 import { TemplatePickerSheet } from './TemplatePickerSheet';
 import { ChatHeaderTitle } from './ChatHeaderTitle';
+import { MessageInfoSheet } from './MessageInfoSheet';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { AttachmentSheet } from './AttachmentSheet';
 import { ForwardSheet, buildForwardBody } from './ForwardSheet';
@@ -182,6 +183,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const messages = useMemo(() => flattenMessages(messagesQuery.data), [messagesQuery.data]);
 
   // --- in-chat search / starred ------------------------------------------
+  const [infoTarget, setInfoTarget] = useState<Message | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [starredOnly, setStarredOnly] = useState(false);
@@ -625,6 +627,8 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           </View>
         </Animated.View>
 
+        <MessageInfoSheet message={infoTarget} onClose={() => setInfoTarget(null)} />
+
         <MessageActionSheet
           visible={Boolean(actionTarget)}
           canReact={Boolean(actionTarget && canReactTo(actionTarget))}
@@ -633,6 +637,15 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           onClose={() => setActionTarget(null)}
           onCopy={handleCopy}
           canSelect={Boolean(actionTarget && buildForwardBody(actionTarget))}
+          // Outgoing only, and never an optimistic row: a message that has
+          // not reached the server has no delivery milestones to show.
+          canShowInfo={Boolean(
+            actionTarget && actionTarget.direction === 'OUT' && !actionTarget.id.startsWith('temp-'),
+          )}
+          onShowInfo={() => {
+            setInfoTarget(actionTarget);
+            setActionTarget(null);
+          }}
           starred={Boolean(actionTarget?.starredAt)}
           // A reaction isn't a message anyone bookmarks, and an optimistic
           // row has no server id to star against yet.

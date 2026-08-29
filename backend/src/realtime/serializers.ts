@@ -15,6 +15,9 @@ export function toRealtimeMessage(doc: MessageDoc): RealtimeMessagePayload {
     status: doc.status,
     senderId: doc.senderId ? String(doc.senderId) : undefined,
     starredAt: doc.starredAt ? doc.starredAt.toISOString() : undefined,
+    sentAt: doc.sentAt ? doc.sentAt.toISOString() : undefined,
+    deliveredAt: doc.deliveredAt ? doc.deliveredAt.toISOString() : undefined,
+    readAt: doc.readAt ? doc.readAt.toISOString() : undefined,
     createdAt: doc.get('createdAt').toISOString(),
   };
 }
@@ -27,6 +30,7 @@ export function toRealtimeConversation(doc: ConversationDoc): RealtimeConversati
     lastMessageAt: doc.lastMessageAt?.toISOString(),
     lastMessagePreview: doc.lastMessagePreview ?? undefined,
     unreadCount: doc.unreadCount,
+    manuallyUnread: doc.manuallyUnread,
     pinned: doc.pinned,
   };
 }

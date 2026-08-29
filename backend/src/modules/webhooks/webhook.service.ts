@@ -128,7 +128,15 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
     return;
   }
 
-  const message = await updateMessageStatusByMetaId(item.messageId, tenantId, ourStatus, item.errors);
+  // item.timestamp is Meta's own — see the model's note on why the webhook's
+  // time is used rather than the moment this handler ran.
+  const message = await updateMessageStatusByMetaId(
+    item.messageId,
+    tenantId,
+    ourStatus,
+    item.errors,
+    item.timestamp,
+  );
   if (!message) {
     // Status arrived before (or without) a matching local message row —
     // not an error; Meta's delivery order isn't guaranteed.

@@ -10,12 +10,15 @@ import { EmptyState } from '../../components/EmptyState';
 import { ChatListItem } from './ChatListItem';
 import { NewChatSheet } from './NewChatSheet';
 import { ChatActionSheet } from './ChatActionSheet';
+import { ChatSelectionBar } from './ChatSelectionBar';
 import {
   useConversations,
   flattenConversations,
   usePinConversation,
   useArchiveConversation,
   useDeleteConversation,
+  useMarkConversationUnread,
+  useBulkConversations,
 } from '../../queries/useConversations';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -31,6 +34,10 @@ export function ChatsListScreen({ navigation }: Props) {
   const [showArchived, setShowArchived] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<Conversation | null>(null);
+  // Multi-select. Held as an id array rather than a Set so it stays a plain
+  // value React can compare — a mutated Set would not re-render the rows.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selectionMode = selectedIds.length > 0;
   const debouncedSearch = useDebouncedValue(search, 300);
 
   // The status filter was never sent, and the backend only filters when it
@@ -48,14 +55,57 @@ export function ChatsListScreen({ navigation }: Props) {
   const pinConversation = usePinConversation();
   const archiveConversation = useArchiveConversation();
   const deleteConversation = useDeleteConversation();
+  const markUnread = useMarkConversationUnread();
+  const bulkConversations = useBulkConversations();
 
   // Stable per-row callbacks — inline arrows would change identity every
   // render and defeat ChatListItem's React.memo.
+  const toggleSelected = useCallback((conversation: Conversation) => {
+    setSelectedIds((prev) =>
+      prev.includes(conversation.id) ? prev.filter((id) => id !== conversation.id) : [...prev, conversation.id],
+    );
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedIds([]), []);
+
   const handleOpen = useCallback(
-    (conversation: Conversation) => navigation.navigate('ConversationDetail', { conversationId: conversation.id }),
-    [navigation],
+    (conversation: Conversation) => {
+      // While selecting, a tap toggles the row rather than leaving the
+      // screen — the same rule the message list uses.
+      if (selectionMode) {
+        toggleSelected(conversation);
+        return;
+      }
+      navigation.navigate('ConversationDetail', { conversationId: conversation.id });
+    },
+    [navigation, selectionMode, toggleSelected],
   );
-  const handleLongPress = useCallback((conversation: Conversation) => setActionTarget(conversation), []);
+
+  const handleLongPress = useCallback(
+    (conversation: Conversation) => {
+      // Long-pressing during a selection extends it instead of opening a
+      // single-chat sheet whose actions would contradict the selection.
+      if (selectionMode) {
+        toggleSelected(conversation);
+        return;
+      }
+      setActionTarget(conversation);
+    },
+    [selectionMode, toggleSelected],
+  );
+
+  const handleMarkUnread = useCallback(
+    (conversation: Conversation) => {
+      setActionTarget(null);
+      markUnread.mutate(conversation.id);
+    },
+    [markUnread],
+  );
+
+  const handleStartSelection = useCallback((conversation: Conversation) => {
+    setActionTarget(null);
+    setSelectedIds([conversation.id]);
+  }, []);
 
   const handleTogglePin = useCallback(
     (conversation: Conversation) => {
@@ -93,11 +143,53 @@ export function ChatsListScreen({ navigation }: Props) {
     [deleteConversation],
   );
 
+  const runBulk = useCallback(
+    (action: 'archive' | 'unarchive' | 'delete' | 'read') => {
+      const ids = selectedIds;
+      bulkConversations.mutate(
+        { ids, action },
+        {
+          onSuccess: (result) => {
+            clearSelection();
+            // Reports what actually changed rather than what was asked for:
+            // a chat someone else deleted meanwhile is skipped, and saying
+            // "20 archived" when 18 were would be a quiet lie.
+            if (result.affected < ids.length) {
+              Alert.alert(
+                'Partly applied',
+                `${result.affected} of ${ids.length} chats were updated. The rest were already gone.`,
+              );
+            }
+          },
+        },
+      );
+    },
+    [bulkConversations, selectedIds, clearSelection],
+  );
+
+  const confirmBulkDelete = useCallback(() => {
+    const count = selectedIds.length;
+    Alert.alert(
+      `Delete ${count} ${count === 1 ? 'chat' : 'chats'}?`,
+      "This removes them and their messages from VOXO. It cannot remove anything from the customers' own WhatsApp.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => runBulk('delete') },
+      ],
+    );
+  }, [selectedIds.length, runBulk]);
+
   const renderItem = useCallback(
     ({ item }: { item: Conversation }) => (
-      <ChatListItem conversation={item} onPress={handleOpen} onLongPress={handleLongPress} />
+      <ChatListItem
+        conversation={item}
+        onPress={handleOpen}
+        onLongPress={handleLongPress}
+        selectable={selectionMode}
+        selected={selectedIds.includes(item.id)}
+      />
     ),
-    [handleOpen, handleLongPress],
+    [handleOpen, handleLongPress, selectionMode, selectedIds],
   );
 
   const showSkeleton = query.isLoading;
@@ -105,7 +197,19 @@ export function ChatsListScreen({ navigation }: Props) {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <SearchBar value={search} onChangeText={setSearch} placeholder={showArchived ? 'Search archived' : 'Search chats'} />
+      {selectionMode ? (
+        <ChatSelectionBar
+          count={selectedIds.length}
+          showingArchived={showArchived}
+          busy={bulkConversations.isPending}
+          onCancel={clearSelection}
+          onMarkRead={() => runBulk('read')}
+          onToggleArchive={() => runBulk(showArchived ? 'unarchive' : 'archive')}
+          onDelete={confirmBulkDelete}
+        />
+      ) : (
+        <SearchBar value={search} onChangeText={setSearch} placeholder={showArchived ? 'Search archived' : 'Search chats'} />
+      )}
 
       <Pressable
         onPress={() => setShowArchived((prev) => !prev)}
@@ -205,6 +309,8 @@ export function ChatsListScreen({ navigation }: Props) {
         onTogglePin={handleTogglePin}
         onToggleArchive={handleArchive}
         onDelete={handleDelete}
+        onMarkUnread={handleMarkUnread}
+        onSelect={handleStartSelection}
       />
 
       <NewChatSheet

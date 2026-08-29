@@ -98,8 +98,64 @@ export async function setConversationStatus(
   return Conversation.findOneAndUpdate({ _id: id, tenantId }, { $set: { status } }, { new: true });
 }
 
+/** Clears both the real count and a manual "mark as unread" — opening the
+ *  chat is exactly the action that undoes either. */
 export async function markConversationRead(id: string, tenantId: string): Promise<ConversationDoc | null> {
-  return Conversation.findOneAndUpdate({ _id: id, tenantId }, { $set: { unreadCount: 0 } }, { new: true });
+  return Conversation.findOneAndUpdate(
+    { _id: id, tenantId },
+    { $set: { unreadCount: 0, manuallyUnread: false } },
+    { new: true },
+  );
+}
+
+/** "Mark as unread" — see the model's note on why this is a flag rather
+ *  than a fabricated unreadCount of 1. */
+export async function markConversationUnread(id: string, tenantId: string): Promise<ConversationDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Conversation.findOneAndUpdate(
+    { _id: id, tenantId },
+    { $set: { manuallyUnread: true } },
+    { new: true },
+  );
+}
+
+/**
+ * Bulk status change for a multi-select action. One query rather than N
+ * round trips, so twenty chats archive atomically instead of half-applying
+ * if the connection drops midway.
+ */
+export async function setStatusForConversations(
+  ids: string[],
+  tenantId: string,
+  status: ConversationStatus,
+): Promise<number> {
+  const valid = ids.filter((id) => Types.ObjectId.isValid(id));
+  if (valid.length === 0) return 0;
+  const result = await Conversation.updateMany({ _id: { $in: valid }, tenantId }, { $set: { status } });
+  return result.modifiedCount;
+}
+
+/** Bulk read — the multi-select counterpart of markConversationRead. */
+export async function markConversationsRead(ids: string[], tenantId: string): Promise<number> {
+  const valid = ids.filter((id) => Types.ObjectId.isValid(id));
+  if (valid.length === 0) return 0;
+  const result = await Conversation.updateMany(
+    { _id: { $in: valid }, tenantId },
+    { $set: { unreadCount: 0, manuallyUnread: false } },
+  );
+  return result.modifiedCount;
+}
+
+/** Bulk delete. Returns the ids that actually belonged to this tenant, so
+ *  the caller can cascade messages for exactly those and no others. */
+export async function deleteConversationsByIds(ids: string[], tenantId: string): Promise<string[]> {
+  const valid = ids.filter((id) => Types.ObjectId.isValid(id));
+  if (valid.length === 0) return [];
+  const owned = await Conversation.find({ _id: { $in: valid }, tenantId }).select('_id');
+  const ownedIds = owned.map((c) => String(c._id));
+  if (ownedIds.length === 0) return [];
+  await Conversation.deleteMany({ _id: { $in: ownedIds }, tenantId });
+  return ownedIds;
 }
 
 /** Called after persisting an inbound (customer) message — advances the 24h window. */

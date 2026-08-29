@@ -22,6 +22,10 @@ interface MessageActionSheetProps {
   canSelect: boolean;
   /** Current star state — the row is a toggle, so it has to read as one. */
   starred: boolean;
+  /** Outgoing messages only — an inbound message has no delivery
+   *  milestones of ours to report. */
+  canShowInfo: boolean;
+  onShowInfo: () => void;
   /** Reactions and not-yet-sent optimistic messages can't be starred. */
   canStar: boolean;
   onToggleStar: () => void;
@@ -52,6 +56,8 @@ export function MessageActionSheet({
   starred,
   canStar,
   onToggleStar,
+  canShowInfo,
+  onShowInfo,
   onSelectMore,
   onDelete,
 }: MessageActionSheetProps) {
@@ -91,6 +97,13 @@ export function MessageActionSheet({
                 icon: starred ? 'star' : 'star-outline',
                 onPress: onToggleStar,
                 enabled: canStar,
+              },
+              {
+                key: 'info',
+                label: 'Message info',
+                icon: 'information-circle-outline',
+                onPress: onShowInfo,
+                enabled: canShowInfo,
               },
               {
                 key: 'select',

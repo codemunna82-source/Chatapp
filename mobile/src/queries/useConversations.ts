@@ -76,3 +76,34 @@ export function useArchiveConversation() {
     },
   });
 }
+
+/** "Mark as unread" — the inverse of opening the chat, which clears it. */
+export function useMarkConversationUnread() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => conversationsApi.markConversationUnread(id),
+    onSuccess: (conversation) => {
+      queryClient.setQueryData(queryKeys.conversation(conversation.id), conversation);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+    },
+  });
+}
+
+/**
+ * One action across a selection of chats.
+ *
+ * The whole list is invalidated rather than patched: a bulk archive or
+ * delete changes which rows belong in the current view at all, and
+ * reconciling that by hand across an infinite query's pages is more likely
+ * to leave a ghost row than a refetch is to be slow.
+ */
+export function useBulkConversations() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { ids: string[]; action: conversationsApi.BulkConversationAction }) =>
+      conversationsApi.bulkUpdateConversations(vars.ids, vars.action),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+    },
+  });
+}

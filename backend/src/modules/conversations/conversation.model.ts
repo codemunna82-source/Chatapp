@@ -20,6 +20,19 @@ const conversationSchema = new Schema(
     lastCustomerMessageAt: { type: Date },
     conversationWindowExpiresAt: { type: Date },
     unreadCount: { type: Number, default: 0, min: 0 },
+    /**
+     * "Mark as unread", kept separate from unreadCount rather than faking a
+     * count of 1.
+     *
+     * The chat list shows unreadCount as a number badge. Bumping it to
+     * claim one unread message when the user has read all of them would be
+     * a lie the UI then repeats — and the next inbound message would make
+     * it "2" for one actual unread. This flag drives the unread STYLING
+     * (bold row, dot) while the badge keeps showing the real count.
+     *
+     * Cleared by the same paths that clear unreadCount: opening the chat.
+     */
+    manuallyUnread: { type: Boolean, default: false },
     pinned: { type: Boolean, default: false },
     pinnedAt: { type: Date },
     status: { type: String, enum: CONVERSATION_STATUSES, default: 'OPEN', required: true },

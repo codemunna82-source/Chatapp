@@ -23,6 +23,13 @@ export const createConversationHandler = asyncHandler(async (req: Request, res: 
   res.status(200).json({ success: true, data: conversation });
 });
 
+export const bulkConversationsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const { ids, action } = req.body as { ids: string[]; action: conversationService.BulkConversationAction };
+  const result = await conversationService.bulkUpdateConversationsForTenant(auth.tenantId, auth.userId, ids, action);
+  res.status(200).json({ success: true, data: result });
+});
+
 export const deleteConversationHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   await conversationService.deleteConversationForTenant(auth.tenantId, req.params.id as string, auth.userId);

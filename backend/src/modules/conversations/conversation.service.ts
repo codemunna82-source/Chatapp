@@ -20,6 +20,7 @@ export interface PublicConversation {
   conversationWindowExpiresAt?: Date;
   withinCustomerServiceWindow: boolean;
   unreadCount: number;
+  manuallyUnread: boolean;
   pinned: boolean;
   pinnedAt?: Date;
   status: string;
@@ -40,6 +41,7 @@ function toPublicConversation(doc: ConversationDoc, contact?: ContactDoc): Publi
     conversationWindowExpiresAt: doc.conversationWindowExpiresAt ?? undefined,
     withinCustomerServiceWindow: repo.isWithinCustomerServiceWindow(doc),
     unreadCount: doc.unreadCount,
+    manuallyUnread: doc.manuallyUnread,
     pinned: doc.pinned,
     pinnedAt: doc.pinnedAt ?? undefined,
     status: doc.status,
@@ -100,6 +102,7 @@ export async function getConversationForTenant(tenantId: string, id: string): Pr
 export interface UpdateConversationBody {
   pinned?: boolean;
   status?: ConversationStatus;
+  manuallyUnread?: true;
 }
 
 /**
@@ -151,6 +154,64 @@ export async function deleteConversationForTenant(tenantId: string, id: string, 
   });
 }
 
+export type BulkConversationAction = 'archive' | 'unarchive' | 'delete' | 'read';
+
+export interface BulkConversationResult {
+  action: BulkConversationAction;
+  /** How many of the requested ids actually belonged to this tenant and
+   *  changed. Deliberately reported back rather than assumed: ids the
+   *  caller no longer owns are silently skipped, and the client should be
+   *  able to say "18 of 20" instead of claiming all twenty. */
+  affected: number;
+}
+
+/**
+ * Applies one action to a hand-selected set of chats.
+ *
+ * A single query per action rather than N round trips from the client:
+ * twenty chats archive together instead of half-applying if the connection
+ * drops midway, and the audit log gets one entry describing the actual
+ * operation instead of twenty unrelated-looking ones.
+ *
+ * Every query is scoped by tenantId, so an id belonging to another
+ * workspace matches nothing — it is skipped, not rejected, because a
+ * partial selection going stale mid-gesture is normal and failing the whole
+ * batch over it would be worse than doing the rest.
+ */
+export async function bulkUpdateConversationsForTenant(
+  tenantId: string,
+  actorUserId: string,
+  ids: string[],
+  action: BulkConversationAction,
+): Promise<BulkConversationResult> {
+  let affected = 0;
+
+  if (action === 'delete') {
+    const deletedIds = await repo.deleteConversationsByIds(ids, tenantId);
+    // Messages are cascaded for exactly the ids that were really deleted —
+    // deleteConversationsByIds returns those, so nothing belonging to
+    // another tenant can be reached through this.
+    for (const id of deletedIds) {
+      await deleteMessagesByConversation(tenantId, id);
+    }
+    affected = deletedIds.length;
+  } else if (action === 'read') {
+    affected = await repo.markConversationsRead(ids, tenantId);
+  } else {
+    affected = await repo.setStatusForConversations(ids, tenantId, action === 'archive' ? 'ARCHIVED' : 'OPEN');
+  }
+
+  await recordAudit({
+    tenantId,
+    actorUserId,
+    action: `conversation.bulk.${action}`,
+    targetType: 'Conversation',
+    metadata: { requested: ids.length, affected },
+  });
+
+  return { action, affected };
+}
+
 export async function updateConversationForTenant(
   tenantId: string,
   actorUserId: string,
@@ -167,6 +228,9 @@ export async function updateConversationForTenant(
   }
   if (patch.status !== undefined) {
     conversation = (await repo.setConversationStatus(id, tenantId, patch.status)) ?? conversation;
+  }
+  if (patch.manuallyUnread) {
+    conversation = (await repo.markConversationUnread(id, tenantId)) ?? conversation;
   }
 
   await recordAudit({

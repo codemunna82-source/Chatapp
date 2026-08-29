@@ -22,6 +22,11 @@ export interface RealtimeMessagePayload {
   senderId?: string;
   /** Present only when the message is starred — see Message.starredAt. */
   starredAt?: string;
+  /** Delivery milestones, each present only once it has happened. readAt
+   *  stays absent forever if the customer has read receipts off. */
+  sentAt?: string;
+  deliveredAt?: string;
+  readAt?: string;
   createdAt: string;
 }
 
@@ -32,6 +37,7 @@ export interface RealtimeConversationPayload {
   lastMessageAt?: string;
   lastMessagePreview?: string;
   unreadCount: number;
+  manuallyUnread: boolean;
   pinned: boolean;
 }
 

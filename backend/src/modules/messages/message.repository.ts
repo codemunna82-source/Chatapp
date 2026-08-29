@@ -104,15 +104,34 @@ export async function deleteMessagesByConversation(tenantId: string, conversatio
   await Message.deleteMany({ tenantId, conversationId });
 }
 
+/** Which timestamp field each status milestone stamps. FAILED and QUEUED
+ *  have none — there is no delivery moment to record. */
+const STATUS_TIMESTAMP_FIELD: Partial<Record<MessageStatus, 'sentAt' | 'deliveredAt' | 'readAt'>> = {
+  SENT: 'sentAt',
+  DELIVERED: 'deliveredAt',
+  READ: 'readAt',
+};
+
 export async function updateMessageStatusByMetaId(
   metaMessageId: string,
   tenantId: string,
   status: MessageStatus,
   error?: unknown,
+  at?: Date,
 ): Promise<MessageDoc | null> {
+  const field = STATUS_TIMESTAMP_FIELD[status];
+  const timestamp = at ?? new Date();
+
+  // $max, not $set: Meta does not guarantee status webhooks arrive in
+  // order, and a delayed "sent" landing after "delivered" must not stamp a
+  // later time onto an earlier milestone. $max on a missing field just
+  // sets it, so first-write still works.
   return Message.findOneAndUpdate(
     { metaMessageId, tenantId },
-    { $set: { status, ...(error !== undefined ? { error } : {}) } },
+    {
+      $set: { status, ...(error !== undefined ? { error } : {}) },
+      ...(field ? { $max: { [field]: timestamp } } : {}),
+    },
     { new: true },
   );
 }
@@ -123,7 +142,13 @@ export async function attachMetaMessageId(
   metaMessageId: string,
 ): Promise<MessageDoc | null> {
   if (!Types.ObjectId.isValid(id)) return null;
-  return Message.findOneAndUpdate({ _id: id, tenantId }, { $set: { metaMessageId, status: 'SENT' } }, { new: true });
+  // Stamped locally: this is the moment Meta accepted the send, which is
+  // the only "sent" time we observe directly rather than via a webhook.
+  return Message.findOneAndUpdate(
+    { _id: id, tenantId },
+    { $set: { metaMessageId, status: 'SENT' }, $max: { sentAt: new Date() } },
+    { new: true },
+  );
 }
 
 export async function markMessageFailed(id: string, tenantId: string, error: unknown): Promise<MessageDoc | null> {

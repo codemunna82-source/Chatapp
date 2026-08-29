@@ -42,6 +42,25 @@ const messageSchema = new Schema(
     metaMessageId: { type: String }, // Meta's wamid — used to correlate status webhooks
     replyToMessageId: { type: Schema.Types.ObjectId, ref: 'Message' },
     status: { type: String, enum: MESSAGE_STATUSES, default: 'QUEUED', required: true },
+    /**
+     * When each delivery milestone happened, for the message-info view.
+     *
+     * `status` alone only says where a message got to, not when — and
+     * "delivered" without a time cannot answer the question people actually
+     * ask, which is whether the customer saw it before or after they
+     * complained. Each is stamped from Meta's OWN webhook timestamp rather
+     * than the moment we processed it: webhook delivery can lag by seconds
+     * or, after an outage, minutes, and the customer's phone is the thing
+     * being reported on, not our queue.
+     *
+     * Only meaningful on outbound messages, and only as far as the status
+     * webhooks Meta actually sends — `readAt` stays empty forever if the
+     * customer has read receipts turned off, which is a real answer, not a
+     * missing one.
+     */
+    sentAt: { type: Date },
+    deliveredAt: { type: Date },
+    readAt: { type: Date },
     error: { type: Schema.Types.Mixed },
     /**
      * Soft delete, tenant-side only. Meta's Cloud API exposes no way to

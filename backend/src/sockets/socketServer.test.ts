@@ -135,6 +135,7 @@ describe('Socket.IO gateway', () => {
       contactId: 'contact-1',
       whatsappPhoneNumberId: 'wpn-1',
       unreadCount: 0,
+      manuallyUnread: false,
       pinned: false,
     });
     await expect(received).resolves.toMatchObject({ id: 'conv-1' });
@@ -156,6 +157,7 @@ describe('Socket.IO gateway', () => {
       contactId: 'contact-x',
       whatsappPhoneNumberId: 'wpn-x',
       unreadCount: 0,
+      manuallyUnread: false,
       pinned: false,
     });
 

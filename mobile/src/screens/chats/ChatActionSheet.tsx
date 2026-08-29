@@ -12,24 +12,41 @@ interface ChatActionSheetProps {
   onTogglePin: (conversation: Conversation) => void;
   onToggleArchive: (conversation: Conversation) => void;
   onDelete: (conversation: Conversation) => void;
+  /** Marks the chat unread so it stands out again later. */
+  onMarkUnread: (conversation: Conversation) => void;
+  /** Enters multi-select with this chat already selected. */
+  onSelect: (conversation: Conversation) => void;
 }
 
 /**
- * Long-press actions for a chat row — pin, archive and delete, the same set
- * WhatsApp offers from a long-press.
+ * Long-press actions for a chat row — pin, archive, mark as unread,
+ * multi-select and delete.
  *
- * Only these three: mute, lock, favourites, lists and block have no backing
- * capability in this app or in Meta's Cloud API, and a row that looks real
- * and does nothing is worse than its absence. Delete is workspace-local —
+ * Mute, lock, favourites, lists and block are still absent: they have no
+ * backing capability in this app or in Meta's Cloud API, and a row that
+ * looks real and does nothing is worse than its absence. Delete is workspace-local —
  * it removes the chat and its messages from VOXO, and cannot withdraw
  * anything from the customer's own WhatsApp.
  */
-export function ChatActionSheet({ conversation, onClose, onTogglePin, onToggleArchive, onDelete }: ChatActionSheetProps) {
+export function ChatActionSheet({
+  conversation,
+  onClose,
+  onTogglePin,
+  onToggleArchive,
+  onDelete,
+  onMarkUnread,
+  onSelect,
+}: ChatActionSheetProps) {
   const { colors, spacing, radius, typography } = useTheme();
   if (!conversation) return null;
 
   const label = conversation.contact?.name || conversation.contact?.phone || 'this chat';
   const isArchived = conversation.status === 'ARCHIVED';
+
+  // Only offered when there is nothing already unread: on a chat with a
+  // real unread count the action would change nothing visible, which reads
+  // as a broken button.
+  const canMarkUnread = conversation.unreadCount === 0 && !conversation.manuallyUnread;
 
   const actions = [
     {
@@ -45,6 +62,24 @@ export function ChatActionSheet({ conversation, onClose, onTogglePin, onToggleAr
       icon: (isArchived ? 'arrow-undo-outline' : 'archive-outline') as keyof typeof Ionicons.glyphMap,
       tint: colors.textPrimary,
       onPress: () => onToggleArchive(conversation),
+    },
+    ...(canMarkUnread
+      ? [
+          {
+            key: 'unread',
+            label: 'Mark as unread',
+            icon: 'ellipse-outline' as keyof typeof Ionicons.glyphMap,
+            tint: colors.textPrimary,
+            onPress: () => onMarkUnread(conversation),
+          },
+        ]
+      : []),
+    {
+      key: 'select',
+      label: 'Select chats',
+      icon: 'checkmark-circle-outline' as keyof typeof Ionicons.glyphMap,
+      tint: colors.textPrimary,
+      onPress: () => onSelect(conversation),
     },
     {
       key: 'delete',
