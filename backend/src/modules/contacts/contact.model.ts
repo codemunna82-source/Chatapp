@@ -21,7 +21,22 @@ const contactSchema = new Schema(
      * contact ever reaches Meta.
      */
     isDemo: { type: Boolean, default: false },
-    avatarUrl: { type: String },
+    /**
+     * A photo the workspace uploaded for this contact.
+     *
+     * Mirrors the User avatar fields exactly, including select:false — the
+     * bytes live in Cloudinary and only the dedicated avatar route needs
+     * the reference, so no ordinary contact query drags it along.
+     *
+     * Not fetched from WhatsApp: Meta's Cloud API exposes no way to read a
+     * customer's profile picture, so this is the workspace's own record of
+     * who someone is. avatarUpdatedAt is public and acts as a cache-buster
+     * for the client's image URL.
+     */
+    avatarUrl: { type: String, select: false },
+    avatarContentType: { type: String, select: false },
+    avatarCloudinaryPublicId: { type: String, select: false },
+    avatarUpdatedAt: { type: Date },
     tags: { type: [String], default: [] },
   },
   { timestamps: true },

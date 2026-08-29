@@ -36,6 +36,8 @@ export interface RealtimeConversationPayload {
   whatsappPhoneNumberId: string;
   lastMessageAt?: string;
   lastMessagePreview?: string;
+  lastMessageDirection?: 'IN' | 'OUT';
+  lastMessageStatus?: string;
   unreadCount: number;
   manuallyUnread: boolean;
   pinned: boolean;

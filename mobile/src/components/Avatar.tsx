@@ -3,6 +3,7 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { useAuthStore } from '../store/authStore';
 import { userAvatarUrl } from '../api/endpoints/users';
+import { contactAvatarUrl } from '../api/endpoints/contacts';
 
 const PALETTE = ['#4C3FE0', '#0E9384', '#C9861A', '#D64545', '#2463EB', '#9333EA'];
 
@@ -29,7 +30,17 @@ function InitialsCircle({ label, size }: { label: string; size: number }) {
  * recommended way to reset state on a prop change without a setState-in-
  * effect (see react-hooks/set-state-in-effect).
  */
-function AvatarPhoto({ userId, version, label, size }: { userId: string; version?: string; label: string; size: number }) {
+function AvatarPhoto({
+  url,
+  version,
+  label,
+  size,
+}: {
+  url: string;
+  version?: string;
+  label: string;
+  size: number;
+}) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const [failed, setFailed] = useState(false);
 
@@ -38,10 +49,10 @@ function AvatarPhoto({ userId, version, label, size }: { userId: string; version
   // the request happens once per avatar.
   const source = useMemo(
     () => ({
-      uri: userAvatarUrl(userId, version),
+      uri: url,
       headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     }),
-    [userId, version, accessToken],
+    [url, accessToken],
   );
 
   if (failed) {
@@ -66,14 +77,49 @@ interface AvatarProps {
    * fetch error (no photo set, network error, etc.).
    */
   userId?: string;
-  /** Cache-busting token (e.g. the user's avatarUpdatedAt) — bump it after a re-upload so a stale cached image isn't shown at the same URL. */
+  /**
+   * WhatsApp contact id whose uploaded photo should be rendered — see
+   * contact.routes.ts's GET /contacts/:id/avatar. Mutually exclusive with
+   * userId in practice: one is a team member, the other a customer.
+   *
+   * The photo is one the WORKSPACE uploaded, not a sync: Meta's Cloud API
+   * exposes no way to read a customer's WhatsApp profile picture.
+   */
+  contactId?: string;
+  /** Cache-busting token (e.g. the user's or contact's avatarUpdatedAt) — bump it after a re-upload so a stale cached image isn't shown at the same URL. */
   version?: string;
 }
 
-/** Initials-based placeholder, or a real uploaded photo when `userId` is given. */
-export function Avatar({ label, size = 48, userId, version }: AvatarProps) {
+/**
+ * Initials placeholder, or a real uploaded photo when a userId or
+ * contactId is given.
+ *
+ * Falls back to initials on ANY fetch failure — no photo set, offline, a
+ * deleted image. That is the common case rather than an error worth
+ * surfacing: most contacts will never have a photo.
+ */
+export function Avatar({ label, size = 48, userId, contactId, version }: AvatarProps) {
   if (userId) {
-    return <AvatarPhoto key={`${userId}:${version ?? ''}`} userId={userId} version={version} label={label} size={size} />;
+    return (
+      <AvatarPhoto
+        key={`u:${userId}:${version ?? ''}`}
+        url={userAvatarUrl(userId, version)}
+        version={version}
+        label={label}
+        size={size}
+      />
+    );
+  }
+  if (contactId) {
+    return (
+      <AvatarPhoto
+        key={`c:${contactId}:${version ?? ''}`}
+        url={contactAvatarUrl(contactId, version)}
+        version={version}
+        label={label}
+        size={size}
+      />
+    );
   }
   return <InitialsCircle label={label} size={size} />;
 }

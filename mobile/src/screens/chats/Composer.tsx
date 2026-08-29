@@ -30,6 +30,7 @@ import { useSendMessage, insertPendingMediaMessage, removeMessageFromCache } fro
 import { getApiErrorMessage } from '../../api/client';
 import { formatDuration } from '../../utils/formatTime';
 import { useMessageDraft } from '../../utils/useMessageDraft';
+import { impactLight } from '../../utils/haptics';
 import { MediaSourceSheet } from './MediaSourceSheet';
 import { QuickReplySheet } from './QuickReplySheet';
 import { recordQuickReplyUse } from '../../queries/useQuickReplies';
@@ -278,6 +279,10 @@ export function Composer({
 
   const performSend = async () => {
     const trimmed = text.trim();
+    // Paired with the send sound, and honest about what it confirms: the
+    // message has left the composer, not that it reached the customer.
+    // The bubble's status tick is what says the latter.
+    impactLight();
     onSendText(trimmed);
     setText('');
     draft.clear();

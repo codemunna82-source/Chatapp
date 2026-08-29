@@ -16,6 +16,10 @@ export interface PublicConversation {
   whatsappPhoneNumberId: string;
   lastMessageAt?: Date;
   lastMessagePreview?: string;
+  /** Who sent the last message, and — for our own sends — how far it got.
+   *  Lets the chat list render a tick without a query per row. */
+  lastMessageDirection?: 'IN' | 'OUT';
+  lastMessageStatus?: string;
   lastCustomerMessageAt?: Date;
   conversationWindowExpiresAt?: Date;
   withinCustomerServiceWindow: boolean;
@@ -43,6 +47,8 @@ function toPublicConversation(doc: ConversationDoc, contact?: ContactDoc): Publi
     whatsappPhoneNumberId: String(doc.whatsappPhoneNumberId),
     lastMessageAt: doc.lastMessageAt ?? undefined,
     lastMessagePreview: doc.lastMessagePreview ?? undefined,
+    lastMessageDirection: (doc.lastMessageDirection as 'IN' | 'OUT' | null) ?? undefined,
+    lastMessageStatus: doc.lastMessageStatus ?? undefined,
     lastCustomerMessageAt: doc.lastCustomerMessageAt ?? undefined,
     conversationWindowExpiresAt: doc.conversationWindowExpiresAt ?? undefined,
     withinCustomerServiceWindow: repo.isWithinCustomerServiceWindow(doc),

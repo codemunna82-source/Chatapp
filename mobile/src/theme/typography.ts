@@ -12,6 +12,8 @@ const fontFamilyMedium = Platform.select({ android: 'sans-serif-medium', default
  */
 export const typography = {
   fontFamily,
+  /** Hero numbers only (dashboard metrics). Big enough that the negative tracking matters. */
+  display: { fontSize: 34, lineHeight: 40, fontWeight: '700' as const, letterSpacing: -0.8, fontFamily: fontFamilyMedium },
   title: { fontSize: 26, lineHeight: 32, fontWeight: '700' as const, letterSpacing: -0.4, fontFamily: fontFamilyMedium },
   heading: { fontSize: 19, lineHeight: 25, fontWeight: '600' as const, letterSpacing: -0.2, fontFamily: fontFamilyMedium },
   body: { fontSize: 15.5, lineHeight: 22, fontWeight: '400' as const, fontFamily },

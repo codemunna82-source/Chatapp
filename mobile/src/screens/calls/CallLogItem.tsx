@@ -41,7 +41,7 @@ function CallLogItemImpl({ call }: { call: CallLog }) {
 
   return (
     <View style={[styles.row, { padding: spacing.md }]}>
-      <Avatar label={label} size={44} />
+      <Avatar label={label} contactId={call.contactId} version={call.contact?.avatarUpdatedAt} size={44} />
       <View style={{ flex: 1, marginLeft: spacing.md }}>
         <Text style={[typography.bodyMedium, { color: isMissedOrFailed ? colors.danger : colors.textPrimary }]} numberOfLines={1}>
           {label}

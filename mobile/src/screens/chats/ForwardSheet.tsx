@@ -118,7 +118,7 @@ export function ForwardSheet({ visible, messages, currentConversationId, onClose
       >
         {({ pressed }) => (
           <View style={[styles.rowInner, { opacity: blocked ? 0.45 : pressed ? 0.6 : 1 }]}>
-            <Avatar label={label} size={40} />
+            <Avatar label={label} contactId={item.contactId} version={item.contact?.avatarUpdatedAt} size={40} />
             <View style={{ flex: 1, marginLeft: spacing.md }}>
               <Text style={[typography.bodyMedium, { color: colors.textPrimary }]} numberOfLines={1}>
                 {label}

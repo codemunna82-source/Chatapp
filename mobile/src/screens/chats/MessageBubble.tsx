@@ -8,8 +8,10 @@ import { formatMessageTime } from '../../utils/formatTime';
 import { MessageStatusIcon } from './MessageStatusIcon';
 import { MediaImage } from './MediaImage';
 import { MediaFileChip } from './MediaFileChip';
+import { VideoMessageBubble } from './VideoMessageBubble';
 import { AudioMessageBubble } from './AudioMessageBubble';
 import type { Message } from '../../api/types';
+import { impactLight, impactMedium } from '../../utils/haptics';
 import type { ReactionSummary } from './deriveConversationView';
 
 interface MessageBubbleProps {
@@ -40,6 +42,30 @@ interface MessageBubbleProps {
 const REPLY_TRIGGER_X = 56;
 const REPLY_MAX_X = 76;
 
+/** Hairline of bubble colour left around edge-to-edge media, so the bubble still frames it. */
+const BLEED_FRAME = 3;
+
+/**
+ * True for the message shapes whose media fills the bubble edge to edge.
+ *
+ * Those get a thin frame instead of the usual padding, so a photo or video
+ * reads as the message rather than as an illustration inside a text
+ * bubble — and the caption below it gets its own padded strip, visually
+ * separate from the media instead of butting straight against it.
+ */
+function isEdgeToEdgeMedia(message: Message): boolean {
+  if (message.type === 'image') return Boolean(message.mediaId || message.localUri);
+  if (message.type === 'video') return Boolean(message.mediaId || message.localUri);
+  return false;
+}
+
+/** Whether MessageContent will render something for this message, as opposed to falling through to a type label. */
+function hasRenderableMedia(message: Message): boolean {
+  if (message.type === 'image' || message.type === 'video') return Boolean(message.mediaId || message.localUri);
+  if (message.type === 'audio' || message.type === 'document') return Boolean(message.mediaId);
+  return false;
+}
+
 function MessageContent({
   message,
   textColor,
@@ -47,6 +73,7 @@ function MessageContent({
   onLongPress,
 }: {
   message: Message;
+  /** Tint for media chrome that sits on the bubble rather than on the media itself (the audio scrubber). */
   textColor: string;
   onOpenImage?: (localUri: string) => void;
   /**
@@ -61,28 +88,26 @@ function MessageContent({
    */
   onLongPress: () => void;
 }) {
-  const { typography } = useTheme();
-
   if (message.type === 'image' && (message.mediaId || message.localUri)) {
     return (
-      <View>
-        <MediaImage
-          mediaId={message.mediaId}
-          localUri={message.localUri}
-          onOpen={onOpenImage}
-          onLongPress={onLongPress}
-        />
-        {message.text ? <Text style={[typography.body, { color: textColor, marginTop: 6 }]}>{message.text}</Text> : null}
-      </View>
+      <MediaImage
+        mediaId={message.mediaId}
+        localUri={message.localUri}
+        onOpen={onOpenImage}
+        onLongPress={onLongPress}
+      />
     );
+  }
+  if (message.type === 'video' && (message.mediaId || message.localUri)) {
+    return <VideoMessageBubble mediaId={message.mediaId} localUri={message.localUri} onLongPress={onLongPress} />;
   }
   if (message.type === 'audio' && message.mediaId) {
     return <AudioMessageBubble mediaId={message.mediaId} tint={textColor} onLongPress={onLongPress} />;
   }
-  if ((message.type === 'video' || message.type === 'document') && message.mediaId) {
+  if (message.type === 'document' && message.mediaId) {
     return <MediaFileChip mediaId={message.mediaId} type={message.type} onLongPress={onLongPress} />;
   }
-  return <Text style={[typography.body, { color: textColor }]}>{message.text || `[${message.type}]`}</Text>;
+  return null;
 }
 
 function MessageBubbleImpl({
@@ -103,10 +128,21 @@ function MessageBubbleImpl({
   const bubbleColor = isOut ? colors.bubbleSent : colors.bubbleReceived;
   const textColor = isOut ? colors.bubbleSentText : colors.bubbleReceivedText;
   const isFailed = message.status === 'FAILED';
+  const bleed = isEdgeToEdgeMedia(message);
+  // Applied to the caption, the reply quote and the footer when the media
+  // is edge-to-edge, so they sit on the same left margin they would have
+  // had in a plain text bubble.
+  const insetWhenBleeding = bleed ? { paddingHorizontal: spacing.xs, paddingTop: spacing.xs } : null;
 
   // Bound inside the memoized component, so these closures are recreated
   // only when this row actually re-renders.
-  const handleLongPress = useCallback(() => onLongPress(message), [onLongPress, message]);
+  const handleLongPress = useCallback(() => {
+    // The one place a tick genuinely earns its keep: a long press has no
+    // visual feedback until the sheet actually appears, so without it the
+    // user cannot tell whether the gesture registered.
+    impactMedium();
+    onLongPress(message);
+  }, [onLongPress, message]);
   // While selecting, a plain tap toggles this row instead of doing whatever
   // it normally would (retrying a failed send, opening a photo).
   const handlePress = useCallback(() => {
@@ -135,9 +171,14 @@ function MessageBubbleImpl({
   const triggered = useSharedValue(0);
 
   const fireReply = useCallback(() => {
+    // Fired from the gesture's onEnd via runOnJS, so this confirms the
+    // swipe crossed the threshold — the bubble has already sprung back by
+    // the time anything else appears.
+    impactLight();
     onReply?.(message);
   }, [onReply, message]);
   const fireForward = useCallback(() => {
+    impactLight();
     onForward?.(message);
   }, [onForward, message]);
 
@@ -232,8 +273,12 @@ function MessageBubbleImpl({
           bubbleRadius,
           {
             backgroundColor: bubbleColor,
-            paddingHorizontal: spacing.sm + 4,
-            paddingVertical: spacing.xs + 4,
+            // A photo or video fills the bubble, leaving only a hairline
+            // frame of bubble colour around it; everything else keeps the
+            // normal text padding. The caption and footer below re-add
+            // their own inset so they never touch the media's edge.
+            paddingHorizontal: bleed ? BLEED_FRAME : spacing.sm + 4,
+            paddingVertical: bleed ? BLEED_FRAME : spacing.xs + 4,
             marginVertical: 2,
             // Every bubble carries a themed border (gold, per the chat
             // screen's own palette in chatTheme.ts) — a failed send
@@ -248,6 +293,7 @@ function MessageBubbleImpl({
             style={[
               styles.replyBlock,
               { borderLeftColor: isOut ? colors.bubbleSentText : colors.primary, marginBottom: spacing.xs },
+              bleed ? styles.replyBlockBleeding : null,
             ]}
           >
             <Text style={[typography.caption, { color: isOut ? colors.bubbleSentText : colors.textSecondary, opacity: 0.85 }]} numberOfLines={1}>
@@ -263,7 +309,24 @@ function MessageBubbleImpl({
           onLongPress={handleLongPress}
         />
 
-        <View style={styles.footer}>
+        {/* The caption is its own block under the media rather than text
+            crammed against the photo's bottom edge — which is what made a
+            captioned photo read as one undifferentiated smudge. For a
+            plain text message this IS the message, and the branch is the
+            same either way. */}
+        {message.text ? (
+          <View style={insetWhenBleeding}>
+            <Text style={[typography.body, { color: textColor }]}>{message.text}</Text>
+          </View>
+        ) : null}
+
+        {/* A media message with no caption still needs something in the
+            bubble when the media type isn't one this app can render. */}
+        {!message.text && !hasRenderableMedia(message) ? (
+          <Text style={[typography.body, { color: textColor }]}>{`[${message.type}]`}</Text>
+        ) : null}
+
+        <View style={[styles.footer, insetWhenBleeding]}>
           {message.starredAt ? (
             <Ionicons name="star" size={11} color={textColor} style={styles.starMark} />
           ) : null}
@@ -324,6 +387,9 @@ const styles = StyleSheet.create({
   checkIn: { marginRight: 6 },
   checkOut: { marginRight: 6 },
   replyBlock: { borderLeftWidth: 2, paddingLeft: 6 },
+  // The quote would otherwise start at the media's own left edge, with no
+  // gap at all, once the bubble's padding is gone.
+  replyBlockBleeding: { marginLeft: 4, marginTop: 3, marginRight: 4 },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4 },
   reactions: {
     position: 'absolute',

@@ -42,6 +42,11 @@ export function MediaFileChip({
   const [error, setError] = useState(false);
 
   const handlePress = async () => {
+    // Re-entrancy guard, standing in for the `disabled` prop this
+    // Pressable used to carry: a disabled Pressable stops responding to
+    // everything, long-press included, which took the action sheet away
+    // for as long as a download was running.
+    if (busy) return;
     setError(false);
     setBusy(true);
     try {
@@ -64,7 +69,6 @@ export function MediaFileChip({
     <Pressable
       onPress={handlePress}
       onLongPress={onLongPress}
-      disabled={busy}
       style={[styles.row, { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm, padding: spacing.sm }]}
     >
       {busy ? (

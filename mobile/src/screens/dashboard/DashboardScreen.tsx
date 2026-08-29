@@ -5,6 +5,9 @@ import { DashboardSkeleton } from '../../components/Skeleton';
 import { InlineBanner } from '../../components/InlineBanner';
 import { StatCard } from '../../components/StatCard';
 import { MessagesBarChart } from './MessagesBarChart';
+import { TodayCard } from './TodayCard';
+import { ResponseTimeCard } from './ResponseTimeCard';
+import { TopContactsCard } from './TopContactsCard';
 import { useDashboard } from '../../queries/useDashboard';
 import { useTheme } from '../../theme/ThemeProvider';
 import { getApiErrorMessage } from '../../api/client';
@@ -38,6 +41,12 @@ export function DashboardScreen() {
 
         {dashboard.data ? (
           <>
+            {/* Today first: the totals below are a standing record, but the
+                question someone opens this screen to answer is how the day
+                is going right now. */}
+            <TodayCard today={dashboard.data.today} />
+            <ResponseTimeCard medianMinutes={dashboard.data.medianFirstResponseMinutes} />
+
             <View style={[styles.grid, { marginBottom: spacing.md, gap: spacing.sm }]}>
               <StatCard label="Contacts" value={dashboard.data.contactsTotal} />
               <StatCard label="Open chats" value={dashboard.data.conversations.open} />
@@ -66,6 +75,8 @@ export function DashboardScreen() {
             >
               <MessagesBarChart data={dashboard.data.messagesByDay} />
             </View>
+
+            <TopContactsCard contacts={dashboard.data.topContacts} />
           </>
         ) : null}
       </ScrollView>

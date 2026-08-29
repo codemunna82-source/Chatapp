@@ -111,6 +111,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         enableBackgroundRecording: false,
       },
     ],
+    [
+      // Inline video playback in chat bubbles. Background playback and
+      // picture-in-picture are both off: a video only ever plays inside an
+      // open conversation, and enabling either would add a foreground
+      // service and its notification for a case the app does not have.
+      'expo-video',
+      { supportsBackgroundPlayback: false, supportsPictureInPicture: false },
+    ],
+    [
+      // Saving a contact into the phone's own address book (READ_CONTACTS
+      // and WRITE_CONTACTS on Android) so a number added in VOXO can be
+      // called and recognised outside it.
+      'expo-contacts',
+      { contactsPermission: 'Allow VOXO to save contacts you add to your phone’s address book.' },
+    ],
   ],
   extra: {
     eas: {

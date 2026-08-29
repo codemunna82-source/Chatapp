@@ -6,15 +6,13 @@ const e164 = z.string().regex(/^\+[1-9]\d{7,14}$/, 'Phone must be in E.164 forma
 export const createContactSchema = z.object({
   phone: e164,
   name: z.string().trim().min(1).max(120).optional(),
-  avatarUrl: z.string().url().optional(),
   tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
 });
 
 export const updateContactSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
-    avatarUrl: z.string().url().optional(),
-    tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+      tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 

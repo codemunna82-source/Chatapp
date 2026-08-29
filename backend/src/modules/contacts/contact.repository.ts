@@ -5,7 +5,6 @@ export interface CreateContactInput {
   tenantId: string;
   phone: string;
   name?: string;
-  avatarUrl?: string;
   tags?: string[];
   /** Only the seed script sets this — see contact.model.ts. */
   isDemo?: boolean;
@@ -79,8 +78,53 @@ export async function listContactsByTenant(
 export async function updateContactByIdAndTenant(
   id: string,
   tenantId: string,
-  patch: Partial<Pick<CreateContactInput, 'name' | 'avatarUrl' | 'tags'>>,
+  patch: Partial<Pick<CreateContactInput, 'name' | 'tags'>>,
 ): Promise<ContactDoc | null> {
   if (!Types.ObjectId.isValid(id)) return null;
   return Contact.findOneAndUpdate({ _id: id, tenantId }, { $set: patch }, { new: true });
+}
+
+export interface ContactAvatarRef {
+  url: string;
+  contentType: string;
+  cloudinaryPublicId?: string;
+}
+
+export async function setContactAvatar(
+  id: string,
+  tenantId: string,
+  avatarUrl: string,
+  contentType: string,
+  cloudinaryPublicId: string,
+): Promise<ContactDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Contact.findOneAndUpdate(
+    { _id: id, tenantId },
+    {
+      $set: {
+        avatarUrl,
+        avatarContentType: contentType,
+        avatarCloudinaryPublicId: cloudinaryPublicId,
+        avatarUpdatedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+}
+
+/** The select:false avatar fields, fetched explicitly — see the model. */
+export async function findContactAvatarRefByIdAndTenant(
+  id: string,
+  tenantId: string,
+): Promise<ContactAvatarRef | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  const contact = await Contact.findOne({ _id: id, tenantId }).select(
+    '+avatarUrl +avatarContentType +avatarCloudinaryPublicId',
+  );
+  if (!contact || !contact.avatarUrl || !contact.avatarContentType) return null;
+  return {
+    url: contact.avatarUrl,
+    contentType: contact.avatarContentType,
+    cloudinaryPublicId: contact.avatarCloudinaryPublicId ?? undefined,
+  };
 }

@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../components/Avatar';
 import { Badge } from '../../components/Badge';
+import { MessageStatusIcon } from './MessageStatusIcon';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatChatListTime } from '../../utils/formatTime';
 import type { Conversation } from '../../api/types';
@@ -49,7 +50,12 @@ function ChatListItemImpl({
       ]}
     >
       <View>
-        <Avatar label={label} size={52} />
+        <Avatar
+          label={label}
+          contactId={conversation.contactId}
+          version={conversation.contact?.avatarUpdatedAt}
+          size={52}
+        />
         {selectable && selected ? (
           <View style={[styles.checkMark, { backgroundColor: colors.primary, borderColor: colors.background }]}>
             <Ionicons name="checkmark" size={12} color={colors.textOnPrimary} />
@@ -72,6 +78,15 @@ function ChatListItemImpl({
           </Text>
         </View>
         <View style={styles.topLine}>
+          {/* The tick sits BEFORE the preview, as WhatsApp does: it tells
+              you the last message was yours, which changes how the line
+              that follows should be read. Only on our own sends — an
+              inbound message has no delivery status of ours to report. */}
+          {conversation.lastMessageDirection === 'OUT' && conversation.lastMessageStatus ? (
+            <View style={styles.previewTick}>
+              <MessageStatusIcon status={conversation.lastMessageStatus} size={13} />
+            </View>
+          ) : null}
           <Text
             style={[typography.body, { color: unread ? colors.textPrimary : colors.textSecondary, flex: 1 }]}
             numberOfLines={1}
@@ -108,6 +123,7 @@ const styles = StyleSheet.create({
   middle: { flex: 1 },
   topLine: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
   pinnedMark: { marginLeft: 6 },
+  previewTick: { marginRight: 4 },
   unreadDot: { width: 10, height: 10, borderRadius: 5, marginLeft: 6 },
   checkMark: {
     position: 'absolute',

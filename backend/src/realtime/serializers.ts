@@ -29,6 +29,8 @@ export function toRealtimeConversation(doc: ConversationDoc): RealtimeConversati
     whatsappPhoneNumberId: String(doc.whatsappPhoneNumberId),
     lastMessageAt: doc.lastMessageAt?.toISOString(),
     lastMessagePreview: doc.lastMessagePreview ?? undefined,
+    lastMessageDirection: (doc.lastMessageDirection as 'IN' | 'OUT' | null) ?? undefined,
+    lastMessageStatus: doc.lastMessageStatus ?? undefined,
     unreadCount: doc.unreadCount,
     manuallyUnread: doc.manuallyUnread,
     pinned: doc.pinned,

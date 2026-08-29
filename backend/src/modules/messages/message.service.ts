@@ -168,6 +168,11 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
       input.conversationId,
       input.tenantId,
       input.text ?? input.caption ?? `[${input.type}]`,
+      new Date(),
+      // SENT, matching the message row attachMetaMessageId just wrote — a
+      // status webhook advances both from here.
+      'SENT',
+      String(localMessage._id),
     );
 
     const realtime = getRealtimeEmitter();

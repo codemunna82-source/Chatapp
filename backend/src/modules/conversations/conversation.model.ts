@@ -17,6 +17,18 @@ const conversationSchema = new Schema(
     whatsappPhoneNumberId: { type: Schema.Types.ObjectId, ref: 'WhatsAppPhoneNumber', required: true },
     lastMessageAt: { type: Date },
     lastMessagePreview: { type: String },
+    /**
+     * Enough about the last message to render a WhatsApp-style chat row
+     * without a second query per conversation.
+     *
+     * Denormalised on purpose: the alternative is one lookup per row on a
+     * screen that is nothing but rows. `lastMessageId` is what lets a
+     * status webhook find the row to update — matching on preview text
+     * would break the moment two messages read the same.
+     */
+    lastMessageDirection: { type: String, enum: ['IN', 'OUT'] },
+    lastMessageStatus: { type: String },
+    lastMessageId: { type: Schema.Types.ObjectId, ref: 'Message' },
     lastCustomerMessageAt: { type: Date },
     conversationWindowExpiresAt: { type: Date },
     unreadCount: { type: Number, default: 0, min: 0 },

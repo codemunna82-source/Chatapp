@@ -171,6 +171,12 @@ export async function recordInboundActivity(
       $set: {
         lastMessageAt: at,
         lastMessagePreview: preview,
+        lastMessageDirection: 'IN',
+        // An inbound message has no delivery status of ours to show — the
+        // row renders no tick for it, rather than a stale one from the
+        // outbound message it replaced.
+        lastMessageStatus: null,
+        lastMessageId: null,
         lastCustomerMessageAt: at,
         conversationWindowExpiresAt: new Date(at.getTime() + CUSTOMER_SERVICE_WINDOW_MS),
       },
@@ -186,11 +192,40 @@ export async function recordOutboundActivity(
   tenantId: string,
   preview: string,
   at: Date = new Date(),
+  status = 'SENT',
+  messageId?: string,
 ): Promise<ConversationDoc | null> {
   return Conversation.findOneAndUpdate(
     { _id: id, tenantId },
-    { $set: { lastMessageAt: at, lastMessagePreview: preview } },
+    {
+      $set: {
+        lastMessageAt: at,
+        lastMessagePreview: preview,
+        lastMessageDirection: 'OUT',
+        lastMessageStatus: status,
+        ...(messageId ? { lastMessageId: messageId } : {}),
+      },
+    },
     { new: true },
+  );
+}
+
+/**
+ * Keeps the chat row's tick in step with a status webhook.
+ *
+ * Scoped to lastMessageId so a late status for an older message cannot
+ * rewrite the row to describe something that is no longer the last thing
+ * in the chat.
+ */
+export async function updateLastMessageStatus(
+  tenantId: string,
+  messageId: string,
+  status: string,
+): Promise<void> {
+  if (!Types.ObjectId.isValid(messageId)) return;
+  await Conversation.updateOne(
+    { tenantId, lastMessageId: new Types.ObjectId(messageId) },
+    { $set: { lastMessageStatus: status } },
   );
 }
 

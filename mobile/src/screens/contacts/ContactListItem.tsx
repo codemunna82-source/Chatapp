@@ -17,7 +17,7 @@ function ContactListItemImpl({ contact, onPress }: { contact: Contact; onPress: 
         { padding: spacing.md, backgroundColor: pressed ? colors.surface : colors.background },
       ]}
     >
-      <Avatar label={label} />
+      <Avatar label={label} contactId={contact.id} version={contact.avatarUpdatedAt} />
       <View style={{ flex: 1, marginLeft: spacing.md }}>
         <Text style={[typography.bodyMedium, { color: colors.textPrimary }]} numberOfLines={1}>
           {label}

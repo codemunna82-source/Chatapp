@@ -8,17 +8,43 @@ import {
   listContactsQuerySchema,
   contactIdParamSchema,
 } from './contact.validation';
+import multer from 'multer';
+import { AVATAR_MAX_SIZE_BYTES } from '../users/user.service';
 import {
   createContactHandler,
   listContactsHandler,
   getContactHandler,
   updateContactHandler,
   deleteContactHandler,
+  updateContactAvatarHandler,
+  getContactAvatarHandler,
 } from './contact.controller';
 
 export const contactRouter = Router();
 
 contactRouter.use(requireAuth);
+
+// In-memory only — the bytes go straight to Cloudinary and never touch
+// local disk, which would be pointless on an ephemeral deployment anyway.
+const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: AVATAR_MAX_SIZE_BYTES } });
+
+// A contact photo is workspace-owned, not fetched from WhatsApp — Meta's
+// Cloud API exposes no way to read a customer's profile picture. Reading
+// it needs CHAT_READ, setting it CHAT_SEND, matching the rest of the
+// contact surface.
+contactRouter.get(
+  '/:id/avatar',
+  requirePermission('CHAT_READ'),
+  validate({ params: contactIdParamSchema }),
+  getContactAvatarHandler,
+);
+contactRouter.patch(
+  '/:id/avatar',
+  requirePermission('CHAT_SEND'),
+  avatarUpload.single('file'),
+  validate({ params: contactIdParamSchema }),
+  updateContactAvatarHandler,
+);
 
 // Contacts are the customer directory a conversation is chatted against —
 // gated behind CHAT_READ/CHAT_SEND like the rest of the chat surface

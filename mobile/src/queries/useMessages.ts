@@ -4,6 +4,8 @@ import type { SendMessageBody } from '../api/endpoints/messages';
 import type { Message } from '../api/types';
 import { queryKeys } from './keys';
 import { playSentSound } from '../sockets/useMessageAlert';
+import { isOfflineError } from '../api/client';
+import { useOutboxStore, isQueueableBody } from '../store/outboxStore';
 
 type MessagesPage = { items: Message[]; nextCursor: string | null };
 type MessagesData = InfiniteData<MessagesPage, string | undefined>;
@@ -207,8 +209,27 @@ export function useSendMessage(conversationId: string) {
       // false confirmation — the FAILED bubble is the honest signal there.
       playSentSound();
     },
-    onError: (_err, _body, context) => {
+    onError: (err, body, context) => {
       if (!context) return;
+
+      // A send that never reached the server is not a failure the user
+      // needs to act on — it is a message waiting for signal. Queue it and
+      // leave the bubble QUEUED; OutboxFlusher sends it when the
+      // connection comes back, even across an app restart.
+      //
+      // Anything the server actually answered (a closed 24-hour window, a
+      // rejected template) would fail identically on every retry, so it
+      // goes straight to FAILED with its retry affordance instead.
+      if (isOfflineError(err) && isQueueableBody(body)) {
+        useOutboxStore.getState().enqueue({
+          id: context.tempId,
+          conversationId,
+          body,
+          queuedAt: new Date().toISOString(),
+        });
+        return;
+      }
+
       patchMessages(queryClient, conversationId, (pages) =>
         pages.map((page) => ({
           ...page,

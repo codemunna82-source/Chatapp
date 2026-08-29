@@ -54,6 +54,9 @@ export interface Contact {
   name?: string;
   avatarUrl?: string;
   tags: string[];
+  /** When this contact's photo last changed; doubles as the cache-buster
+   *  for its image URL. Absent when no photo has been set. */
+  avatarUpdatedAt?: string;
   isDemo: boolean;
   createdAt: string;
   updatedAt: string;
@@ -69,6 +72,10 @@ export interface Conversation {
   whatsappPhoneNumberId: string;
   lastMessageAt?: string;
   lastMessagePreview?: string;
+  /** Who sent the last message, and how far our own send got — lets the
+   *  chat row show a tick without a query per row. */
+  lastMessageDirection?: MessageDirection;
+  lastMessageStatus?: MessageStatus;
   lastCustomerMessageAt?: string;
   conversationWindowExpiresAt?: string;
   withinCustomerServiceWindow: boolean;
@@ -206,6 +213,13 @@ export interface DashboardSummary {
   conversations: { open: number; archived: number; unreadTotal: number };
   messages: { sentTotal: number; receivedTotal: number; failedTotal: number };
   messagesByDay: { date: string; sent: number; received: number }[];
+  /** Today against yesterday — a direction of travel, which totals alone
+   *  never give. */
+  today: { sent: number; received: number; sentYesterday: number; receivedYesterday: number };
+  /** Median minutes from a customer's message to the first reply. Null when
+   *  there is nothing to measure — not zero, which would read as instant. */
+  medianFirstResponseMinutes: number | null;
+  topContacts: { contactId: string; name?: string; phone: string; messages: number }[];
 }
 
 export type CallDirection = 'INBOUND' | 'OUTBOUND';

@@ -49,3 +49,23 @@ export function useDeleteContact() {
     },
   });
 }
+
+/**
+ * Uploads a photo for a contact.
+ *
+ * Invalidates the contact lists so every row's Avatar re-reads
+ * `avatarUpdatedAt` — that value is the cache-busting query param on the
+ * photo URL, so without the invalidation the old photo would keep showing
+ * at the unchanged URL.
+ */
+export function useUploadContactAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: string; file: contactsApi.PickedPhoto }) =>
+      contactsApi.uploadContactAvatar(id, file),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+    },
+  });
+}

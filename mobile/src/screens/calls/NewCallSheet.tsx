@@ -66,7 +66,7 @@ export function NewCallSheet({ visible, onClose }: NewCallSheetProps) {
                     style={[styles.row, { paddingVertical: spacing.sm, borderBottomColor: colors.border }]}
                     onPress={() => handlePick(item)}
                   >
-                    <Avatar label={item.name || item.phone} size={36} />
+                    <Avatar label={item.name || item.phone} contactId={item.id} version={item.avatarUpdatedAt} size={36} />
                     <View style={{ marginLeft: spacing.sm }}>
                       <Text style={[typography.bodyMedium, { color: colors.textPrimary }]}>{item.name || item.phone}</Text>
                       {item.name ? (

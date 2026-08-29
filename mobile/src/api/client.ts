@@ -121,3 +121,22 @@ export function getApiErrorCode(err: unknown): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * True when a request never reached the server — no connection, DNS
+ * failure, or a timeout with nothing returned.
+ *
+ * The distinction matters for the offline outbox: a request that failed
+ * this way can be safely retried later, while one the server actually
+ * answered with a 4xx (bad template, closed 24-hour window, revoked
+ * permission) would fail identically forever and must not be queued.
+ *
+ * A 5xx is deliberately NOT offline: the server received the send, and
+ * re-sending could deliver the same message twice.
+ */
+export function isOfflineError(err: unknown): boolean {
+  // eslint-disable-next-line import/no-named-as-default-member
+  if (!axios.isAxiosError(err)) return false;
+  if (err.response) return false;
+  return err.code === 'ERR_NETWORK' || err.code === 'ECONNABORTED' || err.message === 'Network Error';
+}

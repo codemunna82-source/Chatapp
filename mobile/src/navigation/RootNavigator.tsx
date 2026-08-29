@@ -7,6 +7,7 @@ import { MainTabNavigator } from './MainTabNavigator';
 import { LoadingIndicator } from '../components/LoadingIndicator';
 import { useAuthStore } from '../store/authStore';
 import { RealtimeSync } from '../sockets/RealtimeSync';
+import { OutboxFlusher } from '../sockets/OutboxFlusher';
 import { PushNotificationSync } from '../notifications/PushNotificationSync';
 
 export function RootNavigator() {
@@ -51,6 +52,7 @@ export function RootNavigator() {
       {status === 'signedIn' ? (
         <>
           <RealtimeSync />
+          <OutboxFlusher />
           <PushNotificationSync navigationRef={navigationRef} />
           <MainTabNavigator />
         </>

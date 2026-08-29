@@ -117,7 +117,7 @@ export function ManageContactsScreen() {
                   style={{ marginRight: spacing.sm }}
                 />
               ) : null}
-              <Avatar label={label} size={42} />
+              <Avatar label={label} contactId={item.id} version={item.avatarUpdatedAt} size={42} />
               <View style={{ flex: 1, marginLeft: spacing.md }}>
                 <Text style={[typography.bodyMedium, { color: colors.textPrimary }]} numberOfLines={1}>
                   {label}

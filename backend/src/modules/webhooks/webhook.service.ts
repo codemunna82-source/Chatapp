@@ -4,7 +4,12 @@ import { recordWebhookEventOnce, markWebhookEventProcessed, markWebhookEventFail
 import { findPhoneNumberByMetaId } from '../whatsapp/whatsapp.repository';
 import type { WhatsAppPhoneNumberDoc } from '../whatsapp/whatsappPhoneNumber.model';
 import { findOrCreateContactByPhone } from '../contacts/contact.repository';
-import { findOrCreateConversation, recordInboundActivity } from '../conversations/conversation.repository';
+import {
+  findOrCreateConversation,
+  recordInboundActivity,
+  updateLastMessageStatus,
+  findConversationByIdAndTenant,
+} from '../conversations/conversation.repository';
 import {
   createMessage,
   updateMessageStatusByMetaId,
@@ -144,8 +149,19 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
     return;
   }
 
+  // Keeps the chat list's tick in step. Scoped to lastMessageId inside the
+  // repository, so a late status for an older message cannot rewrite a row
+  // that has since moved on.
+  await updateLastMessageStatus(tenantId, String(message._id), ourStatus);
+
   const realtime = getRealtimeEmitter();
   realtime.emitMessageStatus(tenantId, String(message.conversationId), String(message._id), ourStatus);
+  const conversation = await findConversationByIdAndTenant(String(message.conversationId), tenantId);
+  if (conversation) {
+    // The row's tick lives on the conversation, so the list needs its own
+    // event — message:status alone only updates an open chat's bubbles.
+    realtime.emitConversationUpdated(tenantId, toRealtimeConversation(conversation));
+  }
 }
 
 /**

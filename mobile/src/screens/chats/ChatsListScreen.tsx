@@ -24,6 +24,7 @@ import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
 import type { ChatsStackParamList } from '../../navigation/types';
+import { impactMedium, selectionFeedback } from '../../utils/haptics';
 import type { Conversation } from '../../api/types';
 
 type Props = NativeStackScreenProps<ChatsStackParamList, 'ChatsList'>;
@@ -61,6 +62,7 @@ export function ChatsListScreen({ navigation }: Props) {
   // Stable per-row callbacks — inline arrows would change identity every
   // render and defeat ChatListItem's React.memo.
   const toggleSelected = useCallback((conversation: Conversation) => {
+    selectionFeedback();
     setSelectedIds((prev) =>
       prev.includes(conversation.id) ? prev.filter((id) => id !== conversation.id) : [...prev, conversation.id],
     );
@@ -89,6 +91,9 @@ export function ChatsListScreen({ navigation }: Props) {
         toggleSelected(conversation);
         return;
       }
+      // Same reasoning as the message bubble: a long press has no visual
+      // feedback of its own until the sheet arrives.
+      impactMedium();
       setActionTarget(conversation);
     },
     [selectionMode, toggleSelected],
