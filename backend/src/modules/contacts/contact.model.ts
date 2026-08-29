@@ -4,6 +4,14 @@ import type { Timestamps, Lean } from '../../lib/modelTypes';
 const contactSchema = new Schema(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+    /**
+     * The User whose connected WhatsApp number this belongs to.
+     *
+     * Optional: rows written before per-user numbers existed have none.
+     * The backfill assigns them to the tenant's MASTER_ADMIN, and until it
+     * runs a missing value reads as admin-owned rather than orphaned.
+     */
+    ownerUserId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     phone: { type: String, required: true, trim: true }, // E.164, e.g. +14155551234
     name: { type: String, trim: true },
     /**
@@ -44,7 +52,10 @@ const contactSchema = new Schema(
 );
 
 // A phone number identifies one contact within a tenant.
-contactSchema.index({ tenantId: 1, phone: 1 }, { unique: true });
+// Same reasoning as the conversation index: one contact record per
+// (tenant, owner, phone), so two users can each hold their own record for
+// the same customer number. Also dropped-and-rebuilt by the backfill.
+contactSchema.index({ tenantId: 1, ownerUserId: 1, phone: 1 }, { unique: true });
 // Name-prefix search for the contacts screen's search box.
 contactSchema.index({ tenantId: 1, name: 1 });
 // Keyed on _id because that is what the list actually sorts and paginates

@@ -14,6 +14,14 @@ export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
 const conversationSchema = new Schema(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+    /**
+     * The User whose connected WhatsApp number this belongs to.
+     *
+     * Optional: rows written before per-user numbers existed have none.
+     * The backfill assigns them to the tenant's MASTER_ADMIN, and until it
+     * runs a missing value reads as admin-owned rather than orphaned.
+     */
+    ownerUserId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     contactId: { type: Schema.Types.ObjectId, ref: 'Contact', required: true, index: true },
     whatsappPhoneNumberId: { type: Schema.Types.ObjectId, ref: 'WhatsAppPhoneNumber', required: true },
     lastMessageAt: { type: Date },
@@ -53,8 +61,17 @@ const conversationSchema = new Schema(
   { timestamps: true },
 );
 
-// One conversation per (tenant, contact) — matches spec's Conversation-per-Contact model.
-conversationSchema.index({ tenantId: 1, contactId: 1 }, { unique: true });
+// One conversation per (tenant, owner, contact).
+//
+// ownerUserId is in the key because two users in the same tenant, each
+// with their own WhatsApp number, must be able to hold separate threads
+// with the same customer — under the old (tenant, contact) key the second
+// one failed with a duplicate-key error.
+//
+// The old index is NOT removed by Mongoose when this definition changes;
+// scripts/backfillOwnerUserId.ts drops it explicitly. Until that runs the
+// stale unique index is still enforced and still blocks the second thread.
+conversationSchema.index({ tenantId: 1, ownerUserId: 1, contactId: 1 }, { unique: true });
 // The chat list, exactly as it is sorted and paginated: pinned first, then
 // most recent, with _id breaking ties and carrying the keyset cursor (see
 // listConversationsByTenant). All four fields in the sort's own order and
