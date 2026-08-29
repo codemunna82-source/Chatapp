@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/rbac.middleware';
-import { listPhoneNumbersHandler } from './whatsapp.controller';
+import { validate } from '../../middleware/validate.middleware';
+import { registerPhoneNumberSchema } from './whatsapp.validation';
+import { listPhoneNumbersHandler, registerPhoneNumberHandler } from './whatsapp.controller';
 
 export const whatsappRouter = Router();
 
@@ -11,3 +13,4 @@ export const whatsappRouter = Router();
 whatsappRouter.use(requireAuth, requireRole('MASTER_ADMIN'));
 
 whatsappRouter.get('/numbers', listPhoneNumbersHandler);
+whatsappRouter.post('/numbers', validate({ body: registerPhoneNumberSchema }), registerPhoneNumberHandler);

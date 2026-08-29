@@ -81,3 +81,11 @@ export interface MetaTemplateSummary {
   status: 'APPROVED' | 'PENDING' | 'REJECTED' | 'PAUSED' | 'DISABLED';
   components: unknown;
 }
+
+/** One WhatsApp number's profile as Meta reports it. */
+export interface PhoneNumberProfile {
+  phoneNumberId: string;
+  displayPhoneNumber: string;
+  verifiedName?: string;
+  qualityRating?: string;
+}

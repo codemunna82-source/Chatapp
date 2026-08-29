@@ -89,6 +89,14 @@ export const openApiSpec = {
         summary: 'List the caller\'s tenant WhatsApp numbers, for assigning one to a user (MASTER_ADMIN only)',
         responses: { '200': { description: 'OK' } },
       },
+      post: {
+        summary: 'Register a real WhatsApp number ({ phoneNumberId, wabaId? }) — verified against Meta before it is stored, replacing the demo placeholder (MASTER_ADMIN only)',
+        responses: {
+          '201': { description: 'Registered' },
+          '400': { description: 'Meta rejected the id or the access token — WHATSAPP_NUMBER_VERIFICATION_FAILED' },
+          '409': { description: 'Already registered to another workspace' },
+        },
+      },
     },
     '/contacts': {
       get: { summary: 'List contacts (cursor-paginated, optional search)', responses: { '200': { description: 'OK' } } },

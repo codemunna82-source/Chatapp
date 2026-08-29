@@ -375,6 +375,13 @@ export function SettingsScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('Team')}
           />
         ) : null}
+        {isMasterAdmin ? (
+          <SettingsRow
+            icon="logo-whatsapp"
+            label="WhatsApp number"
+            onPress={() => navigation.navigate('WhatsAppNumbers')}
+          />
+        ) : null}
       </View>
 
       <Button label="Sign out" variant="danger" onPress={() => logout.mutate()} loading={logout.isPending} testID="settings-logout" />

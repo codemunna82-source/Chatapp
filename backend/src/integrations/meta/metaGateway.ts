@@ -9,6 +9,7 @@ import type {
   UploadMediaResult,
   RetrieveMediaResult,
   MetaTemplateSummary,
+  PhoneNumberProfile,
 } from './types';
 import type { ListTemplatesCredentials } from './templates';
 
@@ -28,4 +29,6 @@ export interface MetaGateway {
   retrieveMedia(creds: MetaCredentials, metaMediaId: string): Promise<RetrieveMediaResult>;
   downloadMediaBinary(creds: MetaCredentials, url: string): Promise<Buffer>;
   listTemplates(creds: ListTemplatesCredentials): Promise<MetaTemplateSummary[]>;
+  /** Verifies a phone_number_id exists and the token can reach it. */
+  fetchPhoneNumberProfile(accessToken: string, phoneNumberId: string): Promise<PhoneNumberProfile>;
 }

@@ -39,3 +39,17 @@ describe('resolveAccessToken', () => {
     expect(() => resolveAccessToken('mock:demo-access-token')).toThrow(/no whatsapp access token/i);
   });
 });
+
+describe('resolveAccessToken — env: refs', () => {
+  const original = env.META_ACCESS_TOKEN;
+  afterEach(() => {
+    (env as { META_ACCESS_TOKEN: string }).META_ACCESS_TOKEN = original;
+  });
+
+  it('treats an env: ref as a placeholder, not as the token itself', () => {
+    // findOrCreateRealAccount writes 'env:META_ACCESS_TOKEN'. Using that
+    // string verbatim as a bearer token would fail every call with a 190.
+    (env as { META_ACCESS_TOKEN: string }).META_ACCESS_TOKEN = 'env-token';
+    expect(resolveAccessToken('env:META_ACCESS_TOKEN')).toBe('env-token');
+  });
+});

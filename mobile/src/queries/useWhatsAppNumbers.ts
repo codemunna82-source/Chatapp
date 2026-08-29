@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as whatsappApi from '../api/endpoints/whatsapp';
 import { queryKeys } from './keys';
 
@@ -16,5 +16,18 @@ export function useWhatsAppNumbers(enabled = true) {
     // Numbers change when a WABA is connected — rare, and never from this
     // screen — so re-fetching on every sheet open is pure latency.
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useRegisterWhatsAppNumber() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: whatsappApi.registerWhatsAppNumber,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.whatsappNumbers });
+      // The Team form's "sends from" picker reads the same list, and a
+      // member assigned to the old demo number should show the new one.
+      void queryClient.invalidateQueries({ queryKey: ['team'] });
+    },
   });
 }

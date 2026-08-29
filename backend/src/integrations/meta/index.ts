@@ -3,6 +3,7 @@ import { logger } from '../../lib/logger';
 import * as messages from './messages';
 import * as media from './media';
 import { listTemplates } from './templates';
+import { fetchPhoneNumberProfile } from './phoneNumbers';
 import { mockMetaGateway } from './mock/mockMetaGateway';
 import type { MetaGateway } from './metaGateway';
 
@@ -16,6 +17,7 @@ const realMetaGateway: MetaGateway = {
   retrieveMedia: media.retrieveMedia,
   downloadMediaBinary: media.downloadMediaBinary,
   listTemplates,
+  fetchPhoneNumberProfile,
 };
 
 let warnedMockMode = false;
@@ -50,6 +52,7 @@ export type {
   UploadMediaResult,
   RetrieveMediaResult,
   MetaTemplateSummary,
+  PhoneNumberProfile,
 } from './types';
 export type { ListTemplatesCredentials } from './templates';
 export { MetaApiError, toApiError as toMetaApiError } from './errors';
