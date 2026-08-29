@@ -31,6 +31,8 @@ import { getApiErrorMessage } from '../../api/client';
 import { formatDuration } from '../../utils/formatTime';
 import { useMessageDraft } from '../../utils/useMessageDraft';
 import { MediaSourceSheet } from './MediaSourceSheet';
+import { QuickReplySheet } from './QuickReplySheet';
+import { recordQuickReplyUse } from '../../queries/useQuickReplies';
 
 interface ComposerProps {
   conversationId: string;
@@ -154,6 +156,7 @@ export function Composer({
   const sendMessage = useSendMessage(conversationId);
 
   const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
+  const [quickReplyOpen, setQuickReplyOpen] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
 
   const canSend = Boolean(text.trim()) && !sending;
@@ -647,6 +650,20 @@ export function Composer({
             multiline
             style={[styles.input, typography.body, { color: colors.textPrimary, height: inputHeight }]}
           />
+          {/* Inside the pill rather than as a fifth button in the row: at
+              four icons the row is already at the width where touch targets
+              start being squeezed on a small phone. */}
+          <Pressable
+            onPress={() => setQuickReplyOpen(true)}
+            hitSlop={8}
+            style={styles.pillAction}
+            accessibilityRole="button"
+            accessibilityLabel="Saved replies"
+          >
+            {({ pressed }) => (
+              <Ionicons name="flash-outline" size={19} color={colors.textTertiary} style={{ opacity: pressed ? 0.5 : 1 }} />
+            )}
+          </Pressable>
         </View>
 
         <Pressable
@@ -699,6 +716,19 @@ export function Composer({
         )}
       </View>
 
+      <QuickReplySheet
+        visible={quickReplyOpen}
+        onClose={() => setQuickReplyOpen(false)}
+        onPick={(reply) => {
+          setQuickReplyOpen(false);
+          // Inserted, not sent. A saved reply usually needs a name or an
+          // amount filled in before it goes out, and a picker that fires
+          // the message immediately makes that impossible to correct.
+          handleChangeText(text ? `${text} ${reply.body}` : reply.body);
+          recordQuickReplyUse(reply.id);
+        }}
+      />
+
       <MediaSourceSheet
         visible={mediaSheetOpen}
         onClose={() => setMediaSheetOpen(false)}
@@ -715,6 +745,7 @@ const styles = StyleSheet.create({
   // Every control is a real 48dp touch square regardless of its icon size —
   // see touchTarget in theme/spacing.ts.
   iconButton: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
+  pillAction: { paddingHorizontal: 4, alignSelf: 'flex-end', paddingBottom: 6 },
   pill: {
     flex: 1,
     flexDirection: 'row',

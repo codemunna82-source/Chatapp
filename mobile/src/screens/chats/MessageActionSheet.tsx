@@ -20,19 +20,23 @@ interface MessageActionSheetProps {
   onCopy: () => void;
   /** Whether this message can start a multi-message selection. */
   canSelect: boolean;
+  /** Current star state — the row is a toggle, so it has to read as one. */
+  starred: boolean;
+  /** Reactions and not-yet-sent optimistic messages can't be starred. */
+  canStar: boolean;
+  onToggleStar: () => void;
   onSelectMore: () => void;
   onDelete: () => void;
 }
 
 /**
- * Long-press action sheet — reply, forward, copy and reactions from one
- * entry point.
+ * Long-press action sheet — reactions, reply, forward, copy, star and
+ * delete from one entry point.
  *
- * Deliberately no Delete: the backend exposes only GET and POST on
- * /conversations/:id/messages (see backend/src/modules/messages/
- * message.routes.ts), so there is no delete endpoint to call. A Delete row
- * here could only ever hide the message locally while leaving it delivered
- * on WhatsApp, which would misrepresent what actually happened.
+ * (An earlier version of this comment said there was deliberately no
+ * Delete row, because the backend had no delete endpoint. It has one now —
+ * DELETE /conversations/:id/messages/:messageId — and the row below is
+ * "Delete for me" only, for the reason given at that row.)
  */
 export function MessageActionSheet({
   visible,
@@ -45,6 +49,9 @@ export function MessageActionSheet({
   onForward,
   onCopy,
   canSelect,
+  starred,
+  canStar,
+  onToggleStar,
   onSelectMore,
   onDelete,
 }: MessageActionSheetProps) {
@@ -78,6 +85,13 @@ export function MessageActionSheet({
               { key: 'reply', label: 'Reply', icon: 'arrow-undo-outline', onPress: onReply, enabled: true },
               { key: 'forward', label: 'Forward', icon: 'arrow-redo-outline', onPress: onForward, enabled: canForward },
               { key: 'copy', label: 'Copy', icon: 'copy-outline', onPress: onCopy, enabled: canCopy },
+              {
+                key: 'star',
+                label: starred ? 'Unstar' : 'Star',
+                icon: starred ? 'star' : 'star-outline',
+                onPress: onToggleStar,
+                enabled: canStar,
+              },
               {
                 key: 'select',
                 label: 'Select more',

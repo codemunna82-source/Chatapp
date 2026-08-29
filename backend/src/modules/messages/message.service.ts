@@ -7,6 +7,7 @@ import {
   attachMetaMessageId,
   markMessageFailed,
   softDeleteMessage,
+  setMessageStarred,
 } from './message.repository';
 import { findMediaByIdAndTenant } from '../media/media.repository';
 import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
@@ -70,6 +71,29 @@ export async function deleteMessageForTenant(
     throw ApiError.notFound('MESSAGE_NOT_FOUND', 'That message does not exist.');
   }
   await softDeleteMessage(messageId, tenantId);
+}
+
+/**
+ * Stars or unstars a message. Workspace-wide by design (see the model's
+ * starredAt note) — the conversation check is what scopes it, exactly as
+ * with delete, so a message id from another chat cannot be starred through
+ * this conversation's route.
+ */
+export async function setMessageStarredForTenant(
+  tenantId: string,
+  conversationId: string,
+  messageId: string,
+  starred: boolean,
+): Promise<MessageDoc> {
+  const message = await findMessageByIdAndTenant(messageId, tenantId);
+  if (!message || String(message.conversationId) !== conversationId) {
+    throw ApiError.notFound('MESSAGE_NOT_FOUND', 'That message does not exist.');
+  }
+  const updated = await setMessageStarred(messageId, tenantId, starred);
+  if (!updated) {
+    throw ApiError.notFound('MESSAGE_NOT_FOUND', 'That message does not exist.');
+  }
+  return updated;
 }
 
 export async function sendOutboundMessage(input: SendOutboundMessageInput): Promise<MessageDoc> {

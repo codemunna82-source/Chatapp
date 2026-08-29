@@ -20,6 +20,8 @@ export interface RealtimeMessagePayload {
   replyToMessageId?: string;
   status: string;
   senderId?: string;
+  /** Present only when the message is starred — see Message.starredAt. */
+  starredAt?: string;
   createdAt: string;
 }
 

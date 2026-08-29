@@ -17,6 +17,49 @@ export function useMessages(conversationId: string | undefined) {
   });
 }
 
+/**
+ * A filtered view of one conversation — in-chat search, or the starred
+ * list. Kept as its OWN query rather than a parameter on useMessages so a
+ * search never overwrites the main thread's cache: closing the search box
+ * has to leave the full conversation exactly as it was, not refetch it
+ * from page one.
+ */
+export function useFilteredMessages(
+  conversationId: string | undefined,
+  filter: { search?: string; starredOnly?: boolean },
+) {
+  const active = Boolean(conversationId) && Boolean(filter.search || filter.starredOnly);
+  return useInfiniteQuery<
+    MessagesPage,
+    Error,
+    MessagesData,
+    ReturnType<typeof queryKeys.messagesFiltered>,
+    string | undefined
+  >({
+    queryKey: queryKeys.messagesFiltered(conversationId ?? '', filter),
+    queryFn: ({ pageParam }) =>
+      messagesApi.listMessages(conversationId as string, { cursor: pageParam, ...filter }),
+    initialPageParam: undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: active,
+  });
+}
+
+/** Star/unstar, writing the server's message straight back into every
+ *  cached list that holds it. */
+export function useStarMessage(conversationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, starred }: { messageId: string; starred: boolean }) =>
+      messagesApi.starMessage(conversationId, messageId, starred),
+    onSuccess: (message) => {
+      upsertMessageInCache(queryClient, conversationId, message);
+      // The starred list is a separate query, so it has to be told too.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.messagesFilteredAll(conversationId) });
+    },
+  });
+}
+
 /** Newest-first flat list, matching the API's own ordering — the screen renders this directly into an inverted FlashList. */
 export function flattenMessages(data: MessagesData | undefined): Message[] {
   return data?.pages.flatMap((page) => page.items) ?? [];

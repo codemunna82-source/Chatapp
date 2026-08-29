@@ -40,6 +40,17 @@ export const sendMessageSchema = z
 export const listMessagesQuerySchema = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
+  // Capped and trimmed: this becomes a (fully escaped) regex, and an
+  // unbounded pattern is a cheap way to make the database work hard.
+  search: z.string().trim().min(1).max(120).optional(),
+  starredOnly: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => v === 'true'),
+});
+
+export const starMessageSchema = z.object({
+  starred: z.boolean(),
 });
 
 export const conversationIdParamSchema = z.object({

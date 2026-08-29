@@ -40,6 +40,20 @@ export async function findMessageByMetaIdAndTenant(
 export interface ListMessagesOptions {
   cursor?: string; // opaque cursor = _id of the oldest message already loaded
   limit?: number;
+  /** Case-insensitive substring match against the message text. */
+  search?: string;
+  /** Restrict to starred messages only. */
+  starredOnly?: boolean;
+}
+
+/**
+ * User input goes into a RegExp here, so every regex metacharacter has to
+ * be neutralised first. Without this, a search for "c++" or "(" is either a
+ * syntax error or — worse — a pattern like ".*" that quietly means
+ * something other than what was typed.
+ */
+function escapeRegex(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
@@ -58,6 +72,17 @@ export async function listMessagesByConversation(
   const filter: Record<string, unknown> = { tenantId, conversationId, deletedAt: { $exists: false } };
   if (opts.cursor && Types.ObjectId.isValid(opts.cursor)) {
     filter._id = { $lt: new Types.ObjectId(opts.cursor) };
+  }
+  if (opts.starredOnly) {
+    filter.starredAt = { $exists: true };
+  }
+  if (opts.search) {
+    // Regex rather than a $text index: $text matches whole words only, so
+    // it would miss "9876" inside a phone number and "invoice" inside
+    // "invoice-2024" — both of which are exactly what someone searching a
+    // customer thread is looking for. The query is already narrowed to one
+    // conversation by an index, so the scan is over a bounded set.
+    filter.text = { $regex: escapeRegex(opts.search), $options: 'i' };
   }
 
   const items = await Message.find(filter)
@@ -104,4 +129,28 @@ export async function attachMetaMessageId(
 export async function markMessageFailed(id: string, tenantId: string, error: unknown): Promise<MessageDoc | null> {
   if (!Types.ObjectId.isValid(id)) return null;
   return Message.findOneAndUpdate({ _id: id, tenantId }, { $set: { status: 'FAILED', error } }, { new: true });
+}
+
+/**
+ * Stars or unstars one message. Idempotent: starring an already-starred
+ * message keeps its original timestamp rather than bumping it, so a
+ * starred list stays in the order things were actually marked.
+ */
+export async function setMessageStarred(
+  id: string,
+  tenantId: string,
+  starred: boolean,
+): Promise<MessageDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  if (starred) {
+    // Only sets starredAt on a message that has none — re-starring keeps
+    // the original timestamp instead of jumping the row to the top.
+    const updated = await Message.findOneAndUpdate(
+      { _id: id, tenantId, starredAt: { $exists: false } },
+      { $set: { starredAt: new Date() } },
+      { new: true },
+    );
+    return updated ?? Message.findOne({ _id: id, tenantId });
+  }
+  return Message.findOneAndUpdate({ _id: id, tenantId }, { $unset: { starredAt: 1 } }, { new: true });
 }

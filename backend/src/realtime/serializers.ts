@@ -14,6 +14,7 @@ export function toRealtimeMessage(doc: MessageDoc): RealtimeMessagePayload {
     replyToMessageId: doc.replyToMessageId ? String(doc.replyToMessageId) : undefined,
     status: doc.status,
     senderId: doc.senderId ? String(doc.senderId) : undefined,
+    starredAt: doc.starredAt ? doc.starredAt.toISOString() : undefined,
     createdAt: doc.get('createdAt').toISOString(),
   };
 }

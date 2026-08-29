@@ -51,6 +51,14 @@ const messageSchema = new Schema(
      * delete so the row still anchors replies and status webhooks.
      */
     deletedAt: { type: Date },
+    /**
+     * Workspace-wide, not per-user: this is a shared business inbox, and
+     * "the message with the customer's delivery address" is important to
+     * whoever picks the conversation up next, not just to whoever starred
+     * it. A per-user star would need its own collection and would hide the
+     * one useful signal behind whose account you happen to be in.
+     */
+    starredAt: { type: Date },
   },
   { timestamps: true },
 );
@@ -60,6 +68,12 @@ const messageSchema = new Schema(
 messageSchema.index({ tenantId: 1, conversationId: 1, createdAt: -1 });
 // Recent-activity feeds / dashboards.
 messageSchema.index({ tenantId: 1, createdAt: -1 });
+// Starred-only listing. Partial rather than sparse so the index holds only
+// the handful of starred rows instead of an entry per message.
+messageSchema.index(
+  { tenantId: 1, conversationId: 1, starredAt: -1 },
+  { partialFilterExpression: { starredAt: { $exists: true } } },
+);
 // Webhook status updates arrive keyed by Meta's message id — must resolve
 // in O(1) and must be scoped correctly (sparse: most rows get one eventually,
 // but IN messages/failed sends may briefly lack it).

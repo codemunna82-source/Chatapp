@@ -9,8 +9,13 @@ export const queryKeys = {
   messages: (conversationId: string) => ['messages', conversationId] as const,
   /** Every conversation's message list — used to resync after a socket gap. */
   messagesAll: ['messages'] as const,
+  /** Search / starred views, kept separate from the main thread's cache. */
+  messagesFiltered: (conversationId: string, filter: { search?: string; starredOnly?: boolean }) =>
+    ['messagesFiltered', conversationId, { search: filter.search ?? '', starredOnly: filter.starredOnly ?? false }] as const,
+  messagesFilteredAll: (conversationId: string) => ['messagesFiltered', conversationId] as const,
   contacts: (params: Omit<ListContactsParams, 'cursor'>) => ['contacts', params] as const,
   templates: ['templates'] as const,
+  quickReplies: ['quickReplies'] as const,
   wallet: ['wallet'] as const,
   walletTransactions: ['walletTransactions'] as const,
   notifications: (unreadOnly?: boolean) => ['notifications', { unreadOnly: unreadOnly ?? false }] as const,

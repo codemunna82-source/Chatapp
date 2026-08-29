@@ -9,9 +9,14 @@ interface SearchBarProps {
   value: string;
   onChangeText: (text: string) => void;
   placeholder?: string;
+  /** For a search opened by an explicit action (the in-chat search panel),
+   *  where the keyboard should already be up. Off by default: the chat and
+   *  contact lists show their search bar permanently, and grabbing focus on
+   *  arrival there would cover the list the user came to read. */
+  autoFocus?: boolean;
 }
 
-export function SearchBar({ value, onChangeText, placeholder = 'Search' }: SearchBarProps) {
+export function SearchBar({ value, onChangeText, placeholder = 'Search', autoFocus = false }: SearchBarProps) {
   const { colors, spacing, radius, shadow } = useTheme();
   return (
     <View
@@ -42,6 +47,7 @@ export function SearchBar({ value, onChangeText, placeholder = 'Search' }: Searc
         autoCapitalize="none"
         autoCorrect={false}
         returnKeyType="search"
+        autoFocus={autoFocus}
       />
       {value.length > 0 ? (
         <IconButton

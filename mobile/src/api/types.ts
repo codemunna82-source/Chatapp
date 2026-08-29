@@ -101,6 +101,8 @@ export interface Message {
   direction: MessageDirection;
   type: MessageType;
   text?: string;
+  /** Set only when starred — the API omits it otherwise. */
+  starredAt?: string;
   mediaId?: string;
   /**
    * Client-only: the local file behind an outgoing media message, set on the
@@ -221,6 +223,17 @@ export interface TeamMember {
   displayName?: string;
   lastLoginAt?: string;
   avatarUpdatedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A saved reply, shared across the whole workspace (see the backend's
+ *  quickReply.model.ts for why it is tenant-wide rather than per-user). */
+export interface QuickReply {
+  id: string;
+  title: string;
+  body: string;
+  useCount: number;
   createdAt: string;
   updatedAt: string;
 }

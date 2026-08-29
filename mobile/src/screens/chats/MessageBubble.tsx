@@ -242,6 +242,9 @@ function MessageBubbleImpl({
         <MessageContent message={message} textColor={textColor} onOpenImage={onOpenImage} />
 
         <View style={styles.footer}>
+          {message.starredAt ? (
+            <Ionicons name="star" size={11} color={textColor} style={styles.starMark} />
+          ) : null}
           {isFailed ? (
             <Text style={[typography.caption, { color: colors.danger, marginRight: 4 }]}>Failed · tap to retry</Text>
           ) : null}
@@ -284,6 +287,9 @@ function MessageBubbleImpl({
 export const MessageBubble = React.memo(MessageBubbleImpl);
 
 const styles = StyleSheet.create({
+  // Sits with the timestamp rather than over the text: it marks the message
+  // without competing with what the message says.
+  starMark: { marginRight: 4, opacity: 0.75 },
   row: { flexDirection: 'row' },
   bubble: { maxWidth: '100%' },
   bubbleShift: { maxWidth: '80%' },

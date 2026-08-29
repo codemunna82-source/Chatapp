@@ -175,3 +175,98 @@ describe('Messages REST', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('In-chat search and starring', () => {
+  async function seed() {
+    const tenant = await createTestTenant();
+    const { conversation } = await createTestChatFixture(String(tenant._id));
+    const token = await tokenFor(String(tenant._id), ['CHAT_READ', 'CHAT_SEND']);
+    const base = `/api/conversations/${conversation._id}/messages`;
+
+    for (const text of ['Invoice-2024 attached', 'Thanks!', 'My number is 9876543210']) {
+      await request(app).post(base).set('Authorization', `Bearer ${token}`).send({ type: 'text', text });
+    }
+    return { token, base };
+  }
+
+  it('matches inside a word, not just whole words', async () => {
+    const { token, base } = await seed();
+
+    // The reason this uses a regex rather than a $text index: $text is
+    // word-based and would miss both of these.
+    const partial = await request(app).get(`${base}?search=voice`).set('Authorization', `Bearer ${token}`);
+    expect(partial.body.data).toHaveLength(1);
+
+    const digits = await request(app).get(`${base}?search=98765`).set('Authorization', `Bearer ${token}`);
+    expect(digits.body.data).toHaveLength(1);
+  });
+
+  it('treats regex metacharacters in the query as literal text', async () => {
+    const { token, base } = await seed();
+
+    // Unescaped, ".*" would match every message in the conversation.
+    const res = await request(app).get(`${base}?search=.*`).set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(0);
+  });
+
+  it('stars a message, lists it under starredOnly, and unstars it', async () => {
+    const { token, base } = await seed();
+    const all = await request(app).get(base).set('Authorization', `Bearer ${token}`);
+    const target = all.body.data[0];
+
+    const starred = await request(app)
+      .patch(`${base}/${target.id}/star`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ starred: true });
+    expect(starred.status).toBe(200);
+    expect(starred.body.data.starredAt).toBeTruthy();
+
+    const list = await request(app).get(`${base}?starredOnly=true`).set('Authorization', `Bearer ${token}`);
+    expect(list.body.data).toHaveLength(1);
+    expect(list.body.data[0].id).toBe(target.id);
+
+    await request(app)
+      .patch(`${base}/${target.id}/star`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ starred: false });
+
+    const after = await request(app).get(`${base}?starredOnly=true`).set('Authorization', `Bearer ${token}`);
+    expect(after.body.data).toHaveLength(0);
+  });
+
+  it('re-starring keeps the original timestamp instead of bumping it', async () => {
+    const { token, base } = await seed();
+    const all = await request(app).get(base).set('Authorization', `Bearer ${token}`);
+    const target = all.body.data[0];
+
+    const first = await request(app)
+      .patch(`${base}/${target.id}/star`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ starred: true });
+    const second = await request(app)
+      .patch(`${base}/${target.id}/star`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ starred: true });
+
+    expect(second.body.data.starredAt).toBe(first.body.data.starredAt);
+  });
+
+  it("cannot star a message through another conversation's route", async () => {
+    const tenant = await createTestTenant();
+    const a = await createTestChatFixture(String(tenant._id));
+    const b = await createTestChatFixture(String(tenant._id));
+    const token = await tokenFor(String(tenant._id), ['CHAT_READ', 'CHAT_SEND']);
+
+    const sent = await request(app)
+      .post(`/api/conversations/${a.conversation._id}/messages`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'text', text: 'belongs to conversation a' });
+
+    const res = await request(app)
+      .patch(`/api/conversations/${b.conversation._id}/messages/${sent.body.data.id}/star`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ starred: true });
+    expect(res.status).toBe(404);
+  });
+});

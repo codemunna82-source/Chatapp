@@ -31,12 +31,16 @@ import {
   flattenMessages,
   useSendMessage,
   useDeleteMessage,
+  useStarMessage,
+  useFilteredMessages,
   removeMessageFromCache,
 } from '../../queries/useMessages';
 import { useConversationRoom } from '../../sockets/useConversationRoom';
 import { useSocketEvent } from '../../sockets/useSocketEvent';
 import { emitConversationRead } from '../../sockets/actions';
 import { useSocketConnection } from '../../sockets/useSocketConnected';
+import { useDebouncedValue } from '../../utils/useDebouncedValue';
+import { MessageSearchPanel } from './MessageSearchPanel';
 import { useActiveConversationStore } from '../../store/activeConversationStore';
 import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage } from '../../api/client';
@@ -101,6 +105,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const messagesQuery = useMessages(conversationId);
   const sendMessage = useSendMessage(conversationId);
   const deleteMessage = useDeleteMessage(conversationId);
+  const starMessage = useStarMessage(conversationId);
 
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
@@ -176,6 +181,25 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // react-query only changes when the messages actually change.
   const messages = useMemo(() => flattenMessages(messagesQuery.data), [messagesQuery.data]);
 
+  // --- in-chat search / starred ------------------------------------------
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [starredOnly, setStarredOnly] = useState(false);
+  // Debounced so a five-letter word is one query, not five.
+  const debouncedSearch = useDebouncedValue(searchInput.trim(), 300);
+  const searchQuery = useFilteredMessages(conversationId, {
+    search: debouncedSearch || undefined,
+    starredOnly: starredOnly || undefined,
+  });
+  const searchResults = useMemo(() => flattenMessages(searchQuery.data), [searchQuery.data]);
+
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchInput('');
+    setStarredOnly(false);
+  }, []);
+
   // --- scroll-to-bottom + new-message count --------------------------------
   // The list is inverted, so "at the bottom" is scroll offset ~0.
   const listRef = useRef<FlashListRef<RenderItem>>(null);
@@ -225,6 +249,34 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   }, [conversationId, connected, generation, lastIncomingId]);
   const view = useMemo(() => deriveConversationView(messages), [messages]);
   const renderItems = useMemo(() => buildRenderItems(view.renderable), [view.renderable]);
+
+  const showToast = useCallback((text: string) => {
+    setToast(text);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  /**
+   * Jumps to a result when it is already loaded in the thread. When it is
+   * not, the panel says so rather than pretending: fetching backwards until
+   * a match appears could be many round trips on a long conversation, and a
+   * button that silently does nothing is worse than one that explains.
+   */
+  const handleSelectSearchResult = useCallback(
+    (message: Message) => {
+      const index = renderItems.findIndex((item) => item.kind === 'message' && item.message.id === message.id);
+      if (index === -1) {
+        showToast('Older message — scroll up in the chat to load it');
+        return;
+      }
+      setSearchOpen(false);
+      setSearchInput('');
+      setStarredOnly(false);
+      listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- showToast is a stable useCallback defined below
+    [renderItems],
+  );
 
   const submitSend = useCallback(
     (body: SendMessageBody) => {
@@ -308,6 +360,30 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   }, [view.renderable, selectedIds]);
 
   useEffect(() => {
+    if (searchOpen) {
+      // Search takes over the header, which is also the only way out of the
+      // panel — it covers the thread, so without this there is no exit.
+      navigation.setOptions({
+        title: 'Search in chat',
+        headerTitle: undefined,
+        headerStyle: { backgroundColor: chatHeaderBackground },
+        headerTintColor: '#FFFFFF',
+        headerTitleStyle: { color: '#FFFFFF' },
+        headerRight: () => null,
+        headerLeft: () => (
+          <Pressable
+            onPress={closeSearch}
+            style={styles.headerAction}
+            accessibilityRole="button"
+            accessibilityLabel="Close search"
+          >
+            {({ pressed }) => <Ionicons name="close" size={24} color="#FFFFFF" style={{ opacity: pressed ? 0.5 : 1 }} />}
+          </Pressable>
+        ),
+      });
+      return;
+    }
+
     if (selectionMode) {
       // Selection bar replaces the normal header: count on the left, a
       // close and a forward action on the right.
@@ -368,8 +444,19 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       headerStyle: { backgroundColor: chatHeaderBackground },
       headerTintColor: '#FFFFFF',
       headerTitleStyle: { color: '#FFFFFF' },
-      headerRight: () =>
-        contactId ? (
+      headerRight: () => (
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => setSearchOpen(true)}
+            style={styles.headerAction}
+            accessibilityRole="button"
+            accessibilityLabel="Search in this chat"
+          >
+            {({ pressed }) => (
+              <Ionicons name="search" size={21} color="#FFFFFF" style={{ opacity: pressed ? 0.5 : 1 }} />
+            )}
+          </Pressable>
+          {contactId ? (
           <Pressable
             onPress={() => placeCall(contactId)}
             disabled={callPending}
@@ -387,17 +474,24 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               />
             )}
           </Pressable>
-        ) : null,
+          ) : null}
+        </View>
+      ),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- placeCall is a stable closure from usePlaceCall; including it would re-run this on every render
-  }, [navigation, conversationQuery.data, contactId, callPending, selectionMode, selectedIds.length, clearSelection, forwardSelected]);
+  }, [
+    navigation,
+    conversationQuery.data,
+    contactId,
+    callPending,
+    selectionMode,
+    selectedIds.length,
+    clearSelection,
+    forwardSelected,
+    searchOpen,
+    closeSearch,
+  ]);
   const handleOpenImage = useCallback((localUri: string) => setViewerUri(localUri), []);
-
-  const showToast = useCallback((text: string) => {
-    setToast(text);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2200);
-  }, []);
 
   useEffect(
     () => () => {
@@ -497,6 +591,24 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
             <ScrollToBottomButton visible={scrolledUp} newCount={newSinceAnchor} onPress={scrollToBottom} />
 
+            {searchOpen ? (
+              <MessageSearchPanel
+                search={searchInput}
+                onChangeSearch={setSearchInput}
+                starredOnly={starredOnly}
+                onToggleStarredOnly={() => setStarredOnly((v) => !v)}
+                results={searchResults}
+                loading={searchQuery.isFetching}
+                searched={Boolean(debouncedSearch || starredOnly)}
+                onSelect={handleSelectSearchResult}
+                onEndReached={() => {
+                  if (searchQuery.hasNextPage && !searchQuery.isFetchingNextPage) {
+                    void searchQuery.fetchNextPage();
+                  }
+                }}
+              />
+            ) : null}
+
             {replyingTo ? <ReplyPreviewBar target={replyingTo} onCancel={() => setReplyingTo(null)} /> : null}
 
             <Composer
@@ -521,6 +633,19 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           onClose={() => setActionTarget(null)}
           onCopy={handleCopy}
           canSelect={Boolean(actionTarget && buildForwardBody(actionTarget))}
+          starred={Boolean(actionTarget?.starredAt)}
+          // A reaction isn't a message anyone bookmarks, and an optimistic
+          // row has no server id to star against yet.
+          canStar={Boolean(actionTarget && actionTarget.type !== 'reaction' && !actionTarget.id.startsWith('temp-'))}
+          onToggleStar={() => {
+            const target = actionTarget;
+            setActionTarget(null);
+            if (!target) return;
+            starMessage.mutate(
+              { messageId: target.id, starred: !target.starredAt },
+              { onSuccess: () => showToast(target.starredAt ? 'Removed from starred' : 'Starred') },
+            );
+          }}
           onDelete={() => {
             const target = actionTarget;
             setActionTarget(null);
@@ -601,6 +726,7 @@ const styles = StyleSheet.create({
   callErrorWrap: { paddingHorizontal: 16, paddingTop: 8 },
   // Real 48dp target for the header action — hitSlop was being clipped by
   // the navigator's own tight headerRight container.
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
   headerAction: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   toastWrap: { position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center' },
   toast: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth },
