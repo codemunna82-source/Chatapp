@@ -257,6 +257,9 @@ export interface TeamMember {
   validFrom: string;
   validUntil: string;
   displayName?: string;
+  /** Which of the workspace's WhatsApp numbers this member sends from.
+   *  Undefined = unassigned, which falls back to the workspace default. */
+  whatsappPhoneNumberId?: string;
   lastLoginAt?: string;
   avatarUpdatedAt?: string;
   createdAt: string;
@@ -272,4 +275,14 @@ export interface QuickReply {
   useCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One of the workspace's connected WhatsApp numbers, as offered in the
+ *  MASTER_ADMIN "sends from" picker. */
+export interface WhatsAppNumber {
+  id: string;
+  phoneNumberId: string;
+  displayPhoneNumber: string;
+  status: 'PENDING' | 'CONNECTED' | 'DISCONNECTED' | 'RESTRICTED';
+  qualityRating?: string;
 }

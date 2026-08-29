@@ -8,6 +8,7 @@ import { InlineBanner } from '../../components/InlineBanner';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
 import { useCreateTeamMember, useUpdateTeamMember, useDisableTeamMember } from '../../queries/useTeam';
+import { useWhatsAppNumbers } from '../../queries/useWhatsAppNumbers';
 import { getApiErrorMessage } from '../../api/client';
 import { ALL_PERMISSIONS } from '../../api/types';
 import type { Permission, TeamMember, UserRole } from '../../api/types';
@@ -74,6 +75,14 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
   const [validUntil, setValidUntil] = useState(member ? member.validUntil.slice(0, 10) : defaultValidUntil());
   const [dateError, setDateError] = useState<string | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(false);
+  // undefined = no number assigned, i.e. use whatever the workspace
+  // defaults to. Distinct from a chosen number, and it is what every
+  // member created before this field existed still has.
+  const [whatsappPhoneNumberId, setWhatsappPhoneNumberId] = useState<string | undefined>(
+    member?.whatsappPhoneNumberId,
+  );
+  const numbersQuery = useWhatsAppNumbers();
+  const numbers = numbersQuery.data ?? [];
 
   const mutation = isEdit ? updateMember : createMember;
   const error = mutation.error ? getApiErrorMessage(mutation.error, 'Could not save this team member.') : null;
@@ -98,6 +107,9 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
           permissions: role === 'MASTER_ADMIN' ? [] : permissions,
           validUntil: validUntilIso,
           displayName: displayName.trim() || undefined,
+          // Explicit null, not undefined: on a PATCH the two mean different
+          // things, and undefined would make "unassign" impossible to send.
+          whatsappPhoneNumberId: whatsappPhoneNumberId ?? null,
         },
         { onSuccess: onClose },
       );
@@ -110,6 +122,7 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
           permissions: role === 'MASTER_ADMIN' ? [] : permissions,
           validUntil: validUntilIso,
           displayName: displayName.trim() || undefined,
+          whatsappPhoneNumberId,
         },
         { onSuccess: onClose },
       );
@@ -276,6 +289,67 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
         </Text>
       )}
 
+      <Text style={[typography.label, { color: colors.textSecondary, marginBottom: spacing.xs }]}>Sends from</Text>
+      {numbersQuery.isLoading ? (
+        <Text style={[typography.caption, { color: colors.textTertiary, marginBottom: spacing.md }]}>
+          Loading WhatsApp numbers…
+        </Text>
+      ) : numbers.length === 0 ? (
+        <Text style={[typography.caption, { color: colors.textTertiary, marginBottom: spacing.md }]}>
+          No WhatsApp number is connected to this workspace yet, so there is nothing to assign.
+        </Text>
+      ) : (
+        <>
+          <View style={{ marginBottom: spacing.xs }}>
+            {/* "Workspace default" is a real option, not just the absence of
+                a choice — an admin needs a way back after assigning one. */}
+            <Pressable
+              onPress={() => setWhatsappPhoneNumberId(undefined)}
+              style={[styles.numberRow, { paddingVertical: spacing.xs }]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: whatsappPhoneNumberId === undefined }}
+            >
+              <Ionicons
+                name={whatsappPhoneNumberId === undefined ? 'radio-button-on' : 'radio-button-off'}
+                size={20}
+                color={whatsappPhoneNumberId === undefined ? colors.primary : colors.textSecondary}
+              />
+              <Text style={[typography.body, { color: colors.textPrimary, marginLeft: spacing.sm }]}>
+                Workspace default
+              </Text>
+            </Pressable>
+            {numbers.map((n) => {
+              const selected = whatsappPhoneNumberId === n.id;
+              return (
+                <Pressable
+                  key={n.id}
+                  onPress={() => setWhatsappPhoneNumberId(n.id)}
+                  style={[styles.numberRow, { paddingVertical: spacing.xs }]}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                >
+                  <Ionicons
+                    name={selected ? 'radio-button-on' : 'radio-button-off'}
+                    size={20}
+                    color={selected ? colors.primary : colors.textSecondary}
+                  />
+                  <View style={{ marginLeft: spacing.sm, flex: 1 }}>
+                    <Text style={[typography.body, { color: colors.textPrimary }]}>{n.displayPhoneNumber}</Text>
+                    {n.status !== 'CONNECTED' ? (
+                      <Text style={[typography.caption, { color: colors.textTertiary }]}>{n.status.toLowerCase()}</Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={[typography.caption, { color: colors.textTertiary, marginBottom: spacing.md }]}>
+            New chats this member starts go out from this number. Chats already open keep the number they
+            were started with.
+          </Text>
+        </>
+      )}
+
       <View style={styles.actions}>
         <View style={{ flex: 1, marginRight: spacing.sm }}>
           <Button label="Cancel" variant="secondary" onPress={onClose} />
@@ -337,4 +411,5 @@ const styles = StyleSheet.create({
   presetChip: { paddingHorizontal: 12, minHeight: touchTarget.compact, alignItems: 'center', justifyContent: 'center' },
   dateField: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.min, borderWidth: 1 },
   permissionRow: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact },
+  numberRow: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact },
 });

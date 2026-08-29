@@ -18,6 +18,7 @@ export interface CreateUserInput {
   validFrom: Date;
   validUntil: Date;
   displayName?: string;
+  whatsappPhoneNumberId?: string;
 }
 
 export async function createUser(input: CreateUserInput): Promise<UserDoc> {
@@ -30,6 +31,7 @@ export async function createUser(input: CreateUserInput): Promise<UserDoc> {
     validFrom: input.validFrom,
     validUntil: input.validUntil,
     displayName: input.displayName,
+    whatsappPhoneNumberId: input.whatsappPhoneNumberId,
     status: 'ACTIVE',
   });
 }
@@ -73,6 +75,36 @@ export interface UpdateUserPatch {
   validUntil?: Date;
   status?: UserStatus;
   displayName?: string;
+  /** `null` clears the assignment; omitted leaves it untouched. */
+  whatsappPhoneNumberId?: string | null;
+}
+
+/**
+ * Turns a patch into a Mongo update document.
+ *
+ * Exists as its own function — rather than inline in the update below —
+ * because of one asymmetry that is easy to get wrong: a null
+ * whatsappPhoneNumberId means "unassign" and has to become an `$unset`.
+ * `$set`-ting null would leave the field present and holding null, so
+ * every read path would then have to treat null and absent as the same
+ * thing. Exported for its unit test; nothing else should call it.
+ */
+export function buildUserUpdate(patch: UpdateUserPatch): Record<string, unknown> {
+  const { whatsappPhoneNumberId, ...rest } = patch;
+  const set: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rest)) {
+    // An explicitly-undefined key is "not editing this field", not "clear
+    // it" — $set-ting undefined is a Mongo error, not a no-op.
+    if (value !== undefined) set[key] = value;
+  }
+  const unset: Record<string, ''> = {};
+  if (whatsappPhoneNumberId === null) unset.whatsappPhoneNumberId = '';
+  else if (whatsappPhoneNumberId !== undefined) set.whatsappPhoneNumberId = whatsappPhoneNumberId;
+
+  const update: Record<string, unknown> = {};
+  if (Object.keys(set).length > 0) update.$set = set;
+  if (Object.keys(unset).length > 0) update.$unset = unset;
+  return update;
 }
 
 export async function updateUserByIdAndTenant(
@@ -81,7 +113,8 @@ export async function updateUserByIdAndTenant(
   patch: UpdateUserPatch,
 ): Promise<UserDoc | null> {
   if (!Types.ObjectId.isValid(id)) return null;
-  const updated = await User.findOneAndUpdate({ _id: id, tenantId }, { $set: patch }, { new: true });
+
+  const updated = await User.findOneAndUpdate({ _id: id, tenantId }, buildUserUpdate(patch), { new: true });
 
   // Every field this patch can carry — status, role, permissions, the
   // validity window — is one the request-time auth check reads. Dropping
@@ -132,4 +165,15 @@ export async function findUserAvatarRefByIdAndTenant(id: string, tenantId: strin
   const user = await User.findOne({ _id: id, tenantId }).select('+avatarUrl +avatarContentType +avatarCloudinaryPublicId');
   if (!user || !user.avatarUrl || !user.avatarContentType) return null;
   return { url: user.avatarUrl, contentType: user.avatarContentType, cloudinaryPublicId: user.avatarCloudinaryPublicId ?? undefined };
+}
+
+/**
+ * The WhatsApp number this user was assigned, if any. Read on the
+ * conversation-start path, so it is deliberately a projection rather than a
+ * whole document.
+ */
+export async function findAssignedPhoneNumberId(userId: string, tenantId: string): Promise<string | null> {
+  if (!Types.ObjectId.isValid(userId)) return null;
+  const user = await User.findOne({ _id: userId, tenantId }).select('whatsappPhoneNumberId').lean();
+  return user?.whatsappPhoneNumberId ? String(user.whatsappPhoneNumberId) : null;
 }

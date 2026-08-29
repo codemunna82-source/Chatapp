@@ -19,7 +19,7 @@ export const getConversationHandler = asyncHandler(async (req: Request, res: Res
 export const createConversationHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const { contactId } = req.body as { contactId: string };
-  const conversation = await conversationService.startConversationForTenant(auth.tenantId, contactId);
+  const conversation = await conversationService.startConversationForTenant(auth.tenantId, contactId, auth.userId);
   res.status(200).json({ success: true, data: conversation });
 });
 

@@ -46,6 +46,23 @@ export async function createPhoneNumber(input: CreatePhoneNumberInput): Promise<
   return WhatsAppPhoneNumber.create(input);
 }
 
+/** Every WhatsApp number this tenant has, for the admin's assignment picker. */
+export async function findPhoneNumbersByTenant(tenantId: string): Promise<WhatsAppPhoneNumberDoc[]> {
+  return WhatsAppPhoneNumber.find({ tenantId }).sort({ createdAt: 1 });
+}
+
+/**
+ * One number, only if it is this tenant's. The tenantId in the filter is
+ * what makes this safe to call with an id that came from a request body.
+ */
+export async function findPhoneNumberByIdAndTenant(
+  id: string,
+  tenantId: string,
+): Promise<WhatsAppPhoneNumberDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return WhatsAppPhoneNumber.findOne({ _id: id, tenantId });
+}
+
 /**
  * The tenant's first configured WhatsApp number. Used when starting a
  * conversation from the app: outbound chats have no inbound webhook to say

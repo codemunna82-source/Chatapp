@@ -21,6 +21,8 @@ export interface CreateTeamMemberInput {
   permissions: Permission[];
   validUntil: string; // ISO date
   displayName?: string;
+  /** Optional at creation — leaving it off means the workspace default. */
+  whatsappPhoneNumberId?: string;
 }
 
 export async function createTeamMember(input: CreateTeamMemberInput): Promise<TeamMember> {
@@ -35,6 +37,8 @@ export interface UpdateTeamMemberInput {
   validUntil?: string;
   status?: UserStatus;
   displayName?: string;
+  /** `null` clears the assignment; omitted leaves it as it is. */
+  whatsappPhoneNumberId?: string | null;
 }
 
 export async function updateTeamMember({ id, ...patch }: UpdateTeamMemberInput): Promise<TeamMember> {

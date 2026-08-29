@@ -23,4 +23,5 @@ export const queryKeys = {
   dashboard: ['dashboard'] as const,
   calls: ['calls'] as const,
   team: (status?: string) => ['team', { status: status ?? null }] as const,
+  whatsappNumbers: ['whatsappNumbers'] as const,
 };

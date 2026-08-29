@@ -26,6 +26,22 @@ const userSchema = new Schema(
     validUntil: { type: Date, required: true },
     lastLoginAt: { type: Date },
     displayName: { type: String, trim: true },
+    /**
+     * Which of the tenant's WhatsApp numbers this user sends from.
+     *
+     * A reference into WhatsAppPhoneNumber rather than a raw Meta
+     * `phone_number_id` string, deliberately: the raw id carries no tenancy,
+     * so storing one here would let a mistyped or forged value point at
+     * another tenant's number and send through it. An ObjectId is checked
+     * against `{ _id, tenantId }` before it is ever written (see
+     * assertPhoneNumberBelongsToTenant in user.service.ts) and re-checked
+     * when a conversation is opened.
+     *
+     * Optional: users without an assignment fall back to the tenant's first
+     * connected number, which is exactly what every existing user did
+     * before this field existed.
+     */
+    whatsappPhoneNumberId: { type: Schema.Types.ObjectId, ref: 'WhatsAppPhoneNumber' },
     // Cloudinary-hosted (see integrations/cloudinary.ts) — the bytes
     // themselves are never stored inline on this document. avatarUrl is
     // select: false anyway (only the dedicated GET .../avatar route needs

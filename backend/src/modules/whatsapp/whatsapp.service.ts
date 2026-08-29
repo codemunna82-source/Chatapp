@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { WhatsAppAccount } from './whatsappAccount.model';
 import { WhatsAppPhoneNumber } from './whatsappPhoneNumber.model';
+import { findPhoneNumbersByTenant } from './whatsapp.repository';
 import { ApiError } from '../../lib/ApiError';
 import type { MetaCredentials } from '../../integrations/meta';
 
@@ -52,4 +53,27 @@ export async function resolveWabaCredentialsForTenant(
     throw ApiError.notFound('WHATSAPP_ACCOUNT_NOT_FOUND', 'WhatsApp account not found');
   }
   return { accessToken: account.accessTokenRef, wabaId: account.wabaId };
+}
+
+export interface PublicWhatsAppNumber {
+  id: string;
+  /** Meta's own phone_number_id. Safe to show: it is an account identifier,
+   *  not a credential — the access token it is used with never leaves the
+   *  server (see resolveMetaCredentialsForPhoneNumber above). */
+  phoneNumberId: string;
+  displayPhoneNumber: string;
+  status: string;
+  qualityRating?: string;
+}
+
+/** The tenant's WhatsApp numbers, for the admin's "sends from" picker. */
+export async function listPhoneNumbersForTenant(tenantId: string): Promise<PublicWhatsAppNumber[]> {
+  const numbers = await findPhoneNumbersByTenant(tenantId);
+  return numbers.map((n) => ({
+    id: String(n._id),
+    phoneNumberId: n.phoneNumberId,
+    displayPhoneNumber: n.displayPhoneNumber,
+    status: n.status,
+    qualityRating: n.qualityRating ?? undefined,
+  }));
 }

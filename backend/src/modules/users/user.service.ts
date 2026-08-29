@@ -2,6 +2,7 @@ import { ApiError } from '../../lib/ApiError';
 import { hashPassword } from '../../lib/password';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './user.repository';
+import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
 import { isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer, deleteCloudinaryAsset } from '../../integrations/cloudinary';
 import type { UserDoc } from './user.model';
 import type { z } from 'zod';
@@ -17,6 +18,8 @@ export interface PublicUser {
   validFrom: Date;
   validUntil: Date;
   displayName?: string;
+  /** Which of the tenant's WhatsApp numbers this user sends from, if assigned. */
+  whatsappPhoneNumberId?: string;
   lastLoginAt?: Date;
   avatarUpdatedAt?: Date;
   createdAt: Date;
@@ -34,11 +37,31 @@ export function toPublicUser(user: UserDoc): PublicUser {
     validFrom: user.validFrom,
     validUntil: user.validUntil,
     displayName: user.displayName ?? undefined,
+    whatsappPhoneNumberId: user.whatsappPhoneNumberId ? String(user.whatsappPhoneNumberId) : undefined,
     lastLoginAt: user.lastLoginAt ?? undefined,
     avatarUpdatedAt: user.avatarUpdatedAt ?? undefined,
     createdAt: user.get('createdAt'),
     updatedAt: user.get('updatedAt'),
   };
+}
+
+/**
+ * Refuses a WhatsApp number that is not this tenant's.
+ *
+ * The id arrives in a request body, so it is attacker-controlled even
+ * behind the MASTER_ADMIN guard — an admin of tenant A must not be able to
+ * point one of their users at tenant B's number and send through it. The
+ * tenantId in the lookup filter is the whole check; without it this field
+ * would be a cross-tenant send primitive.
+ */
+async function assertPhoneNumberBelongsToTenant(tenantId: string, phoneNumberId: string): Promise<void> {
+  const phoneNumber = await findPhoneNumberByIdAndTenant(phoneNumberId, tenantId);
+  if (!phoneNumber) {
+    throw ApiError.badRequest(
+      'WHATSAPP_NUMBER_NOT_FOUND',
+      'That WhatsApp number does not belong to this workspace.',
+    );
+  }
 }
 
 type CreateUserBody = z.infer<typeof createUserSchema>;
@@ -58,6 +81,10 @@ export async function createUserForTenant(
     throw ApiError.conflict('EMAIL_ALREADY_EXISTS', 'A user with this email already exists');
   }
 
+  if (body.whatsappPhoneNumberId) {
+    await assertPhoneNumberBelongsToTenant(tenantId, body.whatsappPhoneNumberId);
+  }
+
   const passwordHash = await hashPassword(body.password);
   const user = await repo.createUser({
     tenantId,
@@ -68,6 +95,7 @@ export async function createUserForTenant(
     validFrom: body.validFrom,
     validUntil: body.validUntil,
     displayName: body.displayName,
+    whatsappPhoneNumberId: body.whatsappPhoneNumberId,
   });
 
   await recordAudit({
@@ -103,6 +131,9 @@ export async function updateUserForTenant(
 ): Promise<PublicUser> {
   if (patch.validFrom && patch.validUntil && patch.validUntil <= patch.validFrom) {
     throw ApiError.badRequest('INVALID_VALIDITY_WINDOW', 'validUntil must be after validFrom');
+  }
+  if (patch.whatsappPhoneNumberId) {
+    await assertPhoneNumberBelongsToTenant(tenantId, patch.whatsappPhoneNumberId);
   }
   const user = await repo.updateUserByIdAndTenant(id, tenantId, patch);
   if (!user) {

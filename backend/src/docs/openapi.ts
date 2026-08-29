@@ -77,12 +77,18 @@ export const openApiSpec = {
     },
     '/users': {
       get: { summary: 'List users in the caller\'s tenant (MASTER_ADMIN only)', responses: { '200': { description: 'OK' } } },
-      post: { summary: 'Create a sub-user in the caller\'s tenant (MASTER_ADMIN only)', responses: { '201': { description: 'Created' } } },
+      post: { summary: 'Create a sub-user in the caller\'s tenant, optionally assigning the WhatsApp number they send from (MASTER_ADMIN only)', responses: { '201': { description: 'Created' } } },
     },
     '/users/{id}': {
       get: { summary: 'Get a user by id (tenant-scoped)', responses: { '200': { description: 'OK' } } },
-      patch: { summary: 'Update a user (role, permissions, validity, status)', responses: { '200': { description: 'OK' } } },
+      patch: { summary: 'Update a user (role, permissions, validity, status, assigned WhatsApp number)', responses: { '200': { description: 'OK' } } },
       delete: { summary: 'Disable a user (soft delete)', responses: { '200': { description: 'OK' } } },
+    },
+    '/whatsapp/numbers': {
+      get: {
+        summary: 'List the caller\'s tenant WhatsApp numbers, for assigning one to a user (MASTER_ADMIN only)',
+        responses: { '200': { description: 'OK' } },
+      },
     },
     '/contacts': {
       get: { summary: 'List contacts (cursor-paginated, optional search)', responses: { '200': { description: 'OK' } } },

@@ -2,7 +2,8 @@ import { ApiError } from '../../lib/ApiError';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './conversation.repository';
 import * as contactRepo from '../contacts/contact.repository';
-import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
+import { findFirstPhoneNumberForTenant, findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
+import { findAssignedPhoneNumberId } from '../users/user.repository';
 import { deleteMessagesByConversation } from '../messages/message.repository';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
 import type { ConversationLean, ConversationStatus } from './conversation.model';
@@ -128,30 +129,60 @@ export interface UpdateConversationBody {
 }
 
 /**
+ * The WhatsApp number a new chat should be sent from.
+ *
+ * The user's own assignment first (set by a MASTER_ADMIN — see
+ * user.model.ts), then the tenant's first number for anyone unassigned,
+ * which is what every user did before assignments existed.
+ *
+ * The assigned id is re-checked against the tenant here rather than
+ * trusted: it was validated when written, but the number may have been
+ * removed from the workspace since, and a conversation pinned to a number
+ * that no longer exists would fail on every send instead of falling back.
+ */
+async function resolveSendingPhoneNumberId(tenantId: string, actorUserId: string): Promise<string | null> {
+  const assignedId = await findAssignedPhoneNumberId(actorUserId, tenantId);
+  if (assignedId) {
+    const assigned = await findPhoneNumberByIdAndTenant(assignedId, tenantId);
+    if (assigned) return String(assigned._id);
+  }
+  const fallback = await findFirstPhoneNumberForTenant(tenantId);
+  return fallback ? String(fallback._id) : null;
+}
+
+/**
  * Opens the conversation with a contact, creating it if this is the first
  * time — the app's "new chat" entry point. Idempotent by design: the repo's
  * findOrCreate keys on (tenant, contact), so tapping the same contact twice
  * returns the same thread rather than a duplicate.
  *
- * The conversation is attached to the tenant's own WhatsApp number, since an
- * outbound-initiated chat has no inbound webhook to say which number it
- * belongs to.
+ * The conversation is attached to a WhatsApp number at creation, since an
+ * outbound-initiated chat has no inbound webhook to say which one it
+ * belongs to. Note the idempotency cuts both ways: an existing conversation
+ * keeps the number it was created with, so reassigning a user does not move
+ * their open chats — deliberate, since the customer's own thread is with
+ * that number and moving it mid-conversation would look like a stranger
+ * taking over.
  */
-export async function startConversationForTenant(tenantId: string, contactId: string): Promise<PublicConversation> {
+export async function startConversationForTenant(
+  tenantId: string,
+  contactId: string,
+  actorUserId: string,
+): Promise<PublicConversation> {
   const contact = await contactRepo.findContactByIdAndTenant(contactId, tenantId);
   if (!contact) {
     throw ApiError.notFound('CONTACT_NOT_FOUND', 'That contact does not exist.');
   }
 
-  const phoneNumber = await findFirstPhoneNumberForTenant(tenantId);
-  if (!phoneNumber) {
+  const phoneNumberId = await resolveSendingPhoneNumberId(tenantId, actorUserId);
+  if (!phoneNumberId) {
     throw ApiError.badRequest(
       'NO_WHATSAPP_NUMBER',
       'This workspace has no connected WhatsApp number yet, so a chat cannot be started.',
     );
   }
 
-  const conversation = await repo.findOrCreateConversation(tenantId, contactId, String(phoneNumber._id));
+  const conversation = await repo.findOrCreateConversation(tenantId, contactId, phoneNumberId);
   return toPublicConversation(conversation, contact);
 }
 
