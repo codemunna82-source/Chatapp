@@ -2,6 +2,8 @@ import request from 'supertest';
 import { createApp } from '../../app';
 import { createTestTenant, createTestUser } from '../../../test/helpers';
 import { useMongoMemoryServer } from '../../../test/withMongo';
+import { signAccessToken } from '../../lib/jwt';
+import { User } from '../users/user.model';
 
 useMongoMemoryServer();
 const app = createApp();
@@ -124,5 +126,58 @@ describe('POST /api/auth/change-password', () => {
       .post('/api/auth/login')
       .send({ email: 'change@voxo.test', password: 'NewPassword456!' });
     expect(loginWithNewPassword.status).toBe(200);
+  });
+});
+
+describe('GET /api/auth/me', () => {
+  it("returns the user's CURRENT role, not the one baked into the token", async () => {
+    const tenant = await createTestTenant();
+    const user = await createTestUser({
+      tenantId: String(tenant._id),
+      email: `promote-${Date.now()}@voxo.test`,
+      role: 'SUB_USER',
+    });
+    // A token issued while they were a SUB_USER — the stale snapshot the
+    // app used to be stuck with.
+    const token = signAccessToken({ sub: String(user._id), tenantId: String(tenant._id), role: 'SUB_USER' });
+
+    await User.updateOne({ _id: user._id }, { $set: { role: 'MASTER_ADMIN' } });
+
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    // This is the whole point: the JWT still says SUB_USER.
+    expect(res.body.data.role).toBe('MASTER_ADMIN');
+  });
+
+  it('reflects a permission granted after the token was issued', async () => {
+    const tenant = await createTestTenant();
+    const user = await createTestUser({
+      tenantId: String(tenant._id),
+      email: `perm-${Date.now()}@voxo.test`,
+      permissions: ['CHAT_READ'],
+    });
+    const token = signAccessToken({ sub: String(user._id), tenantId: String(tenant._id), role: 'SUB_USER' });
+
+    await User.updateOne({ _id: user._id }, { $set: { permissions: ['CHAT_READ', 'CHAT_SEND'] } });
+
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
+    expect(res.body.data.permissions).toContain('CHAT_SEND');
+  });
+
+  it('rejects an unauthenticated caller', async () => {
+    const res = await request(app).get('/api/auth/me');
+    expect(res.status).toBe(401);
+  });
+
+  it("401s once the account is gone, rather than serving a token's claims", async () => {
+    const tenant = await createTestTenant();
+    const user = await createTestUser({ tenantId: String(tenant._id), email: `gone-${Date.now()}@voxo.test` });
+    const token = signAccessToken({ sub: String(user._id), tenantId: String(tenant._id), role: 'SUB_USER' });
+
+    await User.deleteOne({ _id: user._id });
+
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(401);
   });
 });

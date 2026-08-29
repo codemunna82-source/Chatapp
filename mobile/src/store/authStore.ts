@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { getStoredTokens, setStoredTokens, clearStoredTokens } from '../storage/secureStorage';
 import { getJSON, setJSON, remove as removeCached } from '../storage/mmkv';
 import { setAuthHandlers } from '../api/client';
+import * as authApi from '../api/endpoints/auth';
 import type { AuthTokens, AuthUser } from '../api/types';
 
 const CACHED_USER_KEY = 'voxo.cachedUser';
@@ -19,6 +20,8 @@ interface AuthState {
   clearSession: () => Promise<void>;
   /** Merges a partial update into the cached user (e.g. avatarUpdatedAt after an upload) without a full re-login. */
   updateUser: (patch: Partial<AuthUser>) => void;
+  /** Re-reads role/permissions from the server — see the implementation. */
+  refreshUser: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -65,6 +68,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const updated = { ...current, ...patch };
     setJSON(CACHED_USER_KEY, updated);
     set({ user: updated });
+  },
+
+  /**
+   * Replaces the cached user with the server's current copy.
+   *
+   * The cached one is a snapshot of whoever you were at your last LOGIN.
+   * Nothing corrected it: a member promoted to MASTER_ADMIN, or granted a
+   * permission, kept the old capabilities in their UI indefinitely, with
+   * nothing on screen to suggest the app was out of date.
+   *
+   * Failures are swallowed on purpose — offline, or the backend not yet
+   * redeployed with /auth/me. The cached user stays, which is exactly the
+   * behaviour that existed before this, so a refresh that cannot run
+   * degrades to the old state rather than signing anyone out. A genuinely
+   * invalid session is handled where it always was: the API client's 401
+   * refresh path.
+   */
+  refreshUser: async () => {
+    if (get().status !== 'signedIn') return;
+    try {
+      const user = await authApi.getCurrentUser();
+      setJSON(CACHED_USER_KEY, user);
+      set({ user });
+    } catch {
+      // See above.
+    }
   },
 }));
 

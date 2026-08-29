@@ -17,9 +17,22 @@ export function RootNavigator() {
   // for it to read.
   const navigationRef = useNavigationContainerRef();
 
+  const refreshUser = useAuthStore((s) => s.refreshUser);
+
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  // Re-reads role and permissions from the server once a session is
+  // restored. hydrate() only replays what was cached at the last login, so
+  // without this a member promoted to MASTER_ADMIN would keep the old UI —
+  // no admin rows, no user management — until they happened to sign out and
+  // back in, with nothing on screen to explain why.
+  useEffect(() => {
+    if (status === 'signedIn') {
+      void refreshUser();
+    }
+  }, [status, refreshUser]);
 
   useEffect(() => {
     // Reveal the app only once we know whether there's a valid session —

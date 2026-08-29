@@ -66,6 +66,38 @@ async function issueTokenPair(
   return { accessToken, refreshToken };
 }
 
+export type AuthUser = AuthTokens['user'];
+
+/**
+ * The signed-in user as the SERVER currently sees them.
+ *
+ * Exists because the login response was the app's only source of `role`
+ * and `permissions`, cached on the device from then on. Nothing could ever
+ * correct that snapshot: a member promoted to MASTER_ADMIN — or granted a
+ * permission — kept the old capabilities in their UI until they happened to
+ * sign out and back in, with no indication anything was stale. The client
+ * re-reads this on every launch.
+ *
+ * Reads the user fresh rather than trusting the JWT's claims: the token
+ * carries a role from whenever it was issued, which is exactly the stale
+ * value this endpoint exists to replace.
+ */
+export async function getCurrentUser(userId: string, tenantId: string): Promise<AuthUser> {
+  const user = await User.findOne({ _id: userId, tenantId });
+  if (!user) {
+    throw ApiError.unauthorized('USER_NOT_FOUND', 'This account no longer exists.');
+  }
+  return {
+    id: String(user._id),
+    tenantId: String(user.tenantId),
+    email: user.email,
+    role: user.role as 'MASTER_ADMIN' | 'SUB_USER',
+    permissions: (user.permissions ?? []) as Permission[],
+    displayName: user.displayName ?? undefined,
+    avatarUpdatedAt: user.avatarUpdatedAt ? user.avatarUpdatedAt.toISOString() : undefined,
+  };
+}
+
 export async function login(email: string, password: string, meta: RequestMeta): Promise<AuthTokens> {
   const user = await User.findOne({ email: email.toLowerCase() }).select('+passwordHash');
   // Constant-shape response whether the email doesn't exist or the password

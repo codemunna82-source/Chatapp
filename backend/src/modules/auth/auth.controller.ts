@@ -25,6 +25,12 @@ export const logoutHandler = asyncHandler(async (req: Request, res: Response) =>
   res.status(200).json({ success: true, data: { loggedOut: true } });
 });
 
+export const meHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const user = await authService.getCurrentUser(auth.userId, auth.tenantId);
+  res.status(200).json({ success: true, data: user });
+});
+
 export const changePasswordHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const { currentPassword, newPassword } = req.body as { currentPassword: string; newPassword: string };
