@@ -9,12 +9,13 @@ import { queryClient } from './src/queries/queryClient';
 import { ThemeProvider } from './src/theme/ThemeProvider';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { Sentry, isSentryEnabled } from './src/lib/sentry';
 
 // Kept visible until auth hydration resolves (see RootNavigator) so the
 // app never flashes an empty screen while reading tokens from secure storage.
 void SplashScreen.preventAutoHideAsync();
 
-export default function App() {
+function App() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   return (
     // Outside every provider on purpose: a crash inside the theme, query or
@@ -34,3 +35,8 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
+// Sentry.wrap adds the native crash handler and touch breadcrumbs around
+// the whole tree. Applied conditionally so a build with no DSN exports the
+// plain component and pulls none of the wrapper's behaviour in.
+export default isSentryEnabled() ? Sentry.wrap(App) : App;

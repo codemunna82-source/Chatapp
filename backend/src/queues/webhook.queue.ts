@@ -2,6 +2,7 @@ import { Queue, Worker, type Job } from 'bullmq';
 import { getRedisConnection } from './connection';
 import { logger } from '../lib/logger';
 import { processWebhookDelivery } from '../modules/webhooks/webhook.service';
+import { captureBackgroundError } from '../lib/sentry';
 
 export const WEBHOOK_QUEUE_NAME = 'meta-webhook-processing';
 
@@ -52,6 +53,10 @@ export function startWebhookWorker(): Worker<WebhookJobData> {
   );
   worker.on('failed', (job, err) => {
     logger.error({ jobId: job?.id, err }, 'Webhook processing job failed');
+    // A queue worker has no error middleware to fall through to, so
+    // without this a failed webhook — a message that never reached the
+    // inbox — is only ever a line in a log nobody is watching.
+    captureBackgroundError(err, { source: 'webhook.worker', jobId: job?.id });
   });
   return worker;
 }

@@ -10,6 +10,7 @@ import {
 } from '../queries/useMessages';
 import { queryKeys } from '../queries/keys';
 import { playSentSound } from './useMessageAlert';
+import { captureHandledError } from '../lib/sentry';
 
 /**
  * Drains the offline outbox one message at a time, oldest first.
@@ -56,6 +57,16 @@ async function flushOutbox(queryClient: QueryClient): Promise<void> {
         // point of usefulness. Leave the bubble visible and FAILED so the
         // user can see what didn't go, and drop it from the queue so it
         // stops being retried behind their back.
+        //
+        // Worth reporting because this is a message the user believed was
+        // sent, queued while offline, and then permanently lost — the
+        // worst outcome this app has, and completely invisible otherwise.
+        captureHandledError(err, {
+          stage: 'outboxFlush',
+          messageType: item.body.type,
+          attempts: item.attempts + 1,
+          queuedAt: item.queuedAt,
+        });
         useOutboxStore.getState().remove(item.id);
         patchMessageStatusInCache(queryClient, item.conversationId, item.id, 'FAILED');
       }

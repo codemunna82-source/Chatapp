@@ -24,6 +24,7 @@ import { dashboardRouter } from './modules/dashboard/dashboard.routes';
 import { callRouter } from './modules/calls/call.routes';
 import { quickReplyRouter } from './modules/quickReplies/quickReply.routes';
 import { deviceRouter } from './modules/devices/deviceToken.routes';
+import { Sentry, isSentryEnabled, isReportableError } from './lib/sentry';
 
 export function createApp(): Express {
   const app = express();
@@ -91,6 +92,20 @@ export function createApp(): Express {
   app.use('/api/devices', deviceRouter);
 
   app.use(notFoundHandler);
+
+  // Between the routes and the response shaper, and that order is the
+  // whole point: Sentry's handler must see the error after every route has
+  // had its chance to throw, but before errorHandler turns it into a JSON
+  // body and ends the response.
+  //
+  // shouldHandleError filters to genuine failures. Without it the project
+  // fills with expected 4xx outcomes — a closed 24-hour window, a contact
+  // that was deleted, an expired token — and the real 500s become
+  // impossible to find.
+  if (isSentryEnabled()) {
+    Sentry.setupExpressErrorHandler(app, { shouldHandleError: isReportableError });
+  }
+
   app.use(errorHandler);
 
   return app;

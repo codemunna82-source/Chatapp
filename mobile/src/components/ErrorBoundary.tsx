@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { lightColors, darkColors } from '../theme/colors';
 import { touchTarget } from '../theme/spacing';
+import { captureHandledError } from '../lib/sentry';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -29,6 +30,15 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // React swallows the error once a boundary handles it, so without this
+    // the most serious class of failure in the app — one that blanked a
+    // screen for a real user — never leaves their device. The component
+    // stack is what makes it actionable; the message itself is scrubbed of
+    // phone numbers on the way out (see lib/sentry.ts).
+    captureHandledError(error, { componentStack: info.componentStack });
   }
 
   handleReset = () => {

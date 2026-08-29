@@ -9,12 +9,24 @@ import { z } from 'zod';
 const envSchema = z.object({
   EXPO_PUBLIC_API_URL: z.string().url(),
   EXPO_PUBLIC_SOCKET_URL: z.string().url(),
+  /**
+   * Sentry DSN. Optional, and validated only when present, so a build made
+   * without one still works — crash reporting simply stays off (see
+   * lib/sentry.ts). A DSN is not a secret in the way an API key is: it only
+   * permits writing events, which is why it is safe in an EXPO_PUBLIC_ var
+   * that ships inside the APK.
+   */
+  EXPO_PUBLIC_SENTRY_DSN: z.string().url().optional().or(z.literal('')),
+  /** Fraction of transactions traced, 0..1. Defaults low — traces are billed per event. */
+  EXPO_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
 });
 
 function loadEnv() {
   const parsed = envSchema.safeParse({
     EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL,
     EXPO_PUBLIC_SOCKET_URL: process.env.EXPO_PUBLIC_SOCKET_URL,
+    EXPO_PUBLIC_SENTRY_DSN: process.env.EXPO_PUBLIC_SENTRY_DSN,
+    EXPO_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: process.env.EXPO_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
   });
 
   if (!parsed.success) {
@@ -33,3 +45,6 @@ export const env = loadEnv();
 /** e.g. "http://10.0.2.2:4000/api" — the REST client's base URL. */
 export const apiBaseUrl = `${env.EXPO_PUBLIC_API_URL.replace(/\/$/, '')}/api`;
 export const socketUrl = env.EXPO_PUBLIC_SOCKET_URL.replace(/\/$/, '');
+/** Empty string when crash reporting is not configured for this build. */
+export const sentryDsn = env.EXPO_PUBLIC_SENTRY_DSN ?? '';
+export const sentryTracesSampleRate = env.EXPO_PUBLIC_SENTRY_TRACES_SAMPLE_RATE;

@@ -7,6 +7,7 @@ import { computeCurrentStatus } from '../modules/subscriptions/subscription.repo
 import { User } from '../modules/users/user.model';
 import { createNotification } from '../modules/notifications/notification.repository';
 import { recordAudit } from '../modules/audit/auditLog.service';
+import { captureBackgroundError } from '../lib/sentry';
 
 export const SUBSCRIPTION_EXPIRY_QUEUE_NAME = 'subscription-expiry-sweep';
 const SWEEP_JOB_NAME = 'sweep';
@@ -106,6 +107,7 @@ export function startSubscriptionExpiryWorker(): Worker {
   );
   worker.on('failed', (job, err) => {
     logger.error({ jobId: job?.id, err }, 'Subscription expiry sweep job failed');
+    captureBackgroundError(err, { source: 'subscriptionExpiry.worker', jobId: job?.id });
   });
   return worker;
 }

@@ -1,3 +1,7 @@
+// MUST be first: Sentry instruments Express, Mongoose and http by patching
+// them at require time, so anything imported above this line runs untraced.
+import './instrument';
+
 import { createServer } from 'node:http';
 import { createApp } from './app';
 import { connectMongo } from './lib/mongoose';

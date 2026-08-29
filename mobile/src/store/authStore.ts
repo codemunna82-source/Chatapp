@@ -4,6 +4,7 @@ import { getJSON, setJSON, remove as removeCached } from '../storage/mmkv';
 import { setAuthHandlers } from '../api/client';
 import * as authApi from '../api/endpoints/auth';
 import type { AuthTokens, AuthUser } from '../api/types';
+import { setSentryUser } from '../lib/sentry';
 
 const CACHED_USER_KEY = 'voxo.cachedUser';
 
@@ -35,12 +36,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = getJSON<AuthUser>(CACHED_USER_KEY);
 
     if (accessToken && refreshToken && user) {
+      // Ids only — never the email or display name. See setSentryUser.
+      setSentryUser(user);
       set({ status: 'signedIn', accessToken, refreshToken, user });
     } else {
       // Partial/corrupt state (e.g. tokens without a cached user) is
       // treated as signed out — never guess at a session.
       await clearStoredTokens();
       removeCached(CACHED_USER_KEY);
+      setSentryUser(null);
       set({ status: 'signedOut', accessToken: null, refreshToken: null, user: null });
     }
   },
@@ -48,6 +52,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setSession: async (tokens: AuthTokens) => {
     await setStoredTokens(tokens.accessToken, tokens.refreshToken);
     setJSON(CACHED_USER_KEY, tokens.user);
+    setSentryUser(tokens.user);
     set({
       status: 'signedIn',
       accessToken: tokens.accessToken,
@@ -59,6 +64,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   clearSession: async () => {
     await clearStoredTokens();
     removeCached(CACHED_USER_KEY);
+    // Cleared on the way out so a crash after signing out is not still
+    // attributed to the person who just left.
+    setSentryUser(null);
     set({ status: 'signedOut', accessToken: null, refreshToken: null, user: null });
   },
 

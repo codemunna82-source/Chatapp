@@ -56,6 +56,25 @@ const envSchema = z.object({
    */
   FCM_SERVICE_ACCOUNT_JSON: z.string().optional().default(''),
 
+  /**
+   * Sentry DSN. Everything Sentry-related is a no-op while this is unset,
+   * so a local or self-hosted deployment reports nothing and needs no
+   * account — see lib/sentry.ts.
+   */
+  SENTRY_DSN: z.string().optional().default('').transform((v) => v.trim()),
+  /**
+   * Fraction of requests traced for performance, 0..1. Traces are billed
+   * per event, so this defaults low enough to be safe to turn on in
+   * production without a surprise; raise it while investigating.
+   */
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
+  /**
+   * Identifies the deployed build so Sentry can attribute an error to the
+   * release that introduced it. Render exposes the commit as
+   * RENDER_GIT_COMMIT; set SENTRY_RELEASE explicitly anywhere else.
+   */
+  SENTRY_RELEASE: z.string().optional().default('').transform((v) => v.trim()),
+
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
 

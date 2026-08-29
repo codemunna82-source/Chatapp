@@ -9,6 +9,7 @@ import { useAuthStore } from '../store/authStore';
 import { RealtimeSync } from '../sockets/RealtimeSync';
 import { OutboxFlusher } from '../sockets/OutboxFlusher';
 import { PushNotificationSync } from '../notifications/PushNotificationSync';
+import { navigationIntegration, isSentryEnabled } from '../lib/sentry';
 
 export function RootNavigator() {
   const status = useAuthStore((s) => s.status);
@@ -48,7 +49,17 @@ export function RootNavigator() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef} linking={linking} fallback={<LoadingIndicator fullscreen />}>
+    <NavigationContainer
+      ref={navigationRef}
+      linking={linking}
+      fallback={<LoadingIndicator fullscreen />}
+      // Tags every event with the screen it happened on. Without it a
+      // crash report says which component threw but not what the user was
+      // looking at, which is usually the more useful half.
+      onReady={() => {
+        if (isSentryEnabled()) navigationIntegration.registerNavigationContainer(navigationRef);
+      }}
+    >
       {status === 'signedIn' ? (
         <>
           <RealtimeSync />

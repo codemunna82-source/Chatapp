@@ -6,6 +6,7 @@ import { queryKeys } from './keys';
 import { playSentSound } from '../sockets/useMessageAlert';
 import { isOfflineError } from '../api/client';
 import { useOutboxStore, isQueueableBody } from '../store/outboxStore';
+import { captureHandledError } from '../lib/sentry';
 
 type MessagesPage = { items: Message[]; nextCursor: string | null };
 type MessagesData = InfiniteData<MessagesPage, string | undefined>;
@@ -229,6 +230,13 @@ export function useSendMessage(conversationId: string) {
         });
         return;
       }
+
+      // Reported, not just rendered. A send that the server rejected is
+      // the single failure a user of this app cares most about, and the
+      // FAILED bubble only ever tells the one person looking at it — the
+      // error itself would otherwise never leave the device. The body is
+      // deliberately not attached: it holds the message text.
+      captureHandledError(err, { stage: 'sendMessage', messageType: body.type });
 
       patchMessages(queryClient, conversationId, (pages) =>
         pages.map((page) => ({
