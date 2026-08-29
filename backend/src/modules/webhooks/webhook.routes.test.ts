@@ -48,6 +48,9 @@ describe('GET /api/webhooks/meta/health (configuration self-check)', () => {
     expect(res.body.data.verifyTokenConfigured).toBe(true);
     expect(res.body.data.appSecretConfigured).toBe(true);
     expect(res.body.data.callbackUrl).toMatch(/\/api\/webhooks\/meta$/);
+    // No FCM service account in the test env, so this must report false
+    // rather than being absent — an absent field reads as "old build".
+    expect(res.body.data.pushConfigured).toBe(false);
 
     // The whole point of the endpoint is that it is safe to curl publicly.
     const serialized = JSON.stringify(res.body);

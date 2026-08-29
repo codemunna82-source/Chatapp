@@ -6,6 +6,7 @@ import { env } from '../../config/env';
 import { verifyChallenge, verifySignature } from '../../integrations/meta/webhookVerifier';
 import { enqueueWebhookDelivery } from '../../queues/webhook.queue';
 import { isRedisConfigured } from '../../queues/connection';
+import { getPushGateway } from '../../integrations/fcm';
 import { processWebhookDelivery } from './webhook.service';
 
 /** GET /api/webhooks/meta — one-time subscription challenge (spec §16). */
@@ -69,6 +70,11 @@ export function webhookConfigHealthHandler(req: Request, res: Response): void {
       phoneNumberIdConfigured: env.META_PHONE_NUMBER_ID.length > 0,
       mockMode: env.META_MOCK_MODE,
       queueMode: isRedisConfigured() ? 'redis' : 'inline',
+      // Reported here because there is otherwise no way to tell whether
+      // push is live short of reading the deploy log — and by the time
+      // someone is asking "why is no notification arriving", the log line
+      // that would have answered it has usually scrolled away.
+      pushConfigured: getPushGateway().isConfigured(),
     },
   });
 }
