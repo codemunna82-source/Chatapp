@@ -68,9 +68,28 @@ jobs:
         # this literal fallback is what actually applies) — override via
         # workflow_dispatch's api_url/socket_url inputs for a local backend
         # on your PC's LAN IP instead.
+        env:
+          SENTRY_DSN: ${{ secrets.EXPO_PUBLIC_SENTRY_DSN }}
         run: |
           echo "EXPO_PUBLIC_API_URL=${{ github.event.inputs.api_url || 'https://chatapp-0orj.onrender.com' }}" >> .env
           echo "EXPO_PUBLIC_SOCKET_URL=${{ github.event.inputs.socket_url || 'https://chatapp-0orj.onrender.com' }}" >> .env
+
+          # Crash reporting. Optional in exactly the same way google-services
+          # below is: with no secret the SDK never initialises and the app is
+          # unchanged. It has to be written HERE rather than read from a
+          # local .env, because this step creates the .env the bundler sees —
+          # a DSN set only on someone's laptop would never reach the APK, and
+          # the build would look fine while reporting nothing.
+          #
+          # A DSN only grants permission to write events, never to read them,
+          # so it is safe baked into the bundle. SENTRY_AUTH_TOKEN is not,
+          # and must never be added here.
+          if [ -n "$SENTRY_DSN" ]; then
+            echo "EXPO_PUBLIC_SENTRY_DSN=$SENTRY_DSN" >> .env
+            echo "Sentry DSN written — crash reporting enabled in this build"
+          else
+            echo "EXPO_PUBLIC_SENTRY_DSN secret not set — building without crash reporting"
+          fi
 
       - name: Write google-services.json (Firebase / push notifications)
         # Optional. The file identifies one specific Firebase project, so it
