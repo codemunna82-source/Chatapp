@@ -7,6 +7,8 @@ export const queryKeys = {
   conversationsAll: ['conversations'] as const,
   conversation: (id: string) => ['conversation', id] as const,
   messages: (conversationId: string) => ['messages', conversationId] as const,
+  /** Every conversation's message list — used to resync after a socket gap. */
+  messagesAll: ['messages'] as const,
   contacts: (params: Omit<ListContactsParams, 'cursor'>) => ['contacts', params] as const,
   templates: ['templates'] as const,
   wallet: ['wallet'] as const,

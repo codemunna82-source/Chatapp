@@ -11,6 +11,7 @@ import { LoadingIndicator } from '../../components/LoadingIndicator';
 import { InlineBanner } from '../../components/InlineBanner';
 import { MessageBubble } from './MessageBubble';
 import { ChatWallpaper } from './ChatWallpaper';
+import { ConnectionBanner } from '../../components/ConnectionBanner';
 import { DateSeparator } from './DateSeparator';
 import { TypingIndicator } from './TypingIndicator';
 import { Composer } from './Composer';
@@ -32,6 +33,7 @@ import {
 import { useConversationRoom } from '../../sockets/useConversationRoom';
 import { useSocketEvent } from '../../sockets/useSocketEvent';
 import { emitConversationRead } from '../../sockets/actions';
+import { useSocketConnection } from '../../sockets/useSocketConnected';
 import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage } from '../../api/client';
 import * as Clipboard from 'expo-clipboard';
@@ -128,9 +130,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   }));
 
 
-  useEffect(() => {
-    emitConversationRead(conversationId);
-  }, [conversationId]);
 
   useSocketEvent<{ conversationId: string; userId: string }>(
     'typing:start',
@@ -159,6 +158,19 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // toast, a keystroke). Key off the query data itself, whose identity
   // react-query only changes when the messages actually change.
   const messages = useMemo(() => flattenMessages(messagesQuery.data), [messagesQuery.data]);
+
+  // Re-sent on every reconnect and on every incoming message, not just at
+  // mount. Two ways the old mount-only version left a stale unread badge:
+  // the socket may not have been connected yet when the screen opened, and
+  // a message arriving while the user is sitting in the chat bumps the
+  // server's unreadCount again — with nothing to clear it, backing out
+  // showed unread messages the user had just watched arrive.
+  const { connected, generation } = useSocketConnection();
+  const lastIncomingId = messages.find((m) => m.direction === 'IN')?.id;
+  useEffect(() => {
+    if (!connected) return;
+    emitConversationRead(conversationId);
+  }, [conversationId, connected, generation, lastIncomingId]);
   const view = useMemo(() => deriveConversationView(messages), [messages]);
   const renderItems = useMemo(() => buildRenderItems(view.renderable), [view.renderable]);
 
@@ -395,6 +407,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         <Animated.View style={[styles.flex, keyboardPadStyle]}>
           <View style={styles.flex}>
             <ChatWallpaper />
+            <ConnectionBanner />
             {callError ? (
               <View style={styles.callErrorWrap}>
                 <InlineBanner message={callError} />

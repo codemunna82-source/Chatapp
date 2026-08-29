@@ -1,5 +1,9 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
+import { focusManager, onlineManager, useQueryClient } from '@tanstack/react-query';
 import { useSocketEvent } from './useSocketEvent';
+import { useSocketConnection } from './useSocketConnected';
 import { upsertMessageInCache, patchMessageStatusInCache } from '../queries/useMessages';
 import { queryKeys } from '../queries/keys';
 import type { Message, Conversation, MessageStatus } from '../api/types';
@@ -18,6 +22,42 @@ interface MessageStatusPayload {
  */
 export function RealtimeSync(): null {
   const queryClient = useQueryClient();
+
+  // React Query ships browser implementations of both managers; in React
+  // Native nothing drives them unless it is wired here, which is why
+  // refetchOnWindowFocus/refetchOnReconnect were previously inert.
+  useEffect(() => {
+    const onAppStateChange = (status: AppStateStatus) => {
+      focusManager.setFocused(status === 'active');
+    };
+    const sub = AppState.addEventListener('change', onAppStateChange);
+    const unsubscribeNetInfo = NetInfo.addEventListener((state) => {
+      // isInternetReachable is null while it is still being determined —
+      // treat that as online rather than pausing every query on a value
+      // that simply hasn't resolved yet.
+      onlineManager.setOnline(Boolean(state.isConnected) && state.isInternetReachable !== false);
+    });
+    return () => {
+      sub.remove();
+      unsubscribeNetInfo();
+    };
+  }, []);
+
+  // A dropped socket is a hole in the realtime stream: anything that
+  // happened while it was down was never delivered and never will be, since
+  // Socket.IO replays nothing on reconnect. Refetching closes the hole.
+  // Skipped on the first connect, where the screens' own queries have just
+  // loaded the same data.
+  const { generation } = useSocketConnection();
+  const lastGeneration = useRef(0);
+  useEffect(() => {
+    if (generation === 0) return;
+    const isReconnect = lastGeneration.current > 0 && generation > lastGeneration.current;
+    lastGeneration.current = generation;
+    if (!isReconnect) return;
+    void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.messagesAll });
+  }, [generation, queryClient]);
 
   useSocketEvent<Message>(
     'message:new',

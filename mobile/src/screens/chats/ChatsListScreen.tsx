@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SearchBar } from '../../components/SearchBar';
+import { ConnectionBanner } from '../../components/ConnectionBanner';
 import { ChatListSkeleton } from '../../components/Skeleton';
 import { EmptyState } from '../../components/EmptyState';
 import { ChatListItem } from './ChatListItem';
@@ -140,6 +141,8 @@ export function ChatsListScreen({ navigation }: Props) {
           </View>
         )}
       </Pressable>
+
+      <ConnectionBanner />
 
       {showSkeleton ? (
         <ChatListSkeleton />
