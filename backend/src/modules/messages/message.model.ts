@@ -33,14 +33,6 @@ export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 const messageSchema = new Schema(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
-    /**
-     * The User whose connected WhatsApp number this belongs to.
-     *
-     * Optional: rows written before per-user numbers existed have none.
-     * The backfill assigns them to the tenant's MASTER_ADMIN, and until it
-     * runs a missing value reads as admin-owned rather than orphaned.
-     */
-    ownerUserId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     conversationId: { type: Schema.Types.ObjectId, ref: 'Conversation', required: true, index: true },
     senderId: { type: Schema.Types.ObjectId, ref: 'User' }, // absent for inbound (customer-sent) messages
     recipientPhone: { type: String, required: true },
@@ -103,10 +95,6 @@ const messageSchema = new Schema(
 // thread. An ObjectId's leading bytes are a timestamp, so _id order is
 // insertion order: nothing is lost by ordering on it.
 messageSchema.index({ tenantId: 1, conversationId: 1, _id: -1 });
-// Denormalised onto the message so a per-user query (an owner's whole
-// history, the dashboard's per-user rollups) never has to join back
-// through conversations to find out who owns it.
-messageSchema.index({ tenantId: 1, ownerUserId: 1, _id: -1 });
 // The dashboard's lifetime totals group every message by direction and
 // status. With only the (tenantId, createdAt) index below, that meant
 // fetching each full document — text, error payloads and all — off disk

@@ -35,25 +35,6 @@ const envSchema = z.object({
   META_BUSINESS_ACCOUNT_ID: z.string().optional().default('').transform((v) => v.trim()),
   META_PHONE_NUMBER_ID: z.string().optional().default('').transform((v) => v.trim()),
   META_API_VERSION: z.string().default('v21.0'),
-  /**
-   * The Facebook Login for Business configuration id that drives Embedded
-   * Signup. Created in the Meta app dashboard, not derivable from anything
-   * else — without it FB.login opens a plain login instead of the WhatsApp
-   * onboarding flow.
-   */
-  META_CONFIG_ID: z.string().optional().default('').transform((v) => v.trim()),
-  /**
-   * Six-digit PIN used to register an onboarded number for Cloud API
-   * (POST /{phone-number-id}/register). Meta requires one; it is also what
-   * two-step verification falls back to, so it must be stable across
-   * deploys rather than generated per call.
-   */
-  META_REGISTER_PIN: z
-    .string()
-    .optional()
-    .default('')
-    .transform((v) => v.trim())
-    .refine((v) => v === '' || /^\d{6}$/.test(v), 'META_REGISTER_PIN must be exactly 6 digits'),
   META_MOCK_MODE: z
     .string()
     .default('true')
@@ -93,17 +74,6 @@ const envSchema = z.object({
    * RENDER_GIT_COMMIT; set SENTRY_RELEASE explicitly anywhere else.
    */
   SENTRY_RELEASE: z.string().optional().default('').transform((v) => v.trim()),
-
-  /**
-   * 32-byte key for encrypting Meta access tokens at rest (lib/crypto.ts).
-   * Accepts base64 or hex — generate with `openssl rand -base64 32`.
-   *
-   * Optional here rather than required so an existing deployment does not
-   * fail to boot the moment this ships; the encrypt path throws a clear
-   * error if it is ever needed while unset. Set it before onboarding any
-   * real WhatsApp account.
-   */
-  ENCRYPTION_KEY: z.string().optional().default('').transform((v) => v.trim()),
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),

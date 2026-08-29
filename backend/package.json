@@ -2,7 +2,7 @@
   "name": "voxo-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "VOXO multi-tenant WhatsApp communication platform \u2014 backend API",
+  "description": "VOXO multi-tenant WhatsApp communication platform — backend API",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -12,8 +12,7 @@
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "test": "jest --runInBand",
     "test:watch": "jest --runInBand --watch",
-    "seed": "tsx src/scripts/seed.ts",
-    "migrate:owner-user-id": "tsx src/scripts/backfillOwnerUserId.ts"
+    "seed": "tsx src/scripts/seed.ts"
   },
   "dependencies": {
     "@sentry/node": "^10.72.0",
