@@ -89,30 +89,45 @@ needs a new build.
 ## 4. Source maps (do this before trusting a release stack trace)
 
 Without source maps, a stack trace from a release APK points at minified
-Hermes bytecode and is close to useless. Wiring this up needs an auth token
-and a build step, so it is not enabled by default:
+Hermes bytecode and is close to useless.
 
-1. Sentry → **Settings → Auth Tokens** → create a token with
+The wiring is already in place — `android/app/build.gradle` applies
+Sentry's `sentry.gradle.kts` **when `android/sentry.properties` exists**,
+and the APK workflow writes that file from secrets. Note this is done
+natively rather than through Sentry's Expo config plugin: this project
+commits its `android/` directory and CI runs Gradle directly with no
+`expo prebuild`, so a config plugin in `app.config.ts` would have looked
+correct and done nothing.
+
+All that is left is the token:
+
+1. Sentry → **Settings → Auth Tokens** → **Create New Token**, scopes
    `project:releases` and `org:read`.
-2. Put it in your CI secrets as `SENTRY_AUTH_TOKEN`. **Never** in `.env`,
-   never in an `EXPO_PUBLIC_` variable, never committed.
-3. Add the Expo config plugin to `mobile/app.config.ts`:
+2. Repo → **Settings → Secrets and variables → Actions** → new repository
+   secret `SENTRY_AUTH_TOKEN`.
+3. If your org or project slug differs from `v0x0` / `voxo-mobile`, add
+   repository **variables** `SENTRY_ORG` / `SENTRY_PROJECT` (variables, not
+   secrets — they are not sensitive). Otherwise the defaults apply.
+4. Run the Android APK build workflow.
 
-   ```ts
-   plugins: [
-     // …existing plugins…
-     ['@sentry/react-native/expo', { organization: 'v0x0', project: 'voxo-mobile' }],
-   ],
-   ```
+The build log says which path it took:
 
-4. Rebuild. The plugin uploads the bundle's source maps as part of the
-   Gradle build.
+- `sentry.properties written — source maps will be uploaded for …`
+- `[VOXO] sentry.properties found — JS source maps will be uploaded for this build.`
 
-Until step 4 is done, JS stack traces from release builds will be
-minified. Backend traces are unaffected — Node runs the compiled output
-with source maps already available.
+and without the secret:
 
----
+- `SENTRY_AUTH_TOKEN secret not set — building without source-map upload`
+- `[VOXO] No android/sentry.properties — building without source-map upload.`
+
+**`SENTRY_AUTH_TOKEN` is the one Sentry credential that is genuinely
+secret.** The DSN only permits writing events; this token grants read
+access to the whole org. It belongs in CI secrets only — never in `.env`,
+never in an `EXPO_PUBLIC_` variable, never committed. `android/.gitignore`
+refuses `sentry.properties` for the same reason.
+
+Backend traces need none of this — Node runs the compiled output with
+source maps already available.
 
 ## 5. Privacy — read this before raising any sampling rate
 

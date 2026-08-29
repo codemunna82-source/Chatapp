@@ -29,6 +29,15 @@ export function scrubText(input: string): string {
 }
 
 /**
+ * The three values the release name is built from. Read from expoConfig
+ * rather than hardcoded, so bumping the version in app.config.ts cannot
+ * leave this behind.
+ */
+const appVersion = Constants.expoConfig?.version ?? 'unknown';
+const androidPackage = Constants.expoConfig?.android?.package ?? 'com.voxo.app';
+const androidVersionCode = String(Constants.expoConfig?.android?.versionCode ?? '0');
+
+/**
  * Records which screen the user is on, so a crash report says where it
  * happened. Registered with the NavigationContainer in RootNavigator.
  */
@@ -48,11 +57,15 @@ export function initSentry(): void {
   Sentry.init({
     dsn: sentryDsn,
     environment: __DEV__ ? 'development' : 'production',
-    // Ties a crash to the exact APK. The version alone is not enough — two
-    // builds of 1.0.0 are indistinguishable without the build number, and
-    // "which release introduced this" is the question that needs it.
-    release: `voxo@${Constants.expoConfig?.version ?? 'unknown'}`,
-    dist: String(Constants.expoConfig?.android?.versionCode ?? '0'),
+    // Ties a crash to the exact APK, and — the part that is easy to get
+    // silently wrong — MUST match the release name sentry-cli uploads the
+    // source maps under, or the maps arrive in Sentry and are never
+    // applied to anything. sentry.gradle.kts builds it as
+    // `${applicationId}@${versionName}+${versionCode}` (see its
+    // defaultReleaseName), so this reproduces that exactly rather than
+    // inventing its own scheme.
+    release: `${androidPackage}@${appVersion}+${androidVersionCode}`,
+    dist: androidVersionCode,
     tracesSampleRate: sentryTracesSampleRate,
 
     // The most important line in this file. Turning it on attaches request

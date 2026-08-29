@@ -39,3 +39,8 @@ keystore.properties
 # from here; the CI build copies it in from the GOOGLE_SERVICES_JSON
 # repository secret.
 app/google-services.json
+
+# Sentry source-map upload config. Holds auth.token, which grants READ
+# access to the org — never commit it. CI writes this from secrets; see
+# SENTRY_SETUP.md.
+/sentry.properties

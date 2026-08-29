@@ -91,6 +91,37 @@ jobs:
             echo "EXPO_PUBLIC_SENTRY_DSN secret not set — building without crash reporting"
           fi
 
+      - name: Write sentry.properties (source-map upload)
+        # Optional, exactly like google-services.json below. Without these
+        # secrets the file is not written, android/app/build.gradle skips
+        # applying sentry.gradle.kts entirely, and the build is byte-for-byte
+        # what it was before Sentry existed.
+        #
+        # Written here rather than committed because auth.token grants READ
+        # access to the whole Sentry org — it is the one Sentry credential
+        # that is genuinely secret (the DSN only permits writing events).
+        # android/.gitignore also refuses it, so a local copy can never be
+        # committed by accident.
+        #
+        # Without this, a release APK's JS stack traces point at minified
+        # Hermes bytecode and are close to useless.
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG || 'v0x0' }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT || 'voxo-mobile' }}
+        run: |
+          if [ -n "$SENTRY_AUTH_TOKEN" ]; then
+            {
+              echo "defaults.url=https://sentry.io/"
+              echo "defaults.org=$SENTRY_ORG"
+              echo "defaults.project=$SENTRY_PROJECT"
+              echo "auth.token=$SENTRY_AUTH_TOKEN"
+            } > android/sentry.properties
+            echo "sentry.properties written — source maps will be uploaded for $SENTRY_ORG/$SENTRY_PROJECT"
+          else
+            echo "SENTRY_AUTH_TOKEN secret not set — building without source-map upload"
+          fi
+
       - name: Write google-services.json (Firebase / push notifications)
         # Optional. The file identifies one specific Firebase project, so it
         # is not committed — add its contents as the GOOGLE_SERVICES_JSON

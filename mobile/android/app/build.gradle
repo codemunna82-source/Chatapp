@@ -35,6 +35,40 @@ if (googleServicesTarget.exists()) {
     )
 }
 
+/**
+ * Sentry source-map upload, wired only when android/sentry.properties is
+ * actually present.
+ *
+ * Same reasoning as the google-services block above: this project commits
+ * its android/ directory and CI runs Gradle directly with no prebuild, so
+ * the wiring Sentry's Expo config plugin generates would never appear.
+ * Adding that plugin to app.config.ts would have looked correct and done
+ * nothing.
+ *
+ * Conditional because sentry.gradle.kts runs sentry-cli during the build,
+ * and sentry-cli needs an auth token, an org and a project. Without them
+ * the upload has nothing to authenticate with, so applying this
+ * unconditionally would make a Sentry account mandatory to build the app —
+ * which it is not.
+ *
+ * sentry.properties holds an auth token and is therefore gitignored and
+ * written by CI from secrets. See SENTRY_SETUP.md.
+ */
+def sentryProperties = file("$projectDir/../sentry.properties")
+if (sentryProperties.exists()) {
+    apply from: new File(
+        ["node", "--print", "require('path').dirname(require.resolve('@sentry/react-native/package.json'))"]
+            .execute(null, rootDir).text.trim(),
+        "sentry.gradle.kts"
+    )
+    logger.lifecycle("[VOXO] sentry.properties found — JS source maps will be uploaded for this build.")
+} else {
+    logger.lifecycle(
+        "[VOXO] No android/sentry.properties — building without source-map upload. " +
+        "Release stack traces will be minified. See SENTRY_SETUP.md."
+    )
+}
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
