@@ -152,7 +152,8 @@ is present, never any part of its value:
     "appSecretConfigured": true,
     "appSecretLength": 32,
     "mockMode": false,
-    "queueMode": "redis"
+    "queueMode": "redis",
+    "pushConfigured": true
   }
 }
 ```

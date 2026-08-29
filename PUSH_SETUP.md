@@ -84,7 +84,18 @@ dashboards introduce into the private key — that mangled newline is the
 single most common reason a correctly-configured FCM setup fails with an
 opaque crypto error.
 
-Save, wait for the redeploy, and check the logs. If the JSON is malformed
+Save and wait for the redeploy. The quickest confirmation is the
+deployment self-check, which reports whether the backend actually parsed
+the service account:
+
+```
+https://<your-service>.onrender.com/api/webhooks/meta/health
+```
+
+`"pushConfigured": true` means it can send. `false` means the variable is
+unset or malformed — and the deploy log says which.
+
+The log is still where the reason lives. If the JSON is malformed
 you will see it named explicitly rather than having to guess:
 
 ```
