@@ -39,6 +39,8 @@ export interface AuthUser {
   permissions: Permission[];
   displayName?: string;
   avatarUpdatedAt?: string;
+  /** The number an admin assigned this user, if any. */
+  whatsappPhoneNumberId?: string;
 }
 
 export interface AuthTokens {

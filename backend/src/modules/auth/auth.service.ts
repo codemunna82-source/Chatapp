@@ -37,6 +37,14 @@ export interface AuthTokens {
     permissions: Permission[];
     displayName?: string;
     avatarUpdatedAt?: string;
+    /**
+     * The number an admin assigned this user, if any. Sent with the
+     * session because the app decides from it whether to offer "Connect
+     * WhatsApp" at all — a member whose number was chosen for them must
+     * not be able to run Embedded Signup and replace that choice with
+     * their own.
+     */
+    whatsappPhoneNumberId?: string;
   };
 }
 
@@ -95,6 +103,11 @@ export async function getCurrentUser(userId: string, tenantId: string): Promise<
     permissions: (user.permissions ?? []) as Permission[],
     displayName: user.displayName ?? undefined,
     avatarUpdatedAt: user.avatarUpdatedAt ? user.avatarUpdatedAt.toISOString() : undefined,
+    // Must match the login payload exactly. AuthUser is derived from
+    // AuthTokens['user'], so an omission here is not a type error — it
+    // just means the field silently disappears from the store the first
+    // time a restored session calls /auth/me.
+    whatsappPhoneNumberId: user.whatsappPhoneNumberId ? String(user.whatsappPhoneNumberId) : undefined,
   };
 }
 
@@ -152,6 +165,7 @@ export async function login(email: string, password: string, meta: RequestMeta):
       permissions: (user.permissions ?? []) as Permission[],
       displayName: user.displayName ?? undefined,
       avatarUpdatedAt: user.avatarUpdatedAt ? user.avatarUpdatedAt.toISOString() : undefined,
+      whatsappPhoneNumberId: user.whatsappPhoneNumberId ? String(user.whatsappPhoneNumberId) : undefined,
     },
   };
 }
@@ -224,6 +238,7 @@ export async function refresh(refreshTokenRaw: string, meta: RequestMeta): Promi
       permissions: (user.permissions ?? []) as Permission[],
       displayName: user.displayName ?? undefined,
       avatarUpdatedAt: user.avatarUpdatedAt ? user.avatarUpdatedAt.toISOString() : undefined,
+      whatsappPhoneNumberId: user.whatsappPhoneNumberId ? String(user.whatsappPhoneNumberId) : undefined,
     },
   };
 }

@@ -385,14 +385,21 @@ export function SettingsScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('Team')}
           />
         ) : null}
-        {/* Every user, not just admins: connecting your own WhatsApp is
-            your own action. The admin-only screen below manages the
-            workspace's shared numbers, which is a different thing. */}
-        <SettingsRow
-          icon="logo-whatsapp"
-          label="Connect WhatsApp"
-          onPress={() => navigation.navigate('ConnectWhatsApp')}
-        />
+        {/* Hidden from a member whose number was chosen for them.
+            Running Embedded Signup reassigns the user to whatever number
+            they connect, so leaving this visible would let an employee
+            replace the admin's assignment with their own personal number
+            — silently, and with no way for the admin to notice.
+            Admins always see it (they are the ones who connect), and so
+            does a member with no number, for whom self-connecting is the
+            only way to get working at all. */}
+        {isMasterAdmin || !user?.whatsappPhoneNumberId ? (
+          <SettingsRow
+            icon="logo-whatsapp"
+            label="Connect WhatsApp"
+            onPress={() => navigation.navigate('ConnectWhatsApp')}
+          />
+        ) : null}
         {isMasterAdmin ? (
           <SettingsRow
             icon="call-outline"
