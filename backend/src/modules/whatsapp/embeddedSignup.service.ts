@@ -22,6 +22,22 @@ export interface ConnectionStatus {
   phoneNumberId?: string;
   wabaId?: string;
   connectedAt?: Date;
+  /** Absent means the token does not expire, not that it expires now. */
+  tokenExpiresAt?: Date;
+  /** Null when there is no expiry; negative once it has passed. */
+  daysUntilExpiry?: number | null;
+  /**
+   * The connection needs the user to run Embedded Signup again — either the
+   * token expired, or a send already came back from Meta as unauthorised.
+   */
+  needsReconnect?: boolean;
+}
+
+const RECONNECT_WARNING_DAYS = 7;
+
+/** Whole days from now until `at`, negative once it is past. */
+function daysUntil(at: Date): number {
+  return Math.floor((at.getTime() - Date.now()) / 86_400_000);
 }
 
 /**
@@ -32,18 +48,51 @@ export interface ConnectionStatus {
  * disconnect.
  */
 export async function getConnectionStatus(tenantId: string, userId: string): Promise<ConnectionStatus> {
-  const account = await WhatsAppAccount.findOne({ tenantId, ownerUserId: userId, status: 'CONNECTED' });
+  // EXPIRED is included, unlike DISCONNECTED: an expired connection still
+  // has a number worth showing, and the user needs to be told to reconnect
+  // rather than shown a blank "not connected" that hides why sends broke.
+  const account = await WhatsAppAccount.findOne({
+    tenantId,
+    ownerUserId: userId,
+    status: { $in: ['CONNECTED', 'EXPIRED'] },
+  });
   if (!account) return { connected: false };
 
   const number = await WhatsAppPhoneNumber.findOne({ tenantId, ownerUserId: userId }).sort({ createdAt: -1 });
+  const expiresAt = account.tokenExpiresAt ?? undefined;
+  const remaining = expiresAt ? daysUntil(expiresAt) : null;
+
   return {
-    connected: true,
+    connected: account.status === 'CONNECTED',
     wabaId: account.wabaId,
     connectedAt: account.connectedAt ?? undefined,
     phoneNumberId: number?.phoneNumberId,
     displayPhoneNumber: number?.displayPhoneNumber,
     verifiedName: account.businessName ?? undefined,
+    tokenExpiresAt: expiresAt,
+    daysUntilExpiry: remaining,
+    // A send that already failed as unauthorised is the strongest signal
+    // there is — stronger than the clock, since a token can be revoked
+    // long before its expiry date.
+    needsReconnect: account.status === 'EXPIRED' || (remaining !== null && remaining <= RECONNECT_WARNING_DAYS),
   };
+}
+
+/**
+ * Marks a connection as needing reconnection after Meta rejected its token.
+ *
+ * Called from the send path on a META_AUTH_ERROR. Without this the only
+ * symptom of an expired token is every message failing with a generic
+ * error, and nothing anywhere telling the user that reconnecting fixes it.
+ */
+export async function markConnectionExpired(whatsappAccountId: string): Promise<void> {
+  const result = await WhatsAppAccount.updateOne(
+    { _id: whatsappAccountId, status: 'CONNECTED' },
+    { $set: { status: 'EXPIRED' } },
+  );
+  if (result.modifiedCount > 0) {
+    logger.warn({ whatsappAccountId }, 'WhatsApp token rejected by Meta — connection marked EXPIRED');
+  }
 }
 
 /**
@@ -80,9 +129,9 @@ export async function connectWhatsAppForUser(
     );
   }
 
-  let accessToken: string;
+  let exchanged;
   try {
-    accessToken = await exchangeCodeForToken(code);
+    exchanged = await exchangeCodeForToken(code);
   } catch (err) {
     logger.warn({ err, userId }, 'Embedded Signup code exchange failed');
     throw ApiError.badRequest(
@@ -91,6 +140,7 @@ export async function connectWhatsAppForUser(
     );
   }
 
+  const accessToken = exchanged.accessToken;
   const wabaId = await findWabaIdForToken(accessToken);
   if (!wabaId) {
     throw ApiError.badRequest(
@@ -154,6 +204,12 @@ export async function connectWhatsAppForUser(
         verifyToken: env.META_VERIFY_TOKEN || 'unset',
         status: 'CONNECTED',
         connectedAt: new Date(),
+        // Only when Meta actually reported one. The "60 day expiration"
+        // Embedded Signup templates do; a permanent System User token does
+        // not, and writing a date for it would nag the user forever.
+        tokenExpiresAt: exchanged.expiresInSeconds
+          ? new Date(Date.now() + exchanged.expiresInSeconds * 1000)
+          : null,
       },
     },
     { new: true, upsert: true },

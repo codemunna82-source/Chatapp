@@ -15,6 +15,18 @@ interface TokenExchangeResponse {
   expires_in?: number;
 }
 
+export interface ExchangedToken {
+  accessToken: string;
+  /**
+   * Seconds until the token expires, when Meta reports one.
+   *
+   * Absent means Meta returned no expiry — which for the templates that
+   * issue a permanent System User token is correct, and must not be read
+   * as "expires now". The caller stores a date only when this is present.
+   */
+  expiresInSeconds?: number;
+}
+
 /**
  * Exchanges the short-lived code Embedded Signup returns for a business
  * access token.
@@ -25,7 +37,7 @@ interface TokenExchangeResponse {
  * sending a redirect_uri Meta never issued the code against makes the
  * exchange fail with a mismatch error.
  */
-export async function exchangeCodeForToken(code: string): Promise<string> {
+export async function exchangeCodeForToken(code: string): Promise<ExchangedToken> {
   const config: AxiosRequestConfig = {
     params: {
       client_id: env.META_APP_ID,
@@ -34,7 +46,13 @@ export async function exchangeCodeForToken(code: string): Promise<string> {
     },
   };
   const res = await metaRequest<TokenExchangeResponse>((client) => client.get('/oauth/access_token', config));
-  return res.access_token;
+  return {
+    accessToken: res.access_token,
+    // Meta sends expires_in only for tokens that actually expire. The
+    // "60 day expiration" Embedded Signup templates do; permanent System
+    // User tokens do not.
+    expiresInSeconds: typeof res.expires_in === 'number' && res.expires_in > 0 ? res.expires_in : undefined,
+  };
 }
 
 interface DebugTokenResponse {

@@ -104,7 +104,23 @@ export function ConnectWhatsAppScreen() {
 
   return (
     <ScrollView contentContainerStyle={{ padding: spacing.md }}>
-      {data?.connected ? (
+      {/* Shown above everything: an expiring or rejected token is the
+          reason sends are about to stop, or already have, and it is the
+          one thing on this screen the user must act on. */}
+      {data?.needsReconnect ? (
+        <InlineBanner
+          tone={data.connected ? 'warning' : 'danger'}
+          message={
+            !data.connected
+              ? 'Your WhatsApp connection has expired. Messages will not send until you reconnect.'
+              : typeof data.daysUntilExpiry === 'number' && data.daysUntilExpiry >= 0
+                ? `This connection expires in ${data.daysUntilExpiry} day${data.daysUntilExpiry === 1 ? '' : 's'}. Reconnect to keep sending.`
+                : 'This connection has expired. Reconnect to keep sending.'
+          }
+        />
+      ) : null}
+
+      {data?.connected || data?.needsReconnect ? (
         <View
           style={[
             styles.card,
@@ -112,9 +128,18 @@ export function ConnectWhatsAppScreen() {
           ]}
         >
           <View style={styles.rowCenter}>
-            <Ionicons name="checkmark-circle" size={26} color={colors.success} />
-            <Text style={[typography.bodyMedium, { color: colors.success, marginLeft: spacing.sm }]}>
-              WhatsApp Connected
+            <Ionicons
+              name={data.connected ? 'checkmark-circle' : 'alert-circle'}
+              size={26}
+              color={data.connected ? colors.success : colors.danger}
+            />
+            <Text
+              style={[
+                typography.bodyMedium,
+                { color: data.connected ? colors.success : colors.danger, marginLeft: spacing.sm },
+              ]}
+            >
+              {data.connected ? 'WhatsApp Connected' : 'Reconnection needed'}
             </Text>
           </View>
           <Text style={[typography.heading, { color: colors.textPrimary, marginTop: spacing.sm }]}>
@@ -126,6 +151,11 @@ export function ConnectWhatsAppScreen() {
           {data.connectedAt ? (
             <Text style={[typography.caption, { color: colors.textTertiary, marginTop: spacing.xs }]}>
               Connected {new Date(data.connectedAt).toLocaleDateString()}
+            </Text>
+          ) : null}
+          {data.tokenExpiresAt ? (
+            <Text style={[typography.caption, { color: colors.textTertiary }]}>
+              Access expires {new Date(data.tokenExpiresAt).toLocaleDateString()}
             </Text>
           ) : null}
         </View>
@@ -152,11 +182,12 @@ export function ConnectWhatsAppScreen() {
         </View>
       ) : null}
 
-      {data?.connected ? (
+      {data?.connected || data?.needsReconnect ? (
         <>
           <Button
             label="Reconnect"
-            variant="secondary"
+            // Primary when it is the action the screen is asking for.
+            variant={data?.needsReconnect ? 'primary' : 'secondary'}
             onPress={startSignup}
             disabled={phase === 'exchanging'}
           />

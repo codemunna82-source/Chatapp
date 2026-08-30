@@ -64,10 +64,21 @@ export function resolveAccessToken(accessTokenRef: string | undefined, accessTok
  * WhatsApp connection, from our own tenant-scoped records — never from
  * anything the Android client sends.
  */
+/**
+ * MetaCredentials plus the account they came from.
+ *
+ * The extra field stays out of MetaCredentials itself — that is the Meta
+ * gateway's own type and has no business knowing about our documents. It
+ * rides along here so the send path can mark this exact connection EXPIRED
+ * when Meta rejects the token, instead of re-deriving it from an error
+ * that carries no account context.
+ */
+export type ResolvedMetaCredentials = MetaCredentials & { whatsappAccountId: string };
+
 export async function resolveMetaCredentialsForPhoneNumber(
   tenantId: string,
   whatsappPhoneNumberId: string,
-): Promise<MetaCredentials> {
+): Promise<ResolvedMetaCredentials> {
   if (!Types.ObjectId.isValid(whatsappPhoneNumberId)) {
     throw ApiError.notFound('WHATSAPP_PHONE_NUMBER_NOT_FOUND', 'WhatsApp phone number not found');
   }
@@ -89,6 +100,10 @@ export async function resolveMetaCredentialsForPhoneNumber(
   return {
     accessToken: resolveAccessToken(account.accessTokenRef, account.accessTokenEnc),
     phoneNumberId: phoneNumber.phoneNumberId,
+    // Returned so the send path can mark this exact connection EXPIRED when
+    // Meta rejects the token, rather than having to look it up again from
+    // an error that carries no account context.
+    whatsappAccountId: String(account._id),
   };
 }
 

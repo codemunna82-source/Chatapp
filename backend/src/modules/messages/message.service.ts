@@ -10,8 +10,9 @@ import {
   setMessageStarred,
 } from './message.repository';
 import { findMediaByIdAndTenant } from '../media/media.repository';
-import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
-import { getMetaGateway, toMetaApiError, type SendableMediaType } from '../../integrations/meta';
+import { resolveMetaCredentialsForPhoneNumber, type ResolvedMetaCredentials } from '../whatsapp/whatsapp.service';
+import { markConnectionExpired } from '../whatsapp/embeddedSignup.service';
+import { getMetaGateway, toMetaApiError, MetaApiError, type SendableMediaType } from '../../integrations/meta';
 import { mockMetaGateway } from '../../integrations/meta/mock/mockMetaGateway';
 import { getRealtimeEmitter } from '../../realtime/events';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
@@ -153,11 +154,16 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     status: 'QUEUED',
   });
 
+  // Declared outside the try so the catch can name the connection that
+  // failed; it is still undefined if resolution itself threw.
+  let credentialsUsed: ResolvedMetaCredentials | undefined;
+
   try {
     const credentials = await resolveMetaCredentialsForPhoneNumber(
       input.tenantId,
       String(conversation.whatsappPhoneNumberId),
     );
+    credentialsUsed = credentials;
     // Demo sends never leave this server, whatever META_MOCK_MODE is set to.
     const gateway = isDemoContact ? mockMetaGateway : getMetaGateway();
 
@@ -189,6 +195,19 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
   } catch (err) {
     const serialized = err instanceof Error ? { name: err.name, message: err.message } : err;
     await markMessageFailed(String(localMessage._id), input.tenantId, serialized);
+
+    // Meta rejected the credentials — an expired or revoked token. Recorded
+    // on the connection so the app can say "reconnect your WhatsApp"
+    // instead of showing a failed message with no explanation, on this
+    // send and every one after it.
+    if (err instanceof MetaApiError && err.code === 'META_AUTH_ERROR' && credentialsUsed) {
+      await markConnectionExpired(credentialsUsed.whatsappAccountId);
+      throw ApiError.badRequest(
+        'WHATSAPP_RECONNECT_REQUIRED',
+        'Your WhatsApp connection has expired. Open Settings → Connect WhatsApp and connect again.',
+      );
+    }
+
     if (err instanceof ApiError) throw err;
     throw toMetaApiError(err);
   }

@@ -1,6 +1,9 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mongoose';
 
-export const WABA_STATUSES = ['PENDING', 'CONNECTED', 'DISCONNECTED', 'ERROR'] as const;
+// EXPIRED is distinct from ERROR on purpose: it has one specific, known
+// remedy the user can carry out themselves — reconnect — and the UI says
+// so, instead of showing a generic failure they can only report.
+export const WABA_STATUSES = ['PENDING', 'CONNECTED', 'DISCONNECTED', 'ERROR', 'EXPIRED'] as const;
 export type WabaStatus = (typeof WABA_STATUSES)[number];
 
 /**
@@ -34,6 +37,14 @@ const whatsappAccountSchema = new Schema(
     verifyToken: { type: String, required: true, select: false },
     status: { type: String, enum: WABA_STATUSES, default: 'PENDING', required: true },
     connectedAt: { type: Date },
+    /**
+     * When the stored token stops working, if Meta gave an expiry.
+     *
+     * Absent means one of two very different things — a permanent token, or
+     * a connection made before this field existed — and neither may be
+     * treated as expired. Only a date in the past is.
+     */
+    tokenExpiresAt: { type: Date },
   },
   { timestamps: true },
 );

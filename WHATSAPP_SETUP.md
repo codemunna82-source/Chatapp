@@ -112,7 +112,7 @@ receives a reply — the worst kind of failure to debug.
 | --- | --- |
 | `META_CONFIG_ID` | Meta dashboard → WhatsApp → Configuration → Embedded Signup |
 | `META_APP_ID`, `META_APP_SECRET` | App Settings → Basic |
-| `META_REGISTER_PIN` | Any six digits **you** choose. Must stay the same across deploys — it is the number's two-step verification PIN, and changing it breaks re-registration. |
+| `META_REGISTER_PIN` | Any six digits **you** choose — digits only, no spaces or quotes. Must stay the same across deploys: it is the number's two-step verification PIN, and changing it breaks re-registration. A malformed value is warned about in the log and ignored, not fatal. |
 | `ENCRYPTION_KEY` | `openssl rand -hex 32`. Rotating it makes stored tokens unreadable and forces every user to reconnect. |
 
 ### The wabaId index
@@ -132,6 +132,28 @@ Advanced Access, which needs Business Verification. Until Meta approves
 that, **only people who hold a role on your Meta app can complete the
 flow** — enough to test end to end, not enough to onboard a client.
 Verification typically takes weeks.
+
+### Token expiry
+
+The `WhatsApp Embedded Signup Configuration With 60 Expiration Token`
+template issues a token that dies after 60 days. Left unhandled that is a
+silent failure: sends simply start returning Meta error 190 two months
+after everything looked fine, with nothing anywhere saying to reconnect.
+
+So the expiry is stored when Meta reports one, and:
+
+- `GET /api/whatsapp/status` returns `tokenExpiresAt`, `daysUntilExpiry`
+  and `needsReconnect`;
+- Settings → Connect WhatsApp warns from **7 days out**, and shows
+  *Reconnection needed* once it lapses;
+- a send that comes back `META_AUTH_ERROR` marks the connection `EXPIRED`
+  immediately and returns `WHATSAPP_RECONNECT_REQUIRED` — a token can be
+  revoked long before its expiry date, so a rejected send is a stronger
+  signal than the clock.
+
+A connection with **no** `tokenExpiresAt` is one Meta gave no expiry for —
+a permanent System User token, or a connection made before this existed.
+Neither is treated as expired.
 
 ### Which token sends a message
 

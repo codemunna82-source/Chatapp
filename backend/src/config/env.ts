@@ -52,8 +52,20 @@ const envSchema = z.object({
     .string()
     .optional()
     .default('')
-    .transform((v) => v.trim())
-    .refine((v) => v === '' || /^\d{6}$/.test(v), 'META_REGISTER_PIN must be exactly 6 digits'),
+    .transform((v) => {
+      const pin = v.trim();
+      if (pin === '' || /^\d{6}$/.test(pin)) return pin;
+      // Warn and ignore rather than refuse to boot. This value is optional
+      // — without it the app simply skips the Cloud API register step — so
+      // taking the entire API down over a mistyped one is out of all
+      // proportion to what it does. Learned the hard way: a six-character
+      // typo here stopped every deploy dead.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `META_REGISTER_PIN is set but is not exactly 6 digits — ignoring it. WhatsApp numbers will not be auto-registered until it is corrected.`,
+      );
+      return '';
+    }),
   META_MOCK_MODE: z
     .string()
     .default('true')

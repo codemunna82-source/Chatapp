@@ -9,6 +9,12 @@ export interface WhatsAppConnection {
   phoneNumberId?: string;
   wabaId?: string;
   connectedAt?: string;
+  /** Absent means the token does not expire — not that it expires now. */
+  tokenExpiresAt?: string;
+  /** Null when there is no expiry; negative once it has passed. */
+  daysUntilExpiry?: number | null;
+  /** The user must run Embedded Signup again — expired, or already rejected by Meta. */
+  needsReconnect?: boolean;
 }
 
 export async function getWhatsAppConnection(): Promise<WhatsAppConnection> {
