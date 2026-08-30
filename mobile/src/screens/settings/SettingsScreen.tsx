@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { File, Paths } from 'expo-file-system';
@@ -302,7 +302,17 @@ export function SettingsScreen({ navigation }: Props) {
   const unreadCount = flattenNotifications(unreadNotifications.data).length;
 
   return (
-    <Screen>
+    // Scrollable, because this screen is taller than a phone and everything
+    // below the fold was simply unreachable — User management, Connect
+    // WhatsApp, Workspace numbers and Sign out all sit at the bottom, so
+    // the whole admin surface and the way out of the app were invisible on
+    // any device shorter than the content. `Screen` is a plain flex View;
+    // it does not scroll on its own.
+    <Screen padded={false}>
+      <ScrollView
+        contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xl }}
+        showsVerticalScrollIndicator={false}
+      >
       {/* No "Settings" heading here: the stack navigator already sets one
           as the screen's header title (SettingsStackNavigator), so having
           both printed the word twice, one above the other. */}
@@ -393,6 +403,7 @@ export function SettingsScreen({ navigation }: Props) {
       </View>
 
       <Button label="Sign out" variant="danger" onPress={() => logout.mutate()} loading={logout.isPending} testID="settings-logout" />
+      </ScrollView>
     </Screen>
   );
 }
