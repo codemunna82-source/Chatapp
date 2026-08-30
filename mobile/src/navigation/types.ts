@@ -19,6 +19,7 @@ export type SettingsStackParamList = {
   Wallet: undefined;
   Team: undefined;
   WhatsAppNumbers: undefined;
+  ConnectWhatsApp: undefined;
   ManageContacts: undefined;
 };
 

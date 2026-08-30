@@ -6,6 +6,7 @@ import { NotificationsScreen } from '../screens/settings/NotificationsScreen';
 import { WalletScreen } from '../screens/settings/WalletScreen';
 import { TeamScreen } from '../screens/team/TeamScreen';
 import { WhatsAppNumbersScreen } from '../screens/settings/WhatsAppNumbersScreen';
+import { ConnectWhatsAppScreen } from '../screens/settings/ConnectWhatsAppScreen';
 import { ManageContactsScreen } from '../screens/contacts/ManageContactsScreen';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -25,6 +26,7 @@ export function SettingsStackNavigator() {
       <Stack.Screen name="Wallet" component={WalletScreen} options={{ title: 'Wallet' }} />
       <Stack.Screen name="Team" component={TeamScreen} options={{ title: 'Team' }} />
       <Stack.Screen name="WhatsAppNumbers" component={WhatsAppNumbersScreen} options={{ title: 'WhatsApp number' }} />
+      <Stack.Screen name="ConnectWhatsApp" component={ConnectWhatsAppScreen} options={{ title: 'Connect WhatsApp' }} />
       <Stack.Screen name="ManageContacts" component={ManageContactsScreen} options={{ title: 'Contacts' }} />
     </Stack.Navigator>
   );

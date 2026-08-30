@@ -62,7 +62,84 @@ The display number is read back from Meta rather than typed.
 
 ---
 
-## 3. Create a user and assign them a number
+## 3a. Let each user connect their own number (Embedded Signup)
+
+**Settings → Connect WhatsApp**, available to every user, not just admins.
+Tapping *Connect WhatsApp* opens Meta's own onboarding: Facebook login,
+pick or create a WhatsApp Business Account, add and verify a number by OTP.
+When it finishes the screen shows:
+
+```
+WhatsApp Connected ✓
++91 XXXXX XXXXX
+```
+
+The user never types an access token, phone number id, WABA id or app
+secret. They never see one either.
+
+### How it works, and why it is shaped this way
+
+Embedded Signup is the Facebook **JavaScript** SDK — `FB.login` with a
+`config_id`. There is no native Android equivalent, so a React Native app
+cannot launch it directly. The backend serves the page at
+`GET /api/whatsapp/signup` and the app loads it in a WebView.
+
+That page holds only the app id and config id, both public. It never sees
+a VOXO session token and never calls the API. It posts the authorization
+code to the app, and the app calls `POST /api/whatsapp/connect` with its
+own credentials — so the user's session never travels in a URL that could
+end up in a log.
+
+The server then, in this order:
+
+1. exchanges the code for a token using `META_APP_SECRET`;
+2. reads the granted WABA id **out of the token** via `debug_token`, not
+   from the request — a crafted call must not be able to attach someone
+   else's business;
+3. lists the WABA's phone numbers from Meta;
+4. registers the number for Cloud API using `META_REGISTER_PIN`;
+5. **subscribes the app to the WABA's webhooks**;
+6. stores the token encrypted (AES-256-GCM) and marks the account
+   connected.
+
+Step 5 happens before step 6 deliberately. An account stored as connected
+but never subscribed can send, looks perfectly healthy, and silently never
+receives a reply — the worst kind of failure to debug.
+
+### What this needs from Meta
+
+| | |
+| --- | --- |
+| `META_CONFIG_ID` | Meta dashboard → WhatsApp → Configuration → Embedded Signup |
+| `META_APP_ID`, `META_APP_SECRET` | App Settings → Basic |
+| `META_REGISTER_PIN` | Any six digits **you** choose. Must stay the same across deploys — it is the number's two-step verification PIN, and changing it breaks re-registration. |
+| `ENCRYPTION_KEY` | `openssl rand -hex 32`. Rotating it makes stored tokens unreadable and forces every user to reconnect. |
+
+**Advanced Access is required for real customers.** Embedded Signup needs
+`whatsapp_business_management` and `whatsapp_business_messaging` at
+Advanced Access, which needs Business Verification. Until Meta approves
+that, **only people who hold a role on your Meta app can complete the
+flow** — enough to test end to end, not enough to onboard a client.
+Verification typically takes weeks.
+
+### Which token sends a message
+
+Three sources, in order:
+
+1. the connection's own encrypted token, if the user ran Embedded Signup;
+2. a literal token stored on the account;
+3. `META_ACCESS_TOKEN` from the environment.
+
+So a user who connected their own WhatsApp sends with their own
+credentials, and the existing single-number deployment keeps working
+untouched. If a stored token cannot be decrypted — almost always a rotated
+`ENCRYPTION_KEY` — the send **fails** rather than falling through to the
+platform token, because falling through would send that customer's message
+from the wrong number.
+
+---
+
+## 3b. Or: create a user and assign them a number
 
 **Settings → User management → Invite**. Set email, password, display name
 and expiry as usual, then pick the number under **Sends from**. A number

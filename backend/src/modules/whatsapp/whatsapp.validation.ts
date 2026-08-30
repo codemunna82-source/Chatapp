@@ -7,3 +7,10 @@ export const registerPhoneNumberSchema = z.object({
   phoneNumberId: z.string().trim().regex(/^\d{5,25}$/, 'Must be the numeric phone number id from Meta'),
   wabaId: z.string().trim().regex(/^\d{5,25}$/, 'Must be the numeric WhatsApp Business Account id').optional(),
 });
+
+export const connectWhatsAppSchema = z.object({
+  // The single-use authorization code from Embedded Signup. Length-bounded
+  // rather than pattern-matched: Meta does not document its format, and a
+  // regex guessing at it would reject valid codes the day they change it.
+  code: z.string().trim().min(10).max(2048),
+});

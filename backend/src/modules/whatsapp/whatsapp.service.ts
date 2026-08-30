@@ -4,6 +4,8 @@ import { WhatsAppPhoneNumber, type WhatsAppPhoneNumberDoc } from './whatsappPhon
 import { findPhoneNumbersByTenant } from './whatsapp.repository';
 import { ApiError } from '../../lib/ApiError';
 import { env } from '../../config/env';
+import { decryptSecret, isEncryptedEnvelope } from '../../lib/crypto';
+import { logger } from '../../lib/logger';
 import { getMetaGateway } from '../../integrations/meta';
 import type { MetaCredentials } from '../../integrations/meta';
 
@@ -20,13 +22,33 @@ import type { MetaCredentials } from '../../integrations/meta';
  * This is the reason setting META_ACCESS_TOKEN on the server is enough to
  * start sending for real, without hand-editing the WhatsAppAccount document.
  *
- * MVP note: refs are still the credential value itself rather than pointers
- * into a secret store. Before production, swap this for a proper
- * secrets-manager fetch keyed by the ref — no caller needs to change.
+ * `accessTokenEnc`, when present, wins over everything: it is the encrypted
+ * token Embedded Signup obtained for this specific account, so a user who
+ * connected their own WhatsApp sends with their own credentials rather than
+ * the platform's.
+ *
+ * The three-way order — own encrypted token, then a literal stored token,
+ * then the environment — is what lets the existing single-number
+ * deployment keep working unchanged while connected accounts use their own.
  */
-export function resolveAccessToken(accessTokenRef: string | undefined): string {
+export function resolveAccessToken(accessTokenRef: string | undefined, accessTokenEnc?: string | null): string {
+  if (accessTokenEnc && isEncryptedEnvelope(accessTokenEnc)) {
+    try {
+      return decryptSecret(accessTokenEnc);
+    } catch (err) {
+      // Almost always a rotated ENCRYPTION_KEY. Falling through to the
+      // platform token would silently send this customer's messages from
+      // the wrong number, so this fails instead and says what to do.
+      logger.error({ err }, 'Stored WhatsApp token could not be decrypted');
+      throw ApiError.badRequest(
+        'WHATSAPP_TOKEN_UNREADABLE',
+        'This WhatsApp connection could not be read. Please disconnect and connect WhatsApp again.',
+      );
+    }
+  }
+
   const ref = accessTokenRef?.trim() ?? '';
-  const isPlaceholder = ref.length === 0 || ref.startsWith('mock:') || ref.startsWith('env:');
+  const isPlaceholder = ref.length === 0 || ref.startsWith('mock:') || ref.startsWith('env:') || ref.startsWith('enc:');
   const token = isPlaceholder ? env.META_ACCESS_TOKEN : ref;
   if (token.length === 0) {
     throw ApiError.badRequest(
@@ -55,7 +77,7 @@ export async function resolveMetaCredentialsForPhoneNumber(
   }
 
   const account = await WhatsAppAccount.findOne({ _id: phoneNumber.whatsappAccountId, tenantId }).select(
-    '+accessTokenRef',
+    '+accessTokenRef +accessTokenEnc',
   );
   if (!account) {
     throw ApiError.notFound('WHATSAPP_ACCOUNT_NOT_FOUND', 'WhatsApp account not found');
@@ -64,7 +86,10 @@ export async function resolveMetaCredentialsForPhoneNumber(
     throw ApiError.badRequest('WHATSAPP_ACCOUNT_NOT_CONNECTED', 'This WhatsApp account is not connected');
   }
 
-  return { accessToken: resolveAccessToken(account.accessTokenRef), phoneNumberId: phoneNumber.phoneNumberId };
+  return {
+    accessToken: resolveAccessToken(account.accessTokenRef, account.accessTokenEnc),
+    phoneNumberId: phoneNumber.phoneNumberId,
+  };
 }
 
 export async function resolveWabaCredentialsForTenant(
@@ -74,11 +99,11 @@ export async function resolveWabaCredentialsForTenant(
   if (!Types.ObjectId.isValid(whatsappAccountId)) {
     throw ApiError.notFound('WHATSAPP_ACCOUNT_NOT_FOUND', 'WhatsApp account not found');
   }
-  const account = await WhatsAppAccount.findOne({ _id: whatsappAccountId, tenantId }).select('+accessTokenRef');
+  const account = await WhatsAppAccount.findOne({ _id: whatsappAccountId, tenantId }).select('+accessTokenRef +accessTokenEnc');
   if (!account) {
     throw ApiError.notFound('WHATSAPP_ACCOUNT_NOT_FOUND', 'WhatsApp account not found');
   }
-  return { accessToken: resolveAccessToken(account.accessTokenRef), wabaId: account.wabaId };
+  return { accessToken: resolveAccessToken(account.accessTokenRef, account.accessTokenEnc), wabaId: account.wabaId };
 }
 
 export interface PublicWhatsAppNumber {

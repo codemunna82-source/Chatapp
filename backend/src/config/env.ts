@@ -35,6 +35,25 @@ const envSchema = z.object({
   META_BUSINESS_ACCOUNT_ID: z.string().optional().default('').transform((v) => v.trim()),
   META_PHONE_NUMBER_ID: z.string().optional().default('').transform((v) => v.trim()),
   META_API_VERSION: z.string().default('v21.0'),
+  /**
+   * The Embedded Signup configuration id, created in the Meta app dashboard
+   * under WhatsApp → Configuration. Not derivable from anything else —
+   * without it FB.login opens a plain Facebook login instead of the
+   * WhatsApp onboarding flow.
+   */
+  META_CONFIG_ID: z.string().optional().default('').transform((v) => v.trim()),
+  /**
+   * Six-digit PIN used to register an onboarded number for Cloud API
+   * (POST /{phone-number-id}/register). Meta requires one, and it is also
+   * what two-step verification falls back to — so it must be stable across
+   * deploys rather than generated per call, or a re-register fails.
+   */
+  META_REGISTER_PIN: z
+    .string()
+    .optional()
+    .default('')
+    .transform((v) => v.trim())
+    .refine((v) => v === '' || /^\d{6}$/.test(v), 'META_REGISTER_PIN must be exactly 6 digits'),
   META_MOCK_MODE: z
     .string()
     .default('true')
@@ -74,6 +93,19 @@ const envSchema = z.object({
    * RENDER_GIT_COMMIT; set SENTRY_RELEASE explicitly anywhere else.
    */
   SENTRY_RELEASE: z.string().optional().default('').transform((v) => v.trim()),
+
+  /**
+   * 32 bytes of hex (64 characters) — `openssl rand -hex 32`. Encrypts the
+   * Meta access tokens that Embedded Signup returns, so a database dump is
+   * not a set of live WhatsApp credentials for every connected customer.
+   *
+   * Optional here rather than required so an existing deployment does not
+   * fail to boot the moment this ships; encryptSecret() throws a clear error
+   * if it is ever needed while unset. Set it before onboarding any real
+   * account — and note that rotating it makes existing tokens
+   * undecryptable, which means every connected user must reconnect.
+   */
+  ENCRYPTION_KEY: z.string().optional().default('').transform((v) => v.trim()),
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),

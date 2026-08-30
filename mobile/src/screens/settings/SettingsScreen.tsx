@@ -375,10 +375,18 @@ export function SettingsScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('Team')}
           />
         ) : null}
+        {/* Every user, not just admins: connecting your own WhatsApp is
+            your own action. The admin-only screen below manages the
+            workspace's shared numbers, which is a different thing. */}
+        <SettingsRow
+          icon="logo-whatsapp"
+          label="Connect WhatsApp"
+          onPress={() => navigation.navigate('ConnectWhatsApp')}
+        />
         {isMasterAdmin ? (
           <SettingsRow
-            icon="logo-whatsapp"
-            label="WhatsApp number"
+            icon="call-outline"
+            label="Workspace numbers"
             onPress={() => navigation.navigate('WhatsAppNumbers')}
           />
         ) : null}
