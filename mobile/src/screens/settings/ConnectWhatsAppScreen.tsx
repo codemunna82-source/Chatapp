@@ -228,10 +228,14 @@ export function ConnectWhatsAppScreen() {
           <WebView
             source={{ uri: SIGNUP_URL }}
             onMessage={handleMessage}
-            // Facebook's login opens a popup; without these the flow dead-ends
-            // on a blank screen with no error.
             javaScriptEnabled
             domStorageEnabled
+            // Kept false deliberately, and the server side is built around
+            // it: the signup flow navigates this same view to Facebook and
+            // back rather than opening a popup, because a WebView has no
+            // popups — `window.open` returns null and anything waiting on
+            // its handle stalls silently, which is exactly how the first
+            // version of this failed.
             setSupportMultipleWindows={false}
             onError={() => {
               setWebViewOpen(false);

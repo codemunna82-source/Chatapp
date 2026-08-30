@@ -110,6 +110,24 @@ Step 5 happens before step 6 deliberately. An account stored as connected
 but never subscribed can send, looks perfectly healthy, and silently never
 receives a reply — the worst kind of failure to debug.
 
+### One redirect URI to allow-list
+
+Onboarding sends the whole in-app browser to Facebook and back, so Meta has
+to be told where “back” is. In the Meta app dashboard, under **Facebook
+Login for Business → Settings → Valid OAuth Redirect URIs**, add exactly:
+
+```
+https://<your-host>/api/whatsapp/signup/callback
+```
+
+Meta refuses to open the dialog at all if the redirect URI is not on that
+list, so missing this looks like the button doing nothing.
+
+This is a redirect, not the JavaScript SDK's `FB.login()` popup —
+deliberately. A WebView has no popups: `window.open` returns null, and the
+SDK, which waits on that window handle, stalls with no error whatsoever.
+The button simply did nothing, which is the worst way for a flow to fail.
+
 ### What this needs from Meta
 
 | | |

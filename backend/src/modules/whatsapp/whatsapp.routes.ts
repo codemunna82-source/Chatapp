@@ -10,7 +10,7 @@ import {
   whatsappStatusHandler,
   disconnectWhatsAppHandler,
 } from './whatsapp.controller';
-import { whatsappSignupPageHandler } from './signupPage.controller';
+import { whatsappSignupPageHandler, whatsappSignupCallbackHandler } from './signupPage.controller';
 
 export const whatsappRouter = Router();
 
@@ -19,6 +19,10 @@ export const whatsappRouter = Router();
 // contains only the public app id and config id. It never calls our API —
 // the app posts the resulting code to /connect with its own session.
 whatsappRouter.get('/signup', whatsappSignupPageHandler);
+// Where Facebook redirects back to. Must match the redirect URI built in
+// whatsappSignupPageHandler, and be allow-listed in the Meta app's
+// "Valid OAuth Redirect URIs" — Meta refuses the dialog otherwise.
+whatsappRouter.get('/signup/callback', whatsappSignupCallbackHandler);
 
 // Connecting a WhatsApp account is every user's own action, not an admin's,
 // so these three sit above the MASTER_ADMIN guard. Each is scoped to the
