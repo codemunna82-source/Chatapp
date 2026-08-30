@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TextField } from '../../components/TextField';
@@ -9,6 +9,10 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { useWhatsAppNumbers, useRegisterWhatsAppNumber } from '../../queries/useWhatsAppNumbers';
 import { getApiErrorMessage } from '../../api/client';
 import type { WhatsAppNumber } from '../../api/types';
+
+/** Stable identity, so `?? NO_NUMBERS` does not hand useMemo a fresh
+ *  array on every render and defeat the memo entirely. */
+const NO_NUMBERS: WhatsAppNumber[] = [];
 
 /** A seeded placeholder rather than a real Meta number. Sends against one
  *  of these always fail, so the screen calls it out explicitly instead of
@@ -61,8 +65,19 @@ export function WhatsAppNumbersScreen() {
 
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [wabaId, setWabaId] = useState('');
+  const [search, setSearch] = useState('');
 
-  const numbers = numbersQuery.data ?? [];
+  const allNumbers = numbersQuery.data ?? NO_NUMBERS;
+  // Client-side: a workspace's numbers are a small, complete list already
+  // in memory, so filtering here is instant and needs no round trip. It is
+  // the scrolling that breaks down at scale, not the data volume.
+  const numbers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return allNumbers;
+    return allNumbers.filter(
+      (n) => n.displayPhoneNumber.toLowerCase().includes(q) || n.phoneNumberId.includes(q),
+    );
+  }, [allNumbers, search]);
   const error = register.error ? getApiErrorMessage(register.error, 'Could not register this number.') : null;
 
   const handleRegister = () => {
@@ -80,14 +95,26 @@ export function WhatsAppNumbersScreen() {
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
       <Text style={[typography.label, { color: colors.textSecondary, marginBottom: spacing.sm }]}>
-        Connected numbers
+        Connected numbers{allNumbers.length > 0 ? ` (${allNumbers.length})` : ''}
       </Text>
+
+      {/* Appears once the list is long enough to be worth searching —
+          below that it is just a field in the way. */}
+      {allNumbers.length > 8 ? (
+        <TextField
+          label="Search numbers"
+          value={search}
+          onChangeText={setSearch}
+          autoCapitalize="none"
+          keyboardType="numbers-and-punctuation"
+        />
+      ) : null}
 
       {numbersQuery.isLoading ? (
         <LoadingIndicator />
       ) : numbers.length === 0 ? (
         <Text style={[typography.body, { color: colors.textSecondary, marginBottom: spacing.md }]}>
-          No WhatsApp number is connected yet.
+          {search.trim() ? 'No number matches that search.' : 'No WhatsApp number is connected yet.'}
         </Text>
       ) : (
         numbers.map((n) => <NumberRow key={n.id} item={n} />)

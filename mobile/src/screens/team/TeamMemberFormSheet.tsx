@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -11,13 +11,17 @@ import { useCreateTeamMember, useUpdateTeamMember, useDisableTeamMember } from '
 import { useWhatsAppNumbers, useRegisterWhatsAppNumber } from '../../queries/useWhatsAppNumbers';
 import { getApiErrorMessage } from '../../api/client';
 import { ALL_PERMISSIONS } from '../../api/types';
-import type { Permission, TeamMember, UserRole } from '../../api/types';
+import type { Permission, TeamMember, UserRole, WhatsAppNumber } from '../../api/types';
 
 interface TeamMemberFormSheetProps {
   visible: boolean;
   member: TeamMember | null; // null = invite mode
   onClose: () => void;
 }
+
+/** Stable identity, so `?? NO_NUMBERS` does not hand useMemo a fresh
+ *  array on every render and defeat the memo entirely. */
+const NO_NUMBERS: WhatsAppNumber[] = [];
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -82,7 +86,28 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
     member?.whatsappPhoneNumberId,
   );
   const numbersQuery = useWhatsAppNumbers();
-  const numbers = numbersQuery.data ?? [];
+  const allNumbers = numbersQuery.data ?? NO_NUMBERS;
+  const [numberSearch, setNumberSearch] = useState('');
+
+  /**
+   * The numbers to show in the picker.
+   *
+   * The currently selected one is always kept, even when it does not match
+   * the search. Dropping it would make the selection look lost the moment
+   * the admin typed — and worse, a save from that state still submits it,
+   * so the screen would be showing something different from what it is
+   * about to do.
+   */
+  const numbers = useMemo(() => {
+    const q = numberSearch.trim().toLowerCase();
+    if (!q) return allNumbers;
+    return allNumbers.filter(
+      (n) =>
+        n.id === whatsappPhoneNumberId ||
+        n.displayPhoneNumber.toLowerCase().includes(q) ||
+        n.phoneNumberId.includes(q),
+    );
+  }, [allNumbers, numberSearch, whatsappPhoneNumberId]);
 
   // Registering a number from inside this form, rather than sending the
   // admin to a second screen and back: adding a member and giving them a
@@ -330,6 +355,15 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
         </View>
       ) : (
         <>
+          {allNumbers.length > 8 ? (
+            <TextField
+              label={`Search ${allNumbers.length} numbers`}
+              value={numberSearch}
+              onChangeText={setNumberSearch}
+              autoCapitalize="none"
+              keyboardType="numbers-and-punctuation"
+            />
+          ) : null}
           <View style={{ marginBottom: spacing.xs }}>
             {/* "Workspace default" is a real option, not just the absence of
                 a choice — an admin needs a way back after assigning one. */}
