@@ -31,8 +31,12 @@ Check what actually landed:
 GET /api/webhooks/meta/health
 ```
 
-It reports whether each secret is present and how long it is, never any
-part of a value, so it is safe to open on a deployed URL.
+It reports whether each value is present and how long it is, never any
+part of a value, so it is safe to open on a deployed URL — including the
+four Embedded Signup needs (`appIdConfigured`, `configIdConfigured`,
+`registerPinConfigured`, `encryptionKeyConfigured`). Check it after any
+environment change: the alternative is installing the app, opening Connect
+WhatsApp and reading the failure off the WebView.
 
 Then point Meta's webhook at `https://<your-host>/api/webhooks/meta` using
 the same verify token.
@@ -111,7 +115,8 @@ receives a reply — the worst kind of failure to debug.
 | | |
 | --- | --- |
 | `META_CONFIG_ID` | Meta dashboard → WhatsApp → Configuration → Embedded Signup |
-| `META_APP_ID`, `META_APP_SECRET` | App Settings → Basic |
+| `META_APP_ID` | App Settings → Basic. **Required** — `FB.init` and the code exchange both use it. Public, not a secret. |
+| `META_APP_SECRET` | App Settings → Basic, under the App ID. Genuinely secret. |
 | `META_REGISTER_PIN` | Any six digits **you** choose — digits only, no spaces or quotes. Must stay the same across deploys: it is the number's two-step verification PIN, and changing it breaks re-registration. A malformed value is warned about in the log and ignored, not fatal. |
 | `ENCRYPTION_KEY` | `openssl rand -hex 32`. Rotating it makes stored tokens unreadable and forces every user to reconnect. |
 

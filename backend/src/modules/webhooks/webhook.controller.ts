@@ -67,6 +67,14 @@ export function webhookConfigHealthHandler(req: Request, res: Response): void {
       appSecretConfigured: env.META_APP_SECRET.length > 0,
       appSecretLength: env.META_APP_SECRET.length,
       accessTokenConfigured: env.META_ACCESS_TOKEN.length > 0,
+      // The two Embedded Signup needs. Reported here because the only
+      // other way to find out one is missing is to install the app, open
+      // Connect WhatsApp, and read it off the WebView — which is a long
+      // way to travel for "you forgot an environment variable".
+      appIdConfigured: env.META_APP_ID.length > 0,
+      configIdConfigured: env.META_CONFIG_ID.length > 0,
+      registerPinConfigured: env.META_REGISTER_PIN.length > 0,
+      encryptionKeyConfigured: env.ENCRYPTION_KEY.length > 0,
       phoneNumberIdConfigured: env.META_PHONE_NUMBER_ID.length > 0,
       mockMode: env.META_MOCK_MODE,
       queueMode: isRedisConfigured() ? 'redis' : 'inline',
