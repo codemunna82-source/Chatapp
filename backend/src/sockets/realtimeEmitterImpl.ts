@@ -25,7 +25,18 @@ export function createSocketRealtimeEmitter(io: AppServer): RealtimeEmitter {
   const chatRooms = (tenantId: string, conversationId: string, whatsappPhoneNumberId: string) =>
     io.to(conversationRoom(conversationId)).to(tenantRoom(tenantId)).to(phoneNumberRoom(whatsappPhoneNumberId));
 
+  /** Calls go to the same audience as that number's chats — no conversation
+   *  room, because a ringing call has no chat open yet. */
+  const numberAudience = (tenantId: string, whatsappPhoneNumberId: string) =>
+    io.to(tenantRoom(tenantId)).to(phoneNumberRoom(whatsappPhoneNumberId));
+
   return {
+    emitCallIncoming(tenantId, call, whatsappPhoneNumberId) {
+      numberAudience(tenantId, whatsappPhoneNumberId).emit('call:incoming', call);
+    },
+    emitCallEnded(tenantId, call, whatsappPhoneNumberId) {
+      numberAudience(tenantId, whatsappPhoneNumberId).emit('call:ended', call);
+    },
     emitMessageNew(tenantId, message, whatsappPhoneNumberId) {
       chatRooms(tenantId, message.conversationId, whatsappPhoneNumberId).emit('message:new', message);
     },

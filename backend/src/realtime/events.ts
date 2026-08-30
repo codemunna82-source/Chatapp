@@ -61,7 +61,26 @@ export interface RealtimeNotificationPayload {
  * refresh and leak while the app was open. It is a required parameter, not
  * an optional one, so a new emit site cannot quietly broadcast tenant-wide.
  */
+/** A voice call arriving on, or leaving, one of the workspace's numbers. */
+export interface RealtimeCallPayload {
+  callId: string;
+  callLogId: string;
+  contactId: string;
+  contactName?: string;
+  fromPhone: string;
+  /**
+   * Meta's WebRTC offer, forwarded verbatim to the device that will answer
+   * it. The server never terminates the media itself — it only carries
+   * this string from Meta to the phone, and the phone's answer back.
+   */
+  sdpOffer?: string;
+  status?: string;
+  durationSeconds?: number;
+}
+
 export interface RealtimeEmitter {
+  emitCallIncoming(tenantId: string, call: RealtimeCallPayload, whatsappPhoneNumberId: string): void;
+  emitCallEnded(tenantId: string, call: RealtimeCallPayload, whatsappPhoneNumberId: string): void;
   emitMessageNew(tenantId: string, message: RealtimeMessagePayload, whatsappPhoneNumberId: string): void;
   emitMessageUpdated(tenantId: string, message: RealtimeMessagePayload, whatsappPhoneNumberId: string): void;
   emitMessageStatus(
@@ -77,6 +96,8 @@ export interface RealtimeEmitter {
 }
 
 const noopEmitter: RealtimeEmitter = {
+  emitCallIncoming: () => {},
+  emitCallEnded: () => {},
   emitMessageNew: () => {},
   emitMessageUpdated: () => {},
   emitMessageStatus: () => {},

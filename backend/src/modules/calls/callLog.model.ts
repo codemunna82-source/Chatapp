@@ -4,14 +4,20 @@ export const CALL_DIRECTIONS = ['INBOUND', 'OUTBOUND'] as const;
 export type CallDirection = (typeof CALL_DIRECTIONS)[number];
 
 /**
- * Provisional status set — spec §24 requires "support only statuses
- * actually supported by the provider." No real CallingProvider is wired in
- * yet (see architecture doc §6 / Phase 9), so this collection exists purely
- * so the schema, indexes, and repository are ready; it stays empty until a
- * real provider is integrated and this enum is reconciled with what that
- * provider actually reports.
+ * Reconciled with what WhatsApp Business Calling actually reports.
+ * REJECTED is its own outcome, not a flavour of MISSED: an agent who
+ * declined and an agent who never picked up are different facts, and a
+ * call report that conflates them is misleading.
  */
-export const CALL_STATUSES = ['INITIATED', 'RINGING', 'ANSWERED', 'COMPLETED', 'MISSED', 'FAILED'] as const;
+export const CALL_STATUSES = [
+  'INITIATED',
+  'RINGING',
+  'ANSWERED',
+  'COMPLETED',
+  'MISSED',
+  'REJECTED',
+  'FAILED',
+] as const;
 export type CallStatus = (typeof CALL_STATUSES)[number];
 
 const callLogSchema = new Schema(
@@ -24,7 +30,14 @@ const callLogSchema = new Schema(
     startedAt: { type: Date },
     endedAt: { type: Date },
     providerCallId: { type: String },
-    provider: { type: String }, // e.g. "meta" once/if MetaCallingProvider is real
+    provider: { type: String }, // "meta" for WhatsApp Business Calling
+    /**
+     * Which number the call came in on. Carried for the same reason
+     * conversations carry it: it is what decides whose call this is, and a
+     * call log that ignored it would show every agent every colleague's
+     * calls.
+     */
+    whatsappPhoneNumberId: { type: Schema.Types.ObjectId, ref: 'WhatsAppPhoneNumber', index: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
@@ -36,6 +49,9 @@ const callLogSchema = new Schema(
 // insertion order, so the rows come back in exactly the same sequence.
 callLogSchema.index({ tenantId: 1, _id: -1 });
 callLogSchema.index({ tenantId: 1, contactId: 1, createdAt: -1 });
+// Sparse: only calls carry a provider id, and two different calls must
+// never share one — this is the key a terminate webhook is matched on.
+callLogSchema.index({ providerCallId: 1 }, { unique: true, sparse: true });
 
 export type CallLogDoc = HydratedDocument<InferSchemaType<typeof callLogSchema>>;
 export const CallLog = model('CallLog', callLogSchema);

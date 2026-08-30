@@ -4,6 +4,7 @@ import * as messages from './messages';
 import * as media from './media';
 import { listTemplates } from './templates';
 import { fetchPhoneNumberProfile } from './phoneNumbers';
+import * as calls from './calls';
 import { mockMetaGateway } from './mock/mockMetaGateway';
 import type { MetaGateway } from './metaGateway';
 
@@ -18,6 +19,10 @@ const realMetaGateway: MetaGateway = {
   downloadMediaBinary: media.downloadMediaBinary,
   listTemplates,
   fetchPhoneNumberProfile,
+  preAcceptCall: calls.preAcceptCall,
+  acceptCall: calls.acceptCall,
+  rejectCall: calls.rejectCall,
+  terminateCall: calls.terminateCall,
 };
 
 let warnedMockMode = false;

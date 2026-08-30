@@ -1,4 +1,5 @@
 import { logger } from '../../lib/logger';
+import type { NormalizedCallItem, NormalizedWebhookItem } from '../../integrations/meta/webhookPayload';
 import { parseWebhookPayload, type NormalizedMessageItem, type NormalizedStatusItem } from '../../integrations/meta/webhookPayload';
 import { recordWebhookEventOnce, markWebhookEventProcessed, markWebhookEventFailed } from './webhookEvent.repository';
 import { findPhoneNumberByMetaId } from '../whatsapp/whatsapp.repository';
@@ -17,6 +18,7 @@ import {
   findMessageByIdAndTenant,
 } from '../messages/message.repository';
 import { pushIncomingMessage, pushReaction } from '../notifications/push.service';
+import { handleInboundCallEvent } from '../calls/call.service';
 import { createMedia } from '../media/media.repository';
 import type { MessageStatus } from '../messages/message.model';
 import { getRealtimeEmitter } from '../../realtime/events';
@@ -180,7 +182,7 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
  * processed/failed. Safe to call repeatedly for the same item (spec §16) —
  * a duplicate is a guaranteed no-op via the unique index on metaEventId.
  */
-async function processWebhookItem(item: NormalizedMessageItem | NormalizedStatusItem): Promise<void> {
+async function processWebhookItem(item: NormalizedWebhookItem): Promise<void> {
   const { isNew, event } = await recordWebhookEventOnce(item.eventId, item.phoneNumberId, item.raw);
   if (!isNew) {
     logger.debug({ eventId: item.eventId }, 'Duplicate webhook delivery — skipping');
@@ -200,6 +202,8 @@ async function processWebhookItem(item: NormalizedMessageItem | NormalizedStatus
   try {
     if (item.kind === 'message') {
       await handleIncomingMessage(tenantId, phoneNumberDoc, item);
+    } else if (item.kind === 'call') {
+      await handleCallEvent(tenantId, phoneNumberDoc, item);
     } else {
       await handleStatusUpdate(tenantId, item);
     }
@@ -216,4 +220,19 @@ export async function processWebhookDelivery(rawPayload: unknown): Promise<void>
   for (const item of items) {
     await processWebhookItem(item);
   }
+}
+
+/**
+ * An inbound voice call, or its end.
+ *
+ * Kept as a thin hand-off: the call module owns what a call means, this
+ * function owns only that the event reached the right tenant. Same split
+ * as messages.
+ */
+async function handleCallEvent(
+  tenantId: string,
+  phoneNumberDoc: WhatsAppPhoneNumberDoc,
+  item: NormalizedCallItem,
+): Promise<void> {
+  await handleInboundCallEvent(tenantId, phoneNumberDoc, item);
 }

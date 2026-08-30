@@ -11,6 +11,7 @@ export interface CreateCallLogInput {
   endedAt?: Date;
   providerCallId?: string;
   provider?: string;
+  whatsappPhoneNumberId?: string;
 }
 
 export async function createCallLog(input: CreateCallLogInput): Promise<CallLogDoc> {
@@ -37,4 +38,26 @@ export async function listCallLogsByTenant(
   const hasMore = items.length > limit;
   const page = hasMore ? items.slice(0, limit) : items;
   return { items: page, nextCursor: hasMore ? String(page[page.length - 1]!._id) : null };
+}
+
+/** Finds a call by Meta's own id, so a terminate webhook can close the row
+ *  the connect webhook opened. */
+export async function findCallLogByProviderId(providerCallId: string): Promise<CallLogDoc | null> {
+  return CallLog.findOne({ providerCallId });
+}
+
+export interface CloseCallInput {
+  status: CallLogDoc['status'];
+  duration?: number;
+  endedAt?: Date;
+}
+
+export async function closeCallLog(id: string, input: CloseCallInput): Promise<CallLogDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return CallLog.findByIdAndUpdate(id, { $set: input }, { new: true });
+}
+
+export async function setCallStatus(id: string, status: CallLogDoc['status']): Promise<CallLogDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return CallLog.findByIdAndUpdate(id, { $set: { status } }, { new: true });
 }

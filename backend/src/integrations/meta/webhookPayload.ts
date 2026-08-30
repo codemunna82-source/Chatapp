@@ -38,7 +38,33 @@ export interface NormalizedStatusItem {
   raw: unknown;
 }
 
-export type NormalizedWebhookItem = NormalizedMessageItem | NormalizedStatusItem;
+/**
+ * An inbound voice call, or the end of one.
+ *
+ * Calls arrive through the same webhook as messages — same
+ * `entry[].changes[]` envelope, same `metadata.phone_number_id` — under
+ * `field: "calls"` instead of `"messages"`. That means signature checking,
+ * idempotency and tenant resolution all already apply to them unchanged.
+ */
+export interface NormalizedCallItem {
+  kind: 'call';
+  /** `${callId}:${event}` — one call produces a connect and a terminate. */
+  eventId: string;
+  phoneNumberId: string;
+  callId: string;
+  event: 'connect' | 'terminate';
+  from: string;
+  contactName?: string;
+  /** Meta's WebRTC offer. Present on connect; this is what the device answers. */
+  sdpOffer?: string;
+  /** Present on terminate: how the call ended, and how long it lasted. */
+  status?: string;
+  durationSeconds?: number;
+  timestamp: Date;
+  raw: unknown;
+}
+
+export type NormalizedWebhookItem = NormalizedMessageItem | NormalizedStatusItem | NormalizedCallItem;
 
 function toMessageType(raw: string): MessageType {
   return (KNOWN_MESSAGE_TYPES.has(raw) ? raw : 'unknown') as MessageType;
@@ -98,10 +124,40 @@ export function parseWebhookPayload(rawPayload: any): NormalizedWebhookItem[] {
     const changes = Array.isArray(entry?.changes) ? entry.changes : [];
     for (const change of changes) {
       const value = change?.value;
-      if (!value || change?.field !== 'messages') continue;
+      if (!value) continue;
 
       const phoneNumberId: string | undefined = value?.metadata?.phone_number_id;
       if (!phoneNumberId) continue;
+
+      if (change?.field === 'calls') {
+        const contactName: string | undefined = value?.contacts?.[0]?.profile?.name;
+        const calls = Array.isArray(value.calls) ? value.calls : [];
+        for (const c of calls) {
+          if (!c?.id) continue;
+          // Meta names the two shapes by what they carry, not by a type
+          // field: a connect carries the SDP offer to answer, a terminate
+          // carries the outcome. Reading the shape avoids depending on a
+          // discriminator that is not documented to exist.
+          const isConnect = Boolean(c?.session?.sdp);
+          items.push({
+            kind: 'call',
+            eventId: `${c.id}:${isConnect ? 'connect' : 'terminate'}`,
+            phoneNumberId,
+            callId: c.id,
+            event: isConnect ? 'connect' : 'terminate',
+            from: c.from ?? '',
+            contactName,
+            sdpOffer: c?.session?.sdp,
+            status: c?.status,
+            durationSeconds: typeof c?.duration === 'number' ? c.duration : undefined,
+            timestamp: toDate(c.timestamp),
+            raw: c,
+          });
+        }
+        continue;
+      }
+
+      if (change?.field !== 'messages') continue;
 
       const contactName: string | undefined = value?.contacts?.[0]?.profile?.name;
 

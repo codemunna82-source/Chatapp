@@ -194,3 +194,43 @@ export async function pushCallStarted(input: CallPushInput): Promise<void> {
     { excludeUserId: input.actorUserId },
   );
 }
+
+export interface IncomingCallPushInput {
+  tenantId: string;
+  whatsappPhoneNumberId: string;
+  contactId: string;
+  contactName: string;
+  callId: string;
+}
+
+/**
+ * A ringing call.
+ *
+ * Unlike every other push here, this one is time-critical: the caller is
+ * waiting, and a notification that arrives after they hang up is worse
+ * than none. It carries `type: 'incoming_call'` so the app can put a full
+ * call screen up rather than a notification the agent has to notice and
+ * tap.
+ *
+ * Addressed by number like the chat pushes, so a call ringing on one
+ * agent's line does not light up the whole workspace's phones.
+ */
+export async function pushIncomingCall(input: IncomingCallPushInput): Promise<void> {
+  await sendToTenant(
+    input.tenantId,
+    {
+      title: input.contactName,
+      body: 'Incoming WhatsApp call',
+      // Not collapsed with the chat key: a call must never replace, or be
+      // replaced by, a message notification from the same contact.
+      collapseKey: `incoming-call:${input.callId}`,
+      channelId: CHAT_CHANNEL_ID,
+      data: {
+        type: 'incoming_call',
+        callId: input.callId,
+        contactId: input.contactId,
+      },
+    },
+    { whatsappPhoneNumberId: input.whatsappPhoneNumberId },
+  );
+}

@@ -84,6 +84,18 @@ export const openApiSpec = {
       patch: { summary: 'Update a user (role, permissions, validity, status, assigned WhatsApp number)', responses: { '200': { description: 'OK' } } },
       delete: { summary: 'Disable a user (soft delete)', responses: { '200': { description: 'OK' } } },
     },
+    '/calls/{callId}/answer': {
+      post: {
+        summary: 'Answer a ringing WhatsApp call with the device SDP answer ({ sdp }) — CALL_ACCESS, own number only',
+        responses: { '200': { description: 'Answered' }, '404': { description: 'Not this user\'s call' } },
+      },
+    },
+    '/calls/{callId}/reject': {
+      post: { summary: 'Decline a ringing WhatsApp call (CALL_ACCESS, own number only)', responses: { '200': { description: 'Rejected' } } },
+    },
+    '/calls/{callId}/hangup': {
+      post: { summary: 'End a connected WhatsApp call (CALL_ACCESS, own number only)', responses: { '200': { description: 'Terminated' } } },
+    },
     '/whatsapp/numbers': {
       get: {
         summary: 'List the caller\'s tenant WhatsApp numbers, for assigning one to a user (MASTER_ADMIN only)',

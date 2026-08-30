@@ -29,6 +29,14 @@ export interface MetaGateway {
   retrieveMedia(creds: MetaCredentials, metaMediaId: string): Promise<RetrieveMediaResult>;
   downloadMediaBinary(creds: MetaCredentials, url: string): Promise<Buffer>;
   listTemplates(creds: ListTemplatesCredentials): Promise<MetaTemplateSummary[]>;
+  /**
+   * WhatsApp Business Calling. The SDP strings pass straight through — the
+   * media path is Meta ↔ the agent's device, never this server.
+   */
+  preAcceptCall(creds: MetaCredentials, callId: string, sdpAnswer: string): Promise<void>;
+  acceptCall(creds: MetaCredentials, callId: string, sdpAnswer: string): Promise<void>;
+  rejectCall(creds: MetaCredentials, callId: string): Promise<void>;
+  terminateCall(creds: MetaCredentials, callId: string): Promise<void>;
   /** Verifies a phone_number_id exists and the token can reach it. */
   fetchPhoneNumberProfile(accessToken: string, phoneNumberId: string): Promise<PhoneNumberProfile>;
 }

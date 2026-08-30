@@ -82,4 +82,19 @@ export const mockMetaGateway: MetaGateway = {
     // real Meta credentials still works end to end.
     return { phoneNumberId, displayPhoneNumber: `+1 555 ${phoneNumberId.slice(-4)}`, verifiedName: 'Mock Business', qualityRating: 'GREEN' };
   },
+  async preAcceptCall(_creds, callId) {
+    logger.debug({ callId }, '[MOCK META] preAcceptCall');
+  },
+
+  async acceptCall(_creds, callId) {
+    logger.debug({ callId }, '[MOCK META] acceptCall');
+  },
+
+  async rejectCall(_creds, callId) {
+    logger.debug({ callId }, '[MOCK META] rejectCall');
+  },
+
+  async terminateCall(_creds, callId) {
+    logger.debug({ callId }, '[MOCK META] terminateCall');
+  },
 };
