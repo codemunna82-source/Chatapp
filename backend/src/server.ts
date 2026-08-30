@@ -15,9 +15,16 @@ import {
   scheduleSubscriptionExpirySweep,
 } from './queues/subscriptionExpiry.queue';
 import { startSocketServer, stopSocketServer } from './sockets/socketServer';
+import { migrateWabaIndexAtBoot } from './modules/whatsapp/wabaIndexMigration';
 
 async function main(): Promise<void> {
   await connectMongo();
+
+  // Runs here rather than as a deploy step someone has to remember: the
+  // failure it prevents only shows up when a second workspace onboards the
+  // same WhatsApp Business Account, which is exactly the moment nobody is
+  // thinking about indexes. Idempotent, and never fatal.
+  await migrateWabaIndexAtBoot();
 
   if (isRedisConfigured()) {
     startWebhookWorker();

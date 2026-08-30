@@ -115,6 +115,17 @@ receives a reply — the worst kind of failure to debug.
 | `META_REGISTER_PIN` | Any six digits **you** choose. Must stay the same across deploys — it is the number's two-step verification PIN, and changing it breaks re-registration. |
 | `ENCRYPTION_KEY` | `openssl rand -hex 32`. Rotating it makes stored tokens unreadable and forces every user to reconnect. |
 
+### The wabaId index
+
+The unique index on `WhatsAppAccount.wabaId` is per-tenant, not global — a
+global one made the second workspace onboarding the same business fail with
+a duplicate-key error. Mongoose creates new indexes but never drops ones a
+schema no longer declares, so the old index has to be dropped explicitly.
+
+**The server does this itself on boot.** Nothing to run. It is idempotent
+and never fatal; if it fails, the deploy log says so and tells you to run
+`npm run migrate:waba-index`, which is the same code as a one-off script.
+
 **Advanced Access is required for real customers.** Embedded Signup needs
 `whatsapp_business_management` and `whatsapp_business_messaging` at
 Advanced Access, which needs Business Verification. Until Meta approves
