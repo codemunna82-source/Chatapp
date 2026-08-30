@@ -6,33 +6,33 @@ import * as conversationService from './conversation.service';
 
 export const listConversationsHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  const result = await conversationService.listConversationsForTenant(auth.tenantId, req.query as never);
+  const result = await conversationService.listConversationsForTenant(auth, req.query as never);
   res.status(200).json({ success: true, data: result.items, meta: { nextCursor: result.nextCursor } });
 });
 
 export const getConversationHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  const conversation = await conversationService.getConversationForTenant(auth.tenantId, req.params.id as string);
+  const conversation = await conversationService.getConversationForTenant(auth, req.params.id as string);
   res.status(200).json({ success: true, data: conversation });
 });
 
 export const createConversationHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const { contactId } = req.body as { contactId: string };
-  const conversation = await conversationService.startConversationForTenant(auth.tenantId, contactId, auth.userId);
+  const conversation = await conversationService.startConversationForTenant(auth, contactId);
   res.status(200).json({ success: true, data: conversation });
 });
 
 export const bulkConversationsHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const { ids, action } = req.body as { ids: string[]; action: conversationService.BulkConversationAction };
-  const result = await conversationService.bulkUpdateConversationsForTenant(auth.tenantId, auth.userId, ids, action);
+  const result = await conversationService.bulkUpdateConversationsForTenant(auth, ids, action);
   res.status(200).json({ success: true, data: result });
 });
 
 export const deleteConversationHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  await conversationService.deleteConversationForTenant(auth.tenantId, req.params.id as string, auth.userId);
+  await conversationService.deleteConversationForTenant(auth, req.params.id as string);
   res.status(200).json({ success: true, data: { id: req.params.id } });
 });
 
@@ -46,11 +46,6 @@ export const updateConversationHandler = asyncHandler(async (req: Request, res: 
     assertPermission(auth, 'CHAT_PIN');
   }
 
-  const conversation = await conversationService.updateConversationForTenant(
-    auth.tenantId,
-    auth.userId,
-    req.params.id as string,
-    patch,
-  );
+  const conversation = await conversationService.updateConversationForTenant(auth, req.params.id as string, patch);
   res.status(200).json({ success: true, data: conversation });
 });

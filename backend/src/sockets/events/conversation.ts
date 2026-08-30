@@ -1,6 +1,7 @@
 import { logger } from '../../lib/logger';
-import { tenantRoom, conversationRoom } from '../rooms';
+import { tenantRoom, conversationRoom, phoneNumberRoom } from '../rooms';
 import { findConversationByIdAndTenant, markConversationRead } from '../../modules/conversations/conversation.repository';
+import { visibleWhatsAppPhoneNumberId } from '../../modules/conversations/conversation.access';
 import { toRealtimeConversation } from '../../realtime/serializers';
 import type { AppServer, AppSocket } from '../types';
 
@@ -28,7 +29,11 @@ export function registerConversationHandlers(io: AppServer, socket: AppSocket): 
       return;
     }
     const conversation = await findConversationByIdAndTenant(conversationId, auth.tenantId);
-    if (!conversation) {
+    // Same visibility rule as the REST routes: a user scoped to one number
+    // must not be able to join a colleague's conversation room and receive
+    // its messages, which would sidestep the room split done at connect.
+    const scope = visibleWhatsAppPhoneNumberId(auth);
+    if (!conversation || (scope && String(conversation.whatsappPhoneNumberId) !== scope)) {
       ack?.({ success: false, error: 'Conversation not found' });
       return;
     }
@@ -48,14 +53,23 @@ export function registerConversationHandlers(io: AppServer, socket: AppSocket): 
       ack?.({ success: false, error: 'conversationId is required' });
       return;
     }
+    const existing = await findConversationByIdAndTenant(conversationId, auth.tenantId);
+    const readScope = visibleWhatsAppPhoneNumberId(auth);
+    // Checked before the write, not after: marking a chat read is a write,
+    // and one a scoped user must not be able to make on a colleague's chat.
+    if (!existing || (readScope && String(existing.whatsappPhoneNumberId) !== readScope)) {
+      ack?.({ success: false, error: 'Conversation not found' });
+      return;
+    }
     const conversation = await markConversationRead(conversationId, auth.tenantId);
     if (!conversation) {
       ack?.({ success: false, error: 'Conversation not found' });
       return;
     }
 
-    io.to(tenantRoom(auth.tenantId)).emit('conversation:read', { conversationId, byUserId: auth.userId });
-    io.to(tenantRoom(auth.tenantId)).emit('conversation:updated', toRealtimeConversation(conversation));
+    const numberRoom = phoneNumberRoom(String(conversation.whatsappPhoneNumberId));
+    io.to(tenantRoom(auth.tenantId)).to(numberRoom).emit('conversation:read', { conversationId, byUserId: auth.userId });
+    io.to(tenantRoom(auth.tenantId)).to(numberRoom).emit('conversation:updated', toRealtimeConversation(conversation));
     ack?.({ success: true });
   });
 

@@ -1,4 +1,6 @@
 import { ApiError } from '../../lib/ApiError';
+import { visibleWhatsAppPhoneNumberId } from './conversation.access';
+import type { AuthContext } from '../../types/express';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './conversation.repository';
 import * as contactRepo from '../contacts/contact.repository';
@@ -89,7 +91,8 @@ export interface ListConversationsQuery {
   status?: ConversationStatus;
 }
 
-export async function listConversationsForTenant(tenantId: string, query: ListConversationsQuery) {
+export async function listConversationsForTenant(auth: AuthContext, query: ListConversationsQuery) {
+  const tenantId = auth.tenantId;
   let contactIds: string[] | undefined;
   if (query.search) {
     // Two-step: resolve matching contacts first, then filter conversations
@@ -108,16 +111,31 @@ export async function listConversationsForTenant(tenantId: string, query: ListCo
     pinnedOnly: query.pinnedOnly,
     status: query.status,
     contactIds,
+    whatsappPhoneNumberId: visibleWhatsAppPhoneNumberId(auth),
   });
 
   return { items: await enrichWithContacts(tenantId, items), nextCursor };
 }
 
-export async function getConversationForTenant(tenantId: string, id: string): Promise<PublicConversation> {
-  const conversation = await repo.findConversationByIdAndTenant(id, tenantId);
-  if (!conversation) {
+/**
+ * Loads a conversation the caller is actually allowed to touch.
+ *
+ * Not visible is reported as 404, not 403: telling a user that a chat
+ * exists but belongs to a colleague leaks both its existence and its id,
+ * and there is nothing they can do with that knowledge anyway.
+ */
+async function loadVisibleConversation(auth: AuthContext, id: string) {
+  const conversation = await repo.findConversationByIdAndTenant(id, auth.tenantId);
+  const scope = visibleWhatsAppPhoneNumberId(auth);
+  if (!conversation || (scope && String(conversation.whatsappPhoneNumberId) !== scope)) {
     throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
   }
+  return conversation;
+}
+
+export async function getConversationForTenant(auth: AuthContext, id: string): Promise<PublicConversation> {
+  const tenantId = auth.tenantId;
+  const conversation = await loadVisibleConversation(auth, id);
   const contact = await contactRepo.findContactByIdAndTenant(String(conversation.contactId), tenantId);
   return toPublicConversation(conversation, contact ?? undefined);
 }
@@ -165,10 +183,11 @@ async function resolveSendingPhoneNumberId(tenantId: string, actorUserId: string
  * taking over.
  */
 export async function startConversationForTenant(
-  tenantId: string,
+  auth: AuthContext,
   contactId: string,
-  actorUserId: string,
 ): Promise<PublicConversation> {
+  const tenantId = auth.tenantId;
+  const actorUserId = auth.userId;
   const contact = await contactRepo.findContactByIdAndTenant(contactId, tenantId);
   if (!contact) {
     throw ApiError.notFound('CONTACT_NOT_FOUND', 'That contact does not exist.');
@@ -183,6 +202,19 @@ export async function startConversationForTenant(
   }
 
   const conversation = await repo.findOrCreateConversation(tenantId, contactId, phoneNumberId);
+
+  // findOrCreate is keyed on (tenant, contact), so an existing chat comes
+  // back on whatever number it was created with — possibly a colleague's.
+  // Without this check, "start a chat" would be a way to open one you are
+  // not allowed to see.
+  const scope = visibleWhatsAppPhoneNumberId(auth);
+  if (scope && String(conversation.whatsappPhoneNumberId) !== scope) {
+    throw ApiError.forbidden(
+      'CONVERSATION_OWNED_BY_ANOTHER_NUMBER',
+      'This contact already has a chat on a different WhatsApp number.',
+    );
+  }
+
   return toPublicConversation(conversation, contact);
 }
 
@@ -191,11 +223,10 @@ export async function startConversationForTenant(
  * it. Local to VOXO only — Meta's Cloud API cannot recall anything already
  * delivered, so the customer's own WhatsApp thread is untouched.
  */
-export async function deleteConversationForTenant(tenantId: string, id: string, actorId: string): Promise<void> {
-  const conversation = await repo.findConversationByIdAndTenant(id, tenantId);
-  if (!conversation) {
-    throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'That conversation does not exist.');
-  }
+export async function deleteConversationForTenant(auth: AuthContext, id: string): Promise<void> {
+  const tenantId = auth.tenantId;
+  const actorId = auth.userId;
+  await loadVisibleConversation(auth, id);
   await deleteMessagesByConversation(tenantId, id);
   await repo.deleteConversation(id, tenantId);
   await recordAudit({
@@ -232,15 +263,22 @@ export interface BulkConversationResult {
  * batch over it would be worse than doing the rest.
  */
 export async function bulkUpdateConversationsForTenant(
-  tenantId: string,
-  actorUserId: string,
+  auth: AuthContext,
   ids: string[],
   action: BulkConversationAction,
 ): Promise<BulkConversationResult> {
+  const tenantId = auth.tenantId;
+  const actorUserId = auth.userId;
+  const scope = visibleWhatsAppPhoneNumberId(auth);
   let affected = 0;
 
+  // Ids the caller cannot see are dropped before any write. Same silent-skip
+  // policy as ids from another tenant: a stale multi-select is normal, and
+  // failing the whole batch over one id would be worse than doing the rest.
+  const permitted = scope ? await repo.filterConversationIdsByPhoneNumber(ids, tenantId, scope) : ids;
+
   if (action === 'delete') {
-    const deletedIds = await repo.deleteConversationsByIds(ids, tenantId);
+    const deletedIds = await repo.deleteConversationsByIds(permitted, tenantId);
     // Messages are cascaded for exactly the ids that were really deleted —
     // deleteConversationsByIds returns those, so nothing belonging to
     // another tenant can be reached through this.
@@ -249,9 +287,9 @@ export async function bulkUpdateConversationsForTenant(
     }
     affected = deletedIds.length;
   } else if (action === 'read') {
-    affected = await repo.markConversationsRead(ids, tenantId);
+    affected = await repo.markConversationsRead(permitted, tenantId);
   } else {
-    affected = await repo.setStatusForConversations(ids, tenantId, action === 'archive' ? 'ARCHIVED' : 'OPEN');
+    affected = await repo.setStatusForConversations(permitted, tenantId, action === 'archive' ? 'ARCHIVED' : 'OPEN', scope);
   }
 
   await recordAudit({
@@ -266,15 +304,13 @@ export async function bulkUpdateConversationsForTenant(
 }
 
 export async function updateConversationForTenant(
-  tenantId: string,
-  actorUserId: string,
+  auth: AuthContext,
   id: string,
   patch: UpdateConversationBody,
 ): Promise<PublicConversation> {
-  let conversation = await repo.findConversationByIdAndTenant(id, tenantId);
-  if (!conversation) {
-    throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
-  }
+  const tenantId = auth.tenantId;
+  const actorUserId = auth.userId;
+  let conversation = await loadVisibleConversation(auth, id);
 
   if (patch.pinned !== undefined) {
     conversation = (await repo.setConversationPinned(id, tenantId, patch.pinned)) ?? conversation;

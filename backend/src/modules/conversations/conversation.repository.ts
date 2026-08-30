@@ -85,6 +85,18 @@ export async function findConversationByIdAndTenant(
  * fetches, and pulling the whole conversation document to look at nothing
  * but whether it came back was the more expensive half of that request.
  */
+export async function conversationVisibleTo(
+  id: string,
+  tenantId: string,
+  whatsappPhoneNumberId?: string,
+): Promise<boolean> {
+  if (!Types.ObjectId.isValid(id)) return false;
+  const filter: Record<string, unknown> = { _id: id, tenantId };
+  if (whatsappPhoneNumberId) filter.whatsappPhoneNumberId = whatsappPhoneNumberId;
+  const found = await Conversation.exists(filter);
+  return found !== null;
+}
+
 export async function conversationExistsForTenant(id: string, tenantId: string): Promise<boolean> {
   if (!Types.ObjectId.isValid(id)) return false;
   const found = await Conversation.exists({ _id: id, tenantId });
@@ -92,6 +104,8 @@ export async function conversationExistsForTenant(id: string, tenantId: string):
 }
 
 export interface ListConversationsOptions {
+  /** Restricts the list to one WhatsApp number's conversations. */
+  whatsappPhoneNumberId?: string;
   cursor?: string;
   limit?: number;
   pinnedOnly?: boolean;
@@ -117,6 +131,11 @@ export async function listConversationsByTenant(
 ): Promise<{ items: ConversationLean[]; nextCursor: string | null }> {
   const limit = Math.min(opts.limit ?? 20, 100);
   const filter: Record<string, unknown> = { tenantId };
+  // Set when the caller may only see one number's chats — see
+  // visibleWhatsAppPhoneNumberId. Applied here rather than filtered after
+  // the query so pagination stays correct: dropping rows post-query would
+  // return short pages and a cursor pointing past invisible ones.
+  if (opts.whatsappPhoneNumberId) filter.whatsappPhoneNumberId = opts.whatsappPhoneNumberId;
   if (opts.pinnedOnly) filter.pinned = true;
   if (opts.status) filter.status = opts.status;
   if (opts.contactIds) {
@@ -210,10 +229,15 @@ export async function setStatusForConversations(
   ids: string[],
   tenantId: string,
   status: ConversationStatus,
+  whatsappPhoneNumberId?: string,
 ): Promise<number> {
   const valid = ids.filter((id) => Types.ObjectId.isValid(id));
   if (valid.length === 0) return 0;
-  const result = await Conversation.updateMany({ _id: { $in: valid }, tenantId }, { $set: { status } });
+  const bulkFilter: Record<string, unknown> = { _id: { $in: valid }, tenantId };
+  // Ids come from the client. Without this, a scoped user could archive or
+  // delete conversations they cannot even see by guessing ids.
+  if (whatsappPhoneNumberId) bulkFilter.whatsappPhoneNumberId = whatsappPhoneNumberId;
+  const result = await Conversation.updateMany(bulkFilter, { $set: { status } });
   return result.modifiedCount;
 }
 
@@ -322,4 +346,23 @@ export function isWithinCustomerServiceWindow(
 ): boolean {
   if (!conversation.conversationWindowExpiresAt) return false;
   return now.getTime() < conversation.conversationWindowExpiresAt.getTime();
+}
+
+/**
+ * Narrows a client-supplied id list to the ones on a given WhatsApp number.
+ *
+ * Used before bulk writes so a scoped user cannot act on chats they cannot
+ * see by sending their ids directly.
+ */
+export async function filterConversationIdsByPhoneNumber(
+  ids: string[],
+  tenantId: string,
+  whatsappPhoneNumberId: string,
+): Promise<string[]> {
+  const valid = ids.filter((id) => Types.ObjectId.isValid(id));
+  if (valid.length === 0) return [];
+  const docs = await Conversation.find({ _id: { $in: valid }, tenantId, whatsappPhoneNumberId })
+    .select('_id')
+    .lean();
+  return docs.map((d) => String(d._id));
 }

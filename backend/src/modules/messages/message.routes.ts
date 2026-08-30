@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { requirePermission } from '../../middleware/rbac.middleware';
 import { validate } from '../../middleware/validate.middleware';
+import { requireVisibleConversation } from '../conversations/requireVisibleConversation.middleware';
 import {
   sendMessageSchema,
   listMessagesQuerySchema,
@@ -20,7 +21,9 @@ import {
 // /api/conversations/:conversationId/messages and needs req.params.conversationId.
 export const messageRouter = Router({ mergeParams: true });
 
-messageRouter.use(requireAuth, validate({ params: conversationIdParamSchema }));
+// requireVisibleConversation runs before every handler below, so none of
+// them repeats the check — and a route added later inherits it.
+messageRouter.use(requireAuth, validate({ params: conversationIdParamSchema }), requireVisibleConversation);
 
 messageRouter.get('/', requirePermission('CHAT_READ'), validate({ query: listMessagesQuerySchema }), listMessagesHandler);
 messageRouter.post('/', requirePermission('CHAT_SEND'), validate({ body: sendMessageSchema }), sendMessageHandler);

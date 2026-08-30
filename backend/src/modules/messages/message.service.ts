@@ -176,7 +176,11 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     );
 
     const realtime = getRealtimeEmitter();
-    realtime.emitMessageNew(input.tenantId, toRealtimeMessage(sentMessage ?? localMessage));
+    realtime.emitMessageNew(
+      input.tenantId,
+      toRealtimeMessage(sentMessage ?? localMessage),
+      String(conversation.whatsappPhoneNumberId),
+    );
     if (updatedConversation) {
       realtime.emitConversationUpdated(input.tenantId, toRealtimeConversation(updatedConversation));
     }

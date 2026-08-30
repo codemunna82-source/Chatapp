@@ -8,7 +8,7 @@ import { InlineBanner } from '../../components/InlineBanner';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
 import { useCreateTeamMember, useUpdateTeamMember, useDisableTeamMember } from '../../queries/useTeam';
-import { useWhatsAppNumbers } from '../../queries/useWhatsAppNumbers';
+import { useWhatsAppNumbers, useRegisterWhatsAppNumber } from '../../queries/useWhatsAppNumbers';
 import { getApiErrorMessage } from '../../api/client';
 import { ALL_PERMISSIONS } from '../../api/types';
 import type { Permission, TeamMember, UserRole } from '../../api/types';
@@ -83,6 +83,33 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
   );
   const numbersQuery = useWhatsAppNumbers();
   const numbers = numbersQuery.data ?? [];
+
+  // Registering a number from inside this form, rather than sending the
+  // admin to a second screen and back: adding a member and giving them a
+  // number is one intention, and splitting it across two screens loses the
+  // half-filled invite.
+  const registerNumber = useRegisterWhatsAppNumber();
+  const [addingNumber, setAddingNumber] = useState(false);
+  const [newPhoneNumberId, setNewPhoneNumberId] = useState('');
+  const numberError = registerNumber.error
+    ? getApiErrorMessage(registerNumber.error, 'Could not add this number.')
+    : null;
+
+  const handleAddNumber = () => {
+    registerNumber.mutate(
+      { phoneNumberId: newPhoneNumberId.trim() },
+      {
+        onSuccess: (created) => {
+          // Selected straight away — the admin added it in order to assign
+          // it, so making them pick it from the list afterwards is a step
+          // that exists only because the form was built in two halves.
+          setWhatsappPhoneNumberId(created.id);
+          setNewPhoneNumberId('');
+          setAddingNumber(false);
+        },
+      },
+    );
+  };
 
   const mutation = isEdit ? updateMember : createMember;
   const error = mutation.error ? getApiErrorMessage(mutation.error, 'Could not save this team member.') : null;
@@ -294,10 +321,13 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
         <Text style={[typography.caption, { color: colors.textTertiary, marginBottom: spacing.md }]}>
           Loading WhatsApp numbers…
         </Text>
-      ) : numbers.length === 0 ? (
-        <Text style={[typography.caption, { color: colors.textTertiary, marginBottom: spacing.md }]}>
-          No WhatsApp number is connected to this workspace yet, so there is nothing to assign.
-        </Text>
+      ) : numbers.length === 0 && !addingNumber ? (
+        <View style={{ marginBottom: spacing.md }}>
+          <Text style={[typography.caption, { color: colors.textTertiary, marginBottom: spacing.sm }]}>
+            No WhatsApp number is connected yet.
+          </Text>
+          <Button label="Add a WhatsApp number" variant="secondary" onPress={() => setAddingNumber(true)} />
+        </View>
       ) : (
         <>
           <View style={{ marginBottom: spacing.xs }}>
@@ -343,12 +373,57 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
               );
             })}
           </View>
-          <Text style={[typography.caption, { color: colors.textTertiary, marginBottom: spacing.md }]}>
-            New chats this member starts go out from this number. Chats already open keep the number they
-            were started with.
+          <Text style={[typography.caption, { color: colors.textTertiary, marginBottom: spacing.sm }]}>
+            New chats this member starts go out from this number, and they only see that number&apos;s
+            chats. Chats already open keep the number they were started with.
           </Text>
+          {!addingNumber ? (
+            <Pressable onPress={() => setAddingNumber(true)} style={[styles.numberRow, { marginBottom: spacing.md }]}>
+              <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+              <Text style={[typography.body, { color: colors.primary, marginLeft: spacing.sm }]}>
+                Add another number
+              </Text>
+            </Pressable>
+          ) : null}
         </>
       )}
+
+      {addingNumber ? (
+        <View style={{ marginBottom: spacing.md }}>
+          <Text style={[typography.caption, { color: colors.textTertiary, marginBottom: spacing.xs }]}>
+            Meta dashboard → WhatsApp → API Setup. Paste the numeric “Phone number ID”, not the phone
+            number. It is checked with Meta before it is saved.
+          </Text>
+          {numberError ? <InlineBanner message={numberError} /> : null}
+          <TextField
+            label="Phone number ID"
+            value={newPhoneNumberId}
+            onChangeText={setNewPhoneNumberId}
+            keyboardType="number-pad"
+            autoCapitalize="none"
+          />
+          <View style={styles.actions}>
+            <View style={{ flex: 1, marginRight: spacing.sm }}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                onPress={() => {
+                  setAddingNumber(false);
+                  setNewPhoneNumberId('');
+                }}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button
+                label="Verify and add"
+                onPress={handleAddNumber}
+                loading={registerNumber.isPending}
+                disabled={newPhoneNumberId.trim().length < 5}
+              />
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.actions}>
         <View style={{ flex: 1, marginRight: spacing.sm }}>

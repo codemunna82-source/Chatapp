@@ -1,9 +1,7 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
-import { ApiError } from '../../lib/ApiError';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { assertPermission } from '../../middleware/rbac.middleware';
-import { conversationExistsForTenant } from '../conversations/conversation.repository';
 import { listMessagesByConversation } from './message.repository';
 import {
   sendOutboundMessage,
@@ -18,12 +16,6 @@ const MEDIA_TYPES = new Set(['image', 'video', 'audio', 'document']);
 export const listMessagesHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const conversationId = req.params.conversationId as string;
-
-  // Existence check only: the message query below is already scoped to
-  // this tenant, so this decides 404-vs-empty-list and nothing else.
-  if (!(await conversationExistsForTenant(conversationId, auth.tenantId))) {
-    throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
-  }
 
   const { cursor, limit, search, starredOnly } = req.query as {
     cursor?: string;

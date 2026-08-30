@@ -51,12 +51,28 @@ export interface RealtimeNotificationPayload {
   data?: Record<string, unknown>;
 }
 
+/**
+ * `whatsappPhoneNumberId` on the chat events is what keeps a workspace's
+ * users from seeing each other's chats in real time.
+ *
+ * Filtering the REST endpoints alone would not be enough: these events are
+ * pushed, so without the number to address them by, every message would
+ * still arrive on every device in the tenant — the isolation would hold on
+ * refresh and leak while the app was open. It is a required parameter, not
+ * an optional one, so a new emit site cannot quietly broadcast tenant-wide.
+ */
 export interface RealtimeEmitter {
-  emitMessageNew(tenantId: string, message: RealtimeMessagePayload): void;
-  emitMessageUpdated(tenantId: string, message: RealtimeMessagePayload): void;
-  emitMessageStatus(tenantId: string, conversationId: string, messageId: string, status: string): void;
+  emitMessageNew(tenantId: string, message: RealtimeMessagePayload, whatsappPhoneNumberId: string): void;
+  emitMessageUpdated(tenantId: string, message: RealtimeMessagePayload, whatsappPhoneNumberId: string): void;
+  emitMessageStatus(
+    tenantId: string,
+    conversationId: string,
+    messageId: string,
+    status: string,
+    whatsappPhoneNumberId: string,
+  ): void;
   emitConversationUpdated(tenantId: string, conversation: RealtimeConversationPayload): void;
-  emitConversationRead(tenantId: string, conversationId: string, byUserId: string): void;
+  emitConversationRead(tenantId: string, conversationId: string, byUserId: string, whatsappPhoneNumberId: string): void;
   emitNotificationNew(tenantId: string, userId: string, notification: RealtimeNotificationPayload): void;
 }
 

@@ -3,8 +3,10 @@ import { getPushGateway } from '../../integrations/fcm';
 import {
   listTokensForTenant,
   listTokensForTenantExcludingUser,
+  listTokensForUsers,
   deleteTokens,
 } from '../devices/deviceToken.repository';
+import { findUserIdsWhoCanSeePhoneNumber } from '../users/user.repository';
 import type { PushPayload } from '../../integrations/fcm';
 
 /** Matches the channel the Android app creates at startup. If these ever
@@ -40,8 +42,13 @@ export function previewForMessage(type: string, text: string | undefined): strin
 }
 
 /**
- * Sends one push to every device in the tenant and prunes whatever FCM
- * reports as dead.
+ * Sends one push and prunes whatever FCM reports as dead.
+ *
+ * `whatsappPhoneNumberId` narrows the recipients to the users who may
+ * actually see that number's chats. Without it a push carries a
+ * colleague's customer name and message text to every phone in the
+ * workspace — and a lock screen is the one place that is impossible to
+ * take back.
  *
  * Never throws. Every caller is on a path that has already done the real
  * work — the message is stored and has gone out over the socket — so a push
@@ -51,15 +58,22 @@ export function previewForMessage(type: string, text: string | undefined): strin
 async function sendToTenant(
   tenantId: string,
   payload: PushPayload,
-  opts: { excludeUserId?: string } = {},
+  opts: { excludeUserId?: string; whatsappPhoneNumberId?: string } = {},
 ): Promise<void> {
   const gateway = getPushGateway();
   if (!gateway.isConfigured()) return;
 
   try {
-    const devices = opts.excludeUserId
-      ? await listTokensForTenantExcludingUser(tenantId, opts.excludeUserId)
-      : await listTokensForTenant(tenantId);
+    let devices;
+    if (opts.whatsappPhoneNumberId) {
+      const audience = await findUserIdsWhoCanSeePhoneNumber(tenantId, opts.whatsappPhoneNumberId);
+      const permitted = opts.excludeUserId ? audience.filter((id) => id !== opts.excludeUserId) : audience;
+      devices = await listTokensForUsers(tenantId, permitted);
+    } else {
+      devices = opts.excludeUserId
+        ? await listTokensForTenantExcludingUser(tenantId, opts.excludeUserId)
+        : await listTokensForTenant(tenantId);
+    }
     if (devices.length === 0) return;
 
     const result = await gateway.send(
@@ -85,6 +99,8 @@ async function sendToTenant(
 export interface MessagePushInput {
   tenantId: string;
   conversationId: string;
+  /** Which number the chat is on — decides who gets the notification. */
+  whatsappPhoneNumberId: string;
   contactName: string;
   messageType: string;
   text?: string;
@@ -102,12 +118,14 @@ export async function pushIncomingMessage(input: MessagePushInput): Promise<void
       type: 'message',
       conversationId: input.conversationId,
     },
-  });
+  }, { whatsappPhoneNumberId: input.whatsappPhoneNumberId });
 }
 
 export interface ReactionPushInput {
   tenantId: string;
   conversationId: string;
+  /** Which number the chat is on — decides who gets the notification. */
+  whatsappPhoneNumberId: string;
   contactName: string;
   emoji?: string;
   /** The text of the message that was reacted to, for context. */
@@ -136,7 +154,7 @@ export async function pushReaction(input: ReactionPushInput): Promise<void> {
       type: 'reaction',
       conversationId: input.conversationId,
     },
-  });
+  }, { whatsappPhoneNumberId: input.whatsappPhoneNumberId });
 }
 
 export interface CallPushInput {

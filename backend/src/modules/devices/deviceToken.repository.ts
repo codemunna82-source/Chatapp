@@ -55,3 +55,9 @@ export async function deleteTokens(tokens: string[]): Promise<void> {
   if (tokens.length === 0) return;
   await DeviceToken.deleteMany({ token: { $in: tokens } });
 }
+
+/** Device tokens for a named set of users, for a scoped push. */
+export async function listTokensForUsers(tenantId: string, userIds: string[]): Promise<DeviceTokenDoc[]> {
+  if (userIds.length === 0) return [];
+  return DeviceToken.find({ tenantId, userId: { $in: userIds } });
+}

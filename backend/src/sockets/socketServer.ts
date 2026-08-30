@@ -6,7 +6,8 @@ import { env } from '../config/env';
 import { logger } from '../lib/logger';
 import { isRedisConfigured, getRedisConnection } from '../queues/connection';
 import { resolveAuthContextFromToken } from '../modules/auth/authContext.service';
-import { tenantRoom, userRoom } from './rooms';
+import { tenantRoom, userRoom, phoneNumberRoom } from './rooms';
+import { visibleWhatsAppPhoneNumberId } from '../modules/conversations/conversation.access';
 import { registerConversationHandlers } from './events/conversation';
 import { registerTypingHandlers } from './events/typing';
 import { createSocketRealtimeEmitter } from './realtimeEmitterImpl';
@@ -72,7 +73,14 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
 
   io.on('connection', (socket: AppSocket) => {
     const { auth } = socket.data;
-    void socket.join(tenantRoom(auth.tenantId));
+
+    // Exactly one visibility room, never both. The tenant room is where
+    // chat events are broadcast to everyone who may see the whole
+    // workspace; a user scoped to one number joins that number's room
+    // instead, so a colleague's message is never delivered to their
+    // device at all — not delivered-then-hidden.
+    const scope = visibleWhatsAppPhoneNumberId(auth);
+    void socket.join(scope ? phoneNumberRoom(scope) : tenantRoom(auth.tenantId));
     void socket.join(userRoom(auth.userId));
     logger.debug({ userId: auth.userId, tenantId: auth.tenantId, socketId: socket.id }, 'Socket connected');
 

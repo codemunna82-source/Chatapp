@@ -94,7 +94,7 @@ async function handleIncomingMessage(
   );
 
   const realtime = getRealtimeEmitter();
-  realtime.emitMessageNew(tenantId, toRealtimeMessage(message));
+  realtime.emitMessageNew(tenantId, toRealtimeMessage(message), String(conversation.whatsappPhoneNumberId));
   if (updatedConversation) {
     realtime.emitConversationUpdated(tenantId, toRealtimeConversation(updatedConversation));
   }
@@ -111,6 +111,7 @@ async function handleIncomingMessage(
     await pushReaction({
       tenantId,
       conversationId: String(conversation._id),
+      whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
       contactName,
       emoji: raw.reaction?.emoji,
       targetPreview: target?.text ?? undefined,
@@ -119,6 +120,7 @@ async function handleIncomingMessage(
     await pushIncomingMessage({
       tenantId,
       conversationId: String(conversation._id),
+      whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
       contactName,
       messageType: item.messageType,
       text: item.text,
@@ -155,9 +157,17 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
   await updateLastMessageStatus(tenantId, String(message._id), ourStatus);
 
   const realtime = getRealtimeEmitter();
-  realtime.emitMessageStatus(tenantId, String(message.conversationId), String(message._id), ourStatus);
+  // Loaded before the emit rather than after: the status event now has to
+  // be addressed to the conversation's number, so it needs the row anyway.
   const conversation = await findConversationByIdAndTenant(String(message.conversationId), tenantId);
   if (conversation) {
+    realtime.emitMessageStatus(
+      tenantId,
+      String(message.conversationId),
+      String(message._id),
+      ourStatus,
+      String(conversation.whatsappPhoneNumberId),
+    );
     // The row's tick lives on the conversation, so the list needs its own
     // event — message:status alone only updates an open chat's bubbles.
     realtime.emitConversationUpdated(tenantId, toRealtimeConversation(conversation));

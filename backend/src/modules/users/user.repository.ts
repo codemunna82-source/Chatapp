@@ -177,3 +177,31 @@ export async function findAssignedPhoneNumberId(userId: string, tenantId: string
   const user = await User.findOne({ _id: userId, tenantId }).select('whatsappPhoneNumberId').lean();
   return user?.whatsappPhoneNumberId ? String(user.whatsappPhoneNumberId) : null;
 }
+
+/**
+ * The users who may see a given WhatsApp number's chats.
+ *
+ * Mirrors visibleWhatsAppPhoneNumberId: master admins and anyone with no
+ * assignment see everything, plus whoever is assigned to this number.
+ * Used to address push notifications, which would otherwise put a
+ * colleague's customer message on every phone in the workspace — the same
+ * leak as the socket broadcast, on the surface where it is most visible.
+ */
+export async function findUserIdsWhoCanSeePhoneNumber(
+  tenantId: string,
+  whatsappPhoneNumberId: string,
+): Promise<string[]> {
+  const users = await User.find({
+    tenantId,
+    status: 'ACTIVE',
+    $or: [
+      { role: 'MASTER_ADMIN' },
+      { whatsappPhoneNumberId: { $exists: false } },
+      { whatsappPhoneNumberId: null },
+      { whatsappPhoneNumberId },
+    ],
+  })
+    .select('_id')
+    .lean();
+  return users.map((u) => String(u._id));
+}

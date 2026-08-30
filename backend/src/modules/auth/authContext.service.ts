@@ -71,7 +71,7 @@ export async function resolveAuthContextFromToken(token: string): Promise<AuthCo
   // this runs on every cache miss, and pulling the whole document to
   // examine five fields is bytes off the wire for nothing.
   const user = await User.findOne({ _id: claims.sub, tenantId: claims.tenantId })
-    .select('status role permissions validFrom validUntil tenantId')
+    .select('status role permissions validFrom validUntil tenantId whatsappPhoneNumberId')
     .lean();
   if (!user) {
     throw ApiError.unauthorized('INVALID_TOKEN', 'Account no longer exists');
@@ -93,6 +93,7 @@ export async function resolveAuthContextFromToken(token: string): Promise<AuthCo
     tenantId: String(user.tenantId),
     role: user.role as 'MASTER_ADMIN' | 'SUB_USER',
     permissions: (user.permissions ?? []) as Permission[],
+    whatsappPhoneNumberId: user.whatsappPhoneNumberId ? String(user.whatsappPhoneNumberId) : undefined,
   };
 
   // Only reached when every check above passed — see the note on the cache.

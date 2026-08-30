@@ -14,3 +14,14 @@ export function userRoom(userId: string): string {
 export function conversationRoom(conversationId: string): string {
   return `conversation:${conversationId}`;
 }
+
+/**
+ * Everyone whose visibility is limited to one WhatsApp number.
+ *
+ * Chat events go to this room *and* the tenant room; a socket in both — it
+ * never is, since joinVisibilityRooms picks exactly one — would still be
+ * delivered once, because Socket.IO de-duplicates across `.to()` rooms.
+ */
+export function phoneNumberRoom(whatsappPhoneNumberId: string): string {
+  return `number:${whatsappPhoneNumberId}`;
+}
