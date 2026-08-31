@@ -3,7 +3,7 @@ import { logger } from '../../lib/logger';
 import * as messages from './messages';
 import * as media from './media';
 import { listTemplates } from './templates';
-import { fetchPhoneNumberProfile } from './phoneNumbers';
+import { fetchPhoneNumberProfile, getCallingSettings, setCallingEnabled } from './phoneNumbers';
 import * as calls from './calls';
 import { mockMetaGateway } from './mock/mockMetaGateway';
 import type { MetaGateway } from './metaGateway';
@@ -19,6 +19,8 @@ const realMetaGateway: MetaGateway = {
   downloadMediaBinary: media.downloadMediaBinary,
   listTemplates,
   fetchPhoneNumberProfile,
+  getCallingSettings,
+  setCallingEnabled,
   preAcceptCall: calls.preAcceptCall,
   acceptCall: calls.acceptCall,
   rejectCall: calls.rejectCall,

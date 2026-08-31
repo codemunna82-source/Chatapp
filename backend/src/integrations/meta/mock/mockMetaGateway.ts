@@ -97,4 +97,12 @@ export const mockMetaGateway: MetaGateway = {
   async terminateCall(_creds, callId) {
     logger.debug({ callId }, '[MOCK META] terminateCall');
   },
+  async getCallingSettings(_accessToken, phoneNumberId) {
+    logger.debug({ phoneNumberId }, '[MOCK META] getCallingSettings');
+    return { status: 'ENABLED', callIconVisibility: 'DEFAULT' };
+  },
+
+  async setCallingEnabled(_accessToken, phoneNumberId, enabled) {
+    logger.debug({ phoneNumberId, enabled }, '[MOCK META] setCallingEnabled');
+  },
 };

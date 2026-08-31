@@ -11,6 +11,7 @@ import type {
   MetaTemplateSummary,
   PhoneNumberProfile,
 } from './types';
+import type { PhoneNumberCallingSettings } from './phoneNumbers';
 import type { ListTemplatesCredentials } from './templates';
 
 /**
@@ -37,6 +38,9 @@ export interface MetaGateway {
   acceptCall(creds: MetaCredentials, callId: string, sdpAnswer: string): Promise<void>;
   rejectCall(creds: MetaCredentials, callId: string): Promise<void>;
   terminateCall(creds: MetaCredentials, callId: string): Promise<void>;
+  /** Calling is off by default on every number — these read and flip it. */
+  getCallingSettings(accessToken: string, phoneNumberId: string): Promise<PhoneNumberCallingSettings>;
+  setCallingEnabled(accessToken: string, phoneNumberId: string, enabled: boolean): Promise<void>;
   /** Verifies a phone_number_id exists and the token can reach it. */
   fetchPhoneNumberProfile(accessToken: string, phoneNumberId: string): Promise<PhoneNumberProfile>;
 }

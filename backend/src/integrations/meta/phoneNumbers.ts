@@ -43,3 +43,64 @@ export async function fetchPhoneNumberProfile(
     qualityRating: res.quality_rating,
   };
 }
+
+export interface PhoneNumberCallingSettings {
+  /** ENABLED | DISABLED, as Meta reports it. Undefined when Meta returns no
+   *  calling object at all — which is how a number with calling unavailable
+   *  in its market looks, and is not the same as DISABLED. */
+  status?: string;
+  callIconVisibility?: string;
+}
+
+interface SettingsResponse {
+  calling?: {
+    status?: string;
+    call_icon_visibility?: string;
+  };
+}
+
+/**
+ * Reads whether voice calling is switched on for a number.
+ *
+ * Worth its own call because calling is **off by default on every number**,
+ * including test ones — a number that messages perfectly will not ring
+ * until this is flipped, and nothing about the number's own status hints
+ * at that.
+ */
+export async function getCallingSettings(
+  accessToken: string,
+  phoneNumberId: string,
+): Promise<PhoneNumberCallingSettings> {
+  const config: AxiosRequestConfig = { ...authConfig(accessToken), params: { fields: 'calling' } };
+  const res = await metaRequest<SettingsResponse>((client) => client.get(`/${phoneNumberId}/settings`, config));
+  return {
+    status: res.calling?.status,
+    callIconVisibility: res.calling?.call_icon_visibility,
+  };
+}
+
+/**
+ * Switches voice calling on or off for a number.
+ *
+ * `call_icon_visibility: DEFAULT` puts the call button in the customer's
+ * WhatsApp chat — without it the number can technically take calls that
+ * nobody has any way to place.
+ */
+export async function setCallingEnabled(
+  accessToken: string,
+  phoneNumberId: string,
+  enabled: boolean,
+): Promise<void> {
+  await metaRequest<{ success?: boolean }>((client) =>
+    client.post(
+      `/${phoneNumberId}/settings`,
+      {
+        calling: {
+          status: enabled ? 'ENABLED' : 'DISABLED',
+          ...(enabled ? { call_icon_visibility: 'DEFAULT' } : {}),
+        },
+      },
+      authConfig(accessToken),
+    ),
+  );
+}
