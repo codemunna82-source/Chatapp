@@ -15,6 +15,20 @@ export const initiateCallHandler = asyncHandler(async (req: Request, res: Respon
   res.status(201).json({ success: true, data: result });
 });
 
+/**
+ * The call ringing on this user's number right now, or null.
+ *
+ * Polled once when the app comes to the foreground — see the mobile
+ * PendingCallSync. Returns 200 with `data: null` rather than 404 when
+ * nothing is ringing: "no call right now" is the ordinary answer to this
+ * question, not a failure.
+ */
+export const pendingCallHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const pending = await callService.findPendingCallForUser(auth);
+  res.status(200).json({ success: true, data: pending });
+});
+
 export const answerCallHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const { sdp } = req.body as { sdp: string };

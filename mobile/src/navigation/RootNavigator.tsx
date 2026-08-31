@@ -9,6 +9,8 @@ import { useAuthStore } from '../store/authStore';
 import { RealtimeSync } from '../sockets/RealtimeSync';
 import { OutboxFlusher } from '../sockets/OutboxFlusher';
 import { PushNotificationSync } from '../notifications/PushNotificationSync';
+import { CallOverlay } from '../calling/CallOverlay';
+import { PendingCallSync } from '../calling/PendingCallSync';
 import { navigationIntegration, isSentryEnabled } from '../lib/sentry';
 
 export function RootNavigator() {
@@ -65,7 +67,12 @@ export function RootNavigator() {
           <RealtimeSync />
           <OutboxFlusher />
           <PushNotificationSync navigationRef={navigationRef} />
+          <PendingCallSync />
           <MainTabNavigator />
+          {/* Last, and outside the tab navigator, so a ringing call covers
+              whatever screen the user was on rather than replacing it —
+              declining puts them straight back with nothing to navigate. */}
+          <CallOverlay />
         </>
       ) : (
         <AuthNavigator />

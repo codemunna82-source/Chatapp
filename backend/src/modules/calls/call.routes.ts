@@ -6,6 +6,7 @@ import { listCallsQuerySchema, initiateCallSchema, callIdParamSchema, answerCall
 import {
   listCallsHandler,
   initiateCallHandler,
+  pendingCallHandler,
   answerCallHandler,
   rejectCallHandler,
   hangUpCallHandler,
@@ -17,6 +18,9 @@ callRouter.use(requireAuth);
 
 callRouter.get('/', requirePermission('CALL_HISTORY'), validate({ query: listCallsQuerySchema }), listCallsHandler);
 callRouter.post('/', requirePermission('CALL_ACCESS'), validate({ body: initiateCallSchema }), initiateCallHandler);
+
+// Before the :callId routes, so "pending" is never read as a call id.
+callRouter.get('/pending', requirePermission('CALL_ACCESS'), pendingCallHandler);
 
 // Answering a live WhatsApp call. Gated on CALL_ACCESS like placing one,
 // and each handler re-checks that the call arrived on this user's own

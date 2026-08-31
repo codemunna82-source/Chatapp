@@ -6,6 +6,7 @@ import { useSocketEvent } from './useSocketEvent';
 import { useSocketConnection } from './useSocketConnected';
 import { useMessageAlert } from './useMessageAlert';
 import { useActiveConversationStore } from '../store/activeConversationStore';
+import { useCallStore, type IncomingCallPayload, type CallEndedPayload } from '../calling/callStore';
 import { upsertMessageInCache, patchMessageStatusInCache } from '../queries/useMessages';
 import { queryKeys } from '../queries/keys';
 import type { Message, Conversation, MessageStatus } from '../api/types';
@@ -152,6 +153,29 @@ export function RealtimeSync(): null {
       invalidateConversations();
     },
     [invalidateConversations],
+  );
+
+  // Calls are handed straight to the call store rather than to the query
+  // cache: a ringing phone is not data to be refetched, and the SDP offer
+  // in this payload is the only copy that will ever arrive — there is no
+  // endpoint to re-read it from if it were dropped here.
+  useSocketEvent<IncomingCallPayload>(
+    'call:incoming',
+    (payload) => {
+      useCallStore.getState().ring(payload);
+    },
+    [],
+  );
+
+  useSocketEvent<CallEndedPayload>(
+    'call:ended',
+    (payload) => {
+      useCallStore.getState().remoteEnded(payload);
+      // The history list gains a completed call with its duration, which
+      // only exists once Meta's terminate webhook has been reconciled.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.calls });
+    },
+    [queryClient],
   );
 
   return null;

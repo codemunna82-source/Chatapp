@@ -170,6 +170,11 @@ export async function handleInboundCallEvent(
       providerCallId: item.callId,
       provider: WHATSAPP_CALLING_PROVIDER,
       whatsappPhoneNumberId,
+      // Kept only while the call rings, so an agent woken by the push
+      // notification can still answer it — the socket event below reaches
+      // a device that is already awake, and nothing replays it for one
+      // that was not. Cleared on answer, decline and terminate.
+      sdpOffer: item.sdpOffer,
     });
 
     const payload = {
@@ -227,6 +232,56 @@ export async function handleInboundCallEvent(
     },
     whatsappPhoneNumberId,
   );
+}
+
+/**
+ * How long after the ring a call is still worth offering to answer.
+ *
+ * WhatsApp gives up on an unanswered call well before this, so the window
+ * only has to cover the seconds between the push landing and the agent
+ * unlocking their phone. Longer would mean presenting calls that have
+ * already stopped ringing on the customer's side.
+ */
+const PENDING_CALL_MAX_AGE_MS = 45_000;
+
+export interface PendingCall {
+  callId: string;
+  callLogId: string;
+  contactId: string;
+  contactName?: string;
+  fromPhone: string;
+  sdpOffer?: string;
+}
+
+/**
+ * The call ringing on this user's own number right now, if any.
+ *
+ * Exists for the app-resume path: a push notification wakes the agent, but
+ * the `call:incoming` socket event that carried the WebRTC offer was
+ * delivered while the app was closed and Socket.IO replays nothing. Without
+ * this the agent opens VOXO to a phone that is still ringing and no way to
+ * pick it up.
+ *
+ * MASTER_ADMIN gets nothing rather than everything: an admin with no number
+ * of their own has no call of their own, and answering a colleague's on
+ * their behalf would take it away from the agent it is ringing for.
+ */
+export async function findPendingCallForUser(auth: AuthContext): Promise<PendingCall | null> {
+  const scope = visibleWhatsAppPhoneNumberId(auth);
+  if (!scope) return null;
+
+  const call = await repo.findRingingCallForNumber(scope, PENDING_CALL_MAX_AGE_MS);
+  if (!call || String(call.tenantId) !== auth.tenantId || !call.providerCallId) return null;
+
+  const contact = await contactRepo.findContactByIdAndTenant(String(call.contactId), auth.tenantId);
+  return {
+    callId: call.providerCallId,
+    callLogId: String(call._id),
+    contactId: String(call.contactId),
+    contactName: contact?.name ?? undefined,
+    fromPhone: contact?.phone ?? '',
+    sdpOffer: call.sdpOffer ?? undefined,
+  };
 }
 
 /**

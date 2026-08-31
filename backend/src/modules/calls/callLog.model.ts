@@ -38,6 +38,20 @@ const callLogSchema = new Schema(
      * calls.
      */
     whatsappPhoneNumberId: { type: Schema.Types.ObjectId, ref: 'WhatsAppPhoneNumber', index: true },
+    /**
+     * Meta's WebRTC offer for a call that is still ringing.
+     *
+     * Stored only because a socket event reaches a device that is awake,
+     * and a call push does not: an agent whose app was closed opens it to
+     * find the ring already delivered and gone, with no endpoint to read
+     * the offer back from. This is that endpoint's source (see
+     * findRingingCallForNumber).
+     *
+     * Cleared the moment the call is answered, declined or terminated —
+     * it is worthless afterwards, and an SDP kept past its call is just an
+     * unbounded blob on every historical row.
+     */
+    sdpOffer: { type: String },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
@@ -52,6 +66,13 @@ callLogSchema.index({ tenantId: 1, contactId: 1, createdAt: -1 });
 // Sparse: only calls carry a provider id, and two different calls must
 // never share one — this is the key a terminate webhook is matched on.
 callLogSchema.index({ providerCallId: 1 }, { unique: true, sparse: true });
+// The pending-call lookup on app resume: one ringing call, on one number,
+// newest first. Partial rather than sparse so the index holds only the
+// handful of calls actually ringing right now, not every row ever written.
+callLogSchema.index(
+  { whatsappPhoneNumberId: 1, _id: -1 },
+  { partialFilterExpression: { status: 'RINGING' } },
+);
 
 export type CallLogDoc = HydratedDocument<InferSchemaType<typeof callLogSchema>>;
 export const CallLog = model('CallLog', callLogSchema);

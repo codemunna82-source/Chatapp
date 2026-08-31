@@ -22,6 +22,13 @@
     </intent>
   </queries>
   <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false" android:fullBackupContent="@xml/secure_store_backup_rules" android:dataExtractionRules="@xml/secure_store_data_extraction_rules">
+    <!-- react-native-webrtc ships a screen-capture service in its own
+         manifest. VOXO makes audio calls only and never starts it, but a
+         declared foregroundServiceType="mediaProjection" drags in the
+         Android 14 media-projection obligations (an extra permission, and
+         a Play Console declaration) for a capability the app does not
+         have. Removed at merge time rather than permitted. -->
+    <service android:name="com.oney.WebRTCModule.MediaProjectionService" tools:node="remove"/>
     <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_icon_color"/>
     <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/notification_icon"/>
     <meta-data android:name="expo.modules.notifications.default_notification_color" android:resource="@color/notification_icon_color"/>

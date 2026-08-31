@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { registerForPushNotifications } from './pushRegistration';
 import { useActiveConversationStore } from '../store/activeConversationStore';
+import { useCallStore } from '../calling/callStore';
 import { queryKeys } from '../queries/keys';
 
 /**
@@ -15,6 +16,7 @@ interface PushData {
   type?: string;
   conversationId?: string;
   contactId?: string;
+  callId?: string;
 }
 
 interface PushNotificationSyncProps {
@@ -95,8 +97,13 @@ Notifications.setNotificationHandler({
     const data = (notification.request.content.data ?? {}) as PushData;
     const activeId = useActiveConversationStore.getState().activeConversationId;
     const isCurrentChat = Boolean(data.conversationId) && data.conversationId === activeId;
+    // The call push is the backup for a device that was asleep. With the
+    // app open the socket has already put the full call screen up, so a
+    // banner about the same call would land on top of the Answer button.
+    const isRingingCall =
+      data.type === 'incoming_call' && useCallStore.getState().callId === data.callId;
     return {
-      shouldShowBanner: !isCurrentChat,
+      shouldShowBanner: !isCurrentChat && !isRingingCall,
       shouldShowList: true,
       // Sound and vibration in the foreground are the in-app alert's job
       // (useMessageAlert), which already respects the Settings toggles. Two
