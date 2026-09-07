@@ -48,8 +48,9 @@ export interface GuestMessageView {
   from: 'me' | 'business';
   type: string;
   text?: string;
-  /** The customer cannot fetch the bytes yet, so the UI renders a placeholder rather than a broken image. */
   hasMedia: boolean;
+  /** Present when there is an attachment — the id the media route is asked for. */
+  mediaId?: string;
   createdAt: string;
 }
 
@@ -67,6 +68,7 @@ function toGuestMessage(doc: MessageLean): GuestMessageView {
     type: doc.type,
     text: doc.text ?? undefined,
     hasMedia: Boolean(doc.mediaId),
+    mediaId: doc.mediaId ? String(doc.mediaId) : undefined,
     createdAt: doc.createdAt.toISOString(),
   };
 }
@@ -293,6 +295,59 @@ export async function postGuestMessage(guest: GuestContext, text: string): Promi
     contactName: contact?.name || contact?.phone || 'Web chat',
     messageType: 'text',
     text,
+  });
+
+  return toGuestMessage(message as unknown as MessageLean);
+}
+
+/**
+ * An image the customer picked in the web window.
+ *
+ * Stored the same way a typed message is — direction IN, on the same
+ * conversation — so the agent reads one thread rather than photos landing
+ * somewhere separate from the words around them. The bytes were already
+ * put away by storeGuestImage; this only records the message that points
+ * at them.
+ */
+export async function postGuestImageMessage(
+  guest: GuestContext,
+  mediaId: string,
+): Promise<GuestMessageView> {
+  const [conversation, phoneNumber, contact] = await Promise.all([
+    findConversationByIdAndTenant(guest.conversationId, guest.tenantId),
+    findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId),
+    findContactByIdAndTenant(guest.contactId, guest.tenantId),
+  ]);
+  if (!conversation) {
+    throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'This conversation no longer exists');
+  }
+
+  const message = await createMessage({
+    tenantId: guest.tenantId,
+    conversationId: guest.conversationId,
+    recipientPhone: phoneNumber?.displayPhoneNumber ?? '',
+    direction: 'IN',
+    type: 'image',
+    mediaId,
+    status: 'DELIVERED',
+  });
+
+  // The chat list has one line per conversation and cannot show a picture,
+  // so it gets the same placeholder the WhatsApp ingestion path uses.
+  const updated = await recordGuestInboundActivity(guest.conversationId, guest.tenantId, '[image]');
+
+  const realtime = getRealtimeEmitter();
+  realtime.emitMessageNew(guest.tenantId, toRealtimeMessage(message), guest.whatsappPhoneNumberId);
+  if (updated) {
+    realtime.emitConversationUpdated(guest.tenantId, toRealtimeConversation(updated));
+  }
+
+  await pushIncomingMessage({
+    tenantId: guest.tenantId,
+    conversationId: guest.conversationId,
+    whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
+    contactName: contact?.name || contact?.phone || 'Web chat',
+    messageType: 'image',
   });
 
   return toGuestMessage(message as unknown as MessageLean);

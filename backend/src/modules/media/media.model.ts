@@ -22,6 +22,21 @@ const mediaSchema = new Schema(
     // Only set once storageRef holds a real Cloudinary URL — needed to
     // delete/manage the asset later.
     cloudinaryPublicId: { type: String },
+    /**
+     * The file itself, for media that has nowhere else to live.
+     *
+     * Everything from WhatsApp is fetched back from Meta, and everything
+     * cached goes to Cloudinary — but an image a customer sends in the web
+     * chat never touches either: it is not going to WhatsApp, and
+     * Cloudinary is optional configuration. Rather than making image
+     * sending depend on a second service being set up, small files fall
+     * back to the database.
+     *
+     * select:false so no ordinary media query drags a few megabytes of
+     * image along; only the byte-serving path asks for it. Bounded by the
+     * guest upload limit well under Mongo's 16MB document ceiling.
+     */
+    bytes: { type: Buffer, select: false },
     status: { type: String, enum: MEDIA_STATUSES, default: 'UPLOADING', required: true },
   },
   { timestamps: true },

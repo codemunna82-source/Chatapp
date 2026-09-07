@@ -2,7 +2,9 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { getGuestContext } from '../../middleware/guestAuth.middleware';
+import { ApiError } from '../../lib/ApiError';
 import { buildIceServers } from '../calls/webCall.service';
+import { getGuestMediaBytes, storeGuestImage } from './guestMedia.service';
 import * as guestService from './guest.service';
 
 /* ------------------------------------------------------------------ *
@@ -76,4 +78,63 @@ export const issueGuestLinkByPhoneHandler = asyncHandler(async (req: Request, re
   const auth = getTenantContext(req);
   const { phone, name } = req.body as { phone: string; name?: string };
   res.status(201).json({ success: true, data: await guestService.issueGuestLinkForPhone(auth, phone, name) });
+});
+
+/* ------------------------------------------------------------------ *
+ * Images                                                              *
+ * ------------------------------------------------------------------ */
+
+/**
+ * Several images in one request, each becoming its own message.
+ *
+ * One message per picture rather than one carrying many: the agent app,
+ * the chat list and the WhatsApp thread this sits beside all model a
+ * message as having at most one attachment, and a multi-image message
+ * would have to be invented on both sides to display.
+ *
+ * Failures are per file. A request that stored three of four images has
+ * genuinely delivered three, and rejecting the whole batch would lose
+ * them to make the response tidier.
+ */
+export const uploadGuestMediaHandler = asyncHandler(async (req: Request, res: Response) => {
+  const guest = getGuestContext(req);
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  if (files.length === 0) {
+    throw ApiError.badRequest('NO_FILES', 'No images were uploaded.');
+  }
+
+  const sent = [];
+  const failed = [];
+  for (const file of files) {
+    try {
+      const media = await storeGuestImage({
+        tenantId: guest.tenantId,
+        whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
+        buffer: file.buffer,
+        mimeType: file.mimetype,
+      });
+      sent.push(await guestService.postGuestImageMessage(guest, String(media._id)));
+    } catch (err) {
+      failed.push({
+        filename: file.originalname,
+        message: err instanceof ApiError ? err.message : 'Could not send this image.',
+      });
+    }
+  }
+
+  if (sent.length === 0) {
+    throw ApiError.badRequest('UPLOAD_FAILED', failed[0]?.message ?? 'Could not send those images.');
+  }
+  res.status(201).json({ success: true, data: sent, meta: { failed } });
+});
+
+export const getGuestMediaHandler = asyncHandler(async (req: Request, res: Response) => {
+  const guest = getGuestContext(req);
+  const { buffer, mimeType } = await getGuestMediaBytes(guest, req.params.id as string);
+
+  // A media id names one immutable file, so the browser never needs to ask
+  // twice. Private because it is one customer's conversation, not
+  // something a shared cache should hold.
+  res.setHeader('Cache-Control', 'private, max-age=86400, immutable');
+  res.type(mimeType).send(buffer);
 });
