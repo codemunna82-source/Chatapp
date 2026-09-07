@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { getGuestContext } from '../../middleware/guestAuth.middleware';
+import { buildIceServers } from '../calls/webCall.service';
 import * as guestService from './guest.service';
 
 /* ------------------------------------------------------------------ *
@@ -24,6 +25,17 @@ export const postGuestMessageHandler = asyncHandler(async (req: Request, res: Re
   const guest = getGuestContext(req);
   const { text } = req.body as { text: string };
   res.status(201).json({ success: true, data: await guestService.postGuestMessage(guest, text) });
+});
+
+/**
+ * The ICE configuration for a call from this window. Served rather than
+ * built into the page so the TURN credentials live in one config the
+ * agent app reads too, and requires a valid link like every other guest
+ * route — TURN credentials are not something to hand out unauthenticated.
+ */
+export const getGuestIceHandler = asyncHandler(async (req: Request, res: Response) => {
+  getGuestContext(req);
+  res.status(200).json({ success: true, data: { iceServers: buildIceServers() } });
 });
 
 export const markGuestReadHandler = asyncHandler(async (req: Request, res: Response) => {

@@ -8,6 +8,7 @@ import {
   listGuestMessagesHandler,
   postGuestMessageHandler,
   markGuestReadHandler,
+  getGuestIceHandler,
 } from './guest.controller';
 
 /**
@@ -26,3 +27,4 @@ guestRouter.get('/session', getGuestSessionHandler);
 guestRouter.get('/messages', validate({ query: guestMessagesQuerySchema }), listGuestMessagesHandler);
 guestRouter.post('/messages', validate({ body: guestMessageSchema }), postGuestMessageHandler);
 guestRouter.post('/read', markGuestReadHandler);
+guestRouter.get('/ice', getGuestIceHandler);

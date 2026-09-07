@@ -10,6 +10,7 @@ import {
   answerCallHandler,
   rejectCallHandler,
   hangUpCallHandler,
+  getWebCallIceHandler,
 } from './call.controller';
 
 export const callRouter = Router();
@@ -18,6 +19,10 @@ callRouter.use(requireAuth);
 
 callRouter.get('/', requirePermission('CALL_HISTORY'), validate({ query: listCallsQuerySchema }), listCallsHandler);
 callRouter.post('/', requirePermission('CALL_ACCESS'), validate({ body: initiateCallSchema }), initiateCallHandler);
+
+// Like "pending" below, before the :callId routes so it is never read as
+// a call id.
+callRouter.get('/ice', requirePermission('CALL_ACCESS'), getWebCallIceHandler);
 
 // Before the :callId routes, so "pending" is never read as a call id.
 callRouter.get('/pending', requirePermission('CALL_ACCESS'), pendingCallHandler);

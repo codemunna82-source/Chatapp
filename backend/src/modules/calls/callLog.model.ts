@@ -52,6 +52,25 @@ const callLogSchema = new Schema(
      * unbounded blob on every historical row.
      */
     sdpOffer: { type: String },
+    /**
+     * Set only on a call carried over our own WebRTC signalling — the
+     * customer in the web chat window rather than a real WhatsApp caller.
+     *
+     * Meta's calling API knows nothing about these, so `provider` reads
+     * "web" and none of the Meta answer/hangup paths apply. The two are
+     * kept in one collection because the agent's call history is one list
+     * either way, and a second collection would have to be merged back
+     * together on every read.
+     */
+    conversationId: { type: Schema.Types.ObjectId, ref: 'Conversation', index: true },
+    /**
+     * Which agent picked it up. A web call is signalled peer to peer after
+     * the answer, so the server has to know which device to route the
+     * remaining candidates to — the ringing broadcast goes to everyone who
+     * may see the number, but the conversation that follows is with one
+     * of them.
+     */
+    answeredByUserId: { type: Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
@@ -63,6 +82,12 @@ const callLogSchema = new Schema(
 // insertion order, so the rows come back in exactly the same sequence.
 callLogSchema.index({ tenantId: 1, _id: -1 });
 callLogSchema.index({ tenantId: 1, contactId: 1, createdAt: -1 });
+// The live web call for a conversation. Partial so the index holds only
+// calls actually in flight rather than an entry per row ever written.
+callLogSchema.index(
+  { conversationId: 1, _id: -1 },
+  { partialFilterExpression: { status: { $in: ['RINGING', 'ANSWERED'] } } },
+);
 // Sparse: only calls carry a provider id, and two different calls must
 // never share one — this is the key a terminate webhook is matched on.
 callLogSchema.index({ providerCallId: 1 }, { unique: true, sparse: true });

@@ -125,6 +125,30 @@ const envSchema = z.object({
    * WhatsApp thread. No trailing slash; issuing a link fails with a clear
    * error while this is unset rather than handing out a half-formed URL.
    */
+  /**
+   * TURN relay for browser-to-phone calls, comma-separated urls plus the
+   * credential pair.
+   *
+   * Required in practice, not optional the way STUN is. A WhatsApp call
+   * has Meta relaying the media, so both ends only ever talk to Meta; a
+   * web-chat call has the customer's browser and the agent's phone trying
+   * to reach each other directly, and on mobile carrier NAT they usually
+   * cannot. Without TURN those calls ring, connect and stay silent.
+   *
+   * Served to both clients from one place (GET /api/guest/ice and the
+   * agent's own fetch) so the credentials live in one config rather than
+   * being pasted into two builds.
+   */
+  TURN_URLS: z.string().optional().default('').transform((v) => v.trim()),
+  TURN_USERNAME: z.string().optional().default('').transform((v) => v.trim()),
+  TURN_CREDENTIAL: z.string().optional().default('').transform((v) => v.trim()),
+  /** Public STUN, used alongside TURN to find a direct path first when one exists. */
+  STUN_URLS: z
+    .string()
+    .optional()
+    .default('stun:stun.l.google.com:19302')
+    .transform((v) => v.trim()),
+
   GUEST_LINK_BASE_URL: z
     .string()
     .optional()

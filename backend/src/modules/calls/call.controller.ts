@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import * as callService from './call.service';
+import { buildIceServers } from './webCall.service';
 
 export const listCallsHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
@@ -46,4 +47,15 @@ export const hangUpCallHandler = asyncHandler(async (req: Request, res: Response
   const auth = getTenantContext(req);
   const call = await callService.hangUpCallForUser(auth, req.params.callId as string);
   res.status(200).json({ success: true, data: call });
+});
+
+/**
+ * The ICE configuration for a call with the web chat window.
+ *
+ * The same values the customer's page is served, from one config — a
+ * browser and a phone that disagree about which relay to use will gather
+ * candidates that can never pair up.
+ */
+export const getWebCallIceHandler = asyncHandler(async (_req: Request, res: Response) => {
+  res.status(200).json({ success: true, data: { iceServers: buildIceServers() } });
 });

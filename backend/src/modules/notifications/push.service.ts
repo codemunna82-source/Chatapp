@@ -201,6 +201,13 @@ export interface IncomingCallPushInput {
   contactId: string;
   contactName: string;
   callId: string;
+  /**
+   * Where the call came from. A call from the web chat window is not a
+   * WhatsApp call and must not say it is — the agent decides whether to
+   * pick up partly on what the notification claims, and the two behave
+   * differently once answered.
+   */
+  channel?: 'whatsapp' | 'web';
 }
 
 /**
@@ -220,7 +227,7 @@ export async function pushIncomingCall(input: IncomingCallPushInput): Promise<vo
     input.tenantId,
     {
       title: input.contactName,
-      body: 'Incoming WhatsApp call',
+      body: input.channel === 'web' ? 'Incoming call from the chat window' : 'Incoming WhatsApp call',
       // Not collapsed with the chat key: a call must never replace, or be
       // replaced by, a message notification from the same contact.
       collapseKey: `incoming-call:${input.callId}`,

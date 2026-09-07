@@ -11,6 +11,7 @@ import { tenantRoom, userRoom, phoneNumberRoom, conversationRoom } from './rooms
 import { visibleWhatsAppPhoneNumberId } from '../modules/conversations/conversation.access';
 import { registerConversationHandlers } from './events/conversation';
 import { registerTypingHandlers } from './events/typing';
+import { registerGuestCallHandlers, registerAgentWebCallHandlers } from './events/webCall';
 import { createSocketRealtimeEmitter } from './realtimeEmitterImpl';
 import { setRealtimeEmitter } from '../realtime/events';
 import type { AppServer, AppSocket } from './types';
@@ -96,6 +97,8 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
       void socket.join(conversationRoom(guest.conversationId));
       logger.debug({ conversationId: guest.conversationId, socketId: socket.id }, 'Guest socket connected');
 
+      registerGuestCallHandlers(io as AppServer, socket, guest);
+
       // The same reasoning as the agent re-validation below: a link can be
       // revoked or expire while the page is still open, and a long-lived
       // socket must not outlive what an HTTP request with the same token
@@ -137,6 +140,7 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
 
     registerConversationHandlers(io as AppServer, socket, auth);
     registerTypingHandlers(socket, auth);
+    registerAgentWebCallHandlers(io as AppServer, socket, auth);
 
     // Re-runs the exact same check requireAuth uses on every HTTP request
     // (account status, subscription window, and — because it re-verifies
