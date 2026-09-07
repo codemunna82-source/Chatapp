@@ -11,6 +11,10 @@ process.env.JWT_REFRESH_TTL ??= '30d';
 process.env.META_MOCK_MODE ??= 'true';
 process.env.META_APP_SECRET ??= 'test-meta-app-secret';
 process.env.META_VERIFY_TOKEN ??= 'test-verify-token';
+// The customer-facing web chat needs a public origin to build its link
+// from; without one, issuing a link is a configuration error rather than a
+// test failure.
+process.env.GUEST_LINK_BASE_URL ??= 'https://chat.example.com';
 // Placeholder — real DB-backed tests point mongoose at an in-memory
 // instance via withMongo.ts; this only satisfies env.ts's non-empty check.
 process.env.MONGODB_URI ??= 'mongodb://127.0.0.1:27017/voxo-test-placeholder';

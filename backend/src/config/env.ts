@@ -119,6 +119,25 @@ const envSchema = z.object({
    */
   ENCRYPTION_KEY: z.string().optional().default('').transform((v) => v.trim()),
 
+  /**
+   * Public origin of the customer-facing web chat — the Vercel deployment
+   * — used to build the "Open private chat" link an agent sends into a
+   * WhatsApp thread. No trailing slash; issuing a link fails with a clear
+   * error while this is unset rather than handing out a half-formed URL.
+   */
+  GUEST_LINK_BASE_URL: z
+    .string()
+    .optional()
+    .default('')
+    .transform((v) => v.trim().replace(/\/+$/, '')),
+  /**
+   * How long a web-chat link keeps working. Long enough that a customer
+   * who comes back to an old WhatsApp thread still lands in their
+   * conversation, short enough that a forwarded link does not outlive the
+   * business relationship.
+   */
+  GUEST_SESSION_TTL_DAYS: z.coerce.number().int().positive().max(365).default(30),
+
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
 

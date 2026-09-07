@@ -1,5 +1,6 @@
 import { conversationRoom } from '../rooms';
 import type { AppSocket } from '../types';
+import type { AuthContext } from '../../types/express';
 
 interface TypingPayload {
   conversationId?: string;
@@ -12,8 +13,7 @@ interface TypingPayload {
  * "typing" into a conversation room it was never authorized to join,
  * leaking presence information across the tenant boundary.
  */
-export function registerTypingHandlers(socket: AppSocket): void {
-  const { auth } = socket.data;
+export function registerTypingHandlers(socket: AppSocket, auth: AuthContext): void {
 
   socket.on('typing:start', (payload: TypingPayload) => {
     const conversationId = payload?.conversationId;

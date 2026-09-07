@@ -32,3 +32,17 @@ export const webhookRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many webhook requests.' } },
 });
+
+/**
+ * The customer-facing web chat. Public in a way the rest of the API is
+ * not — the link is in a WhatsApp thread that can be forwarded to anyone —
+ * so this is per-IP and tighter than the general budget, while still
+ * leaving room for someone typing quickly on a page that also polls.
+ */
+export const guestRateLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  limit: Math.max(30, Math.floor(env.RATE_LIMIT_MAX / 2)),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many requests, slow down.' } },
+});

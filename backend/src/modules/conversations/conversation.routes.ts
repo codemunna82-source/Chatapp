@@ -18,6 +18,7 @@ import {
   bulkConversationsHandler,
 } from './conversation.controller';
 import { messageRouter } from '../messages/message.routes';
+import { guestAdminRouter } from '../guest/guestAdmin.routes';
 
 export const conversationRouter = Router();
 
@@ -65,3 +66,4 @@ conversationRouter.delete(
 // GET/POST /api/conversations/:id/messages — nested, own permission checks
 // (CHAT_SEND/CHAT_MEDIA/CHAT_TEMPLATE) applied per-request in message.controller.ts.
 conversationRouter.use('/:conversationId/messages', messageRouter);
+conversationRouter.use('/:conversationId/guest', guestAdminRouter);

@@ -292,6 +292,45 @@ export async function recordInboundActivity(
   );
 }
 
+/**
+ * Called after a message the customer typed in the web chat window.
+ *
+ * Deliberately NOT recordInboundActivity, and the difference is the whole
+ * point: that function advances `lastCustomerMessageAt` and
+ * `conversationWindowExpiresAt`, which is Meta's 24-hour customer-service
+ * window — the thing that decides whether an agent may send a free-form
+ * WhatsApp message or must fall back to an approved template.
+ *
+ * A message typed into our own web page is not a WhatsApp message and does
+ * not reopen that window. Treating it as if it did would tell the agent
+ * the window was open, let them write a free-form reply, and have Meta
+ * reject it at send time — or, worse, have it accepted against a window
+ * that policy says was closed. So the chat row updates and the unread
+ * count rises, and the window fields are left exactly as WhatsApp left
+ * them.
+ */
+export async function recordGuestInboundActivity(
+  id: string,
+  tenantId: string,
+  preview: string,
+  at: Date = new Date(),
+): Promise<ConversationDoc | null> {
+  return Conversation.findOneAndUpdate(
+    { _id: id, tenantId },
+    {
+      $set: {
+        lastMessageAt: at,
+        lastMessagePreview: preview,
+        lastMessageDirection: 'IN',
+        lastMessageStatus: null,
+        lastMessageId: null,
+      },
+      $inc: { unreadCount: 1 },
+    },
+    { new: true },
+  );
+}
+
 /** Called after successfully sending an outbound (business) message — does NOT touch the window. */
 export async function recordOutboundActivity(
   id: string,

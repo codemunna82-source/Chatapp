@@ -4,6 +4,7 @@ import { findConversationByIdAndTenant, markConversationRead } from '../../modul
 import { visibleWhatsAppPhoneNumberId } from '../../modules/conversations/conversation.access';
 import { toRealtimeConversation } from '../../realtime/serializers';
 import type { AppServer, AppSocket } from '../types';
+import type { AuthContext } from '../../types/express';
 
 interface JoinLeavePayload {
   conversationId?: string;
@@ -19,8 +20,7 @@ type Ack = (res: { success: boolean; error?: string }) => void;
  * conversationId the client sends without checking it server-side, exactly
  * like every REST tenant-scoped lookup in this codebase.
  */
-export function registerConversationHandlers(io: AppServer, socket: AppSocket): void {
-  const { auth } = socket.data;
+export function registerConversationHandlers(io: AppServer, socket: AppSocket, auth: AuthContext): void {
 
   socket.on('conversation:join', async (payload: JoinLeavePayload, ack?: Ack) => {
     const conversationId = payload?.conversationId;
