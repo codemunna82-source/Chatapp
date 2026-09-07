@@ -4,6 +4,7 @@ import cors from 'cors';
 import compression from 'compression';
 import swaggerUi from 'swagger-ui-express';
 import { env } from './config/env';
+import { resolveCorsOrigin } from './lib/cors';
 import { openApiSpec } from './docs/openapi';
 import { requestLogger } from './middleware/requestLogger.middleware';
 import { apiRateLimiter } from './middleware/rateLimit.middleware';
@@ -48,7 +49,7 @@ export function createApp(): Express {
   app.use(helmet());
   app.use(
     cors({
-      origin: env.CORS_ORIGINS,
+      origin: resolveCorsOrigin(env.CORS_ORIGINS),
       credentials: true,
     }),
   );
