@@ -71,3 +71,9 @@ export const sendGuestReplyHandler = asyncHandler(async (req: Request, res: Resp
   const { text } = req.body as { text: string };
   res.status(201).json({ success: true, data: await guestService.sendGuestReply(auth, conversationId, text) });
 });
+
+export const issueGuestLinkByPhoneHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const { phone, name } = req.body as { phone: string; name?: string };
+  res.status(201).json({ success: true, data: await guestService.issueGuestLinkForPhone(auth, phone, name) });
+});

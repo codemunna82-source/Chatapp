@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import { Contact, type ContactDoc, type ContactLean } from './contact.model';
+import { normalizePhone, phoneVariants } from '../../lib/phone';
 
 export interface CreateContactInput {
   tenantId: string;
@@ -33,11 +34,29 @@ export async function findContactsByIdsAndTenant(ids: string[], tenantId: string
   return Contact.find({ _id: { $in: validIds }, tenantId }).lean<ContactLean[]>();
 }
 
+/**
+ * Matches every stored form of the number, not just the string given.
+ *
+ * The REST API writes E.164 with a leading `+`; Meta's webhook delivers
+ * bare digits and older rows were stored exactly as they arrived. Looking
+ * up only one of those forms is what let the same customer exist twice —
+ * see lib/phone.ts.
+ */
 export async function findContactByPhoneAndTenant(phone: string, tenantId: string): Promise<ContactDoc | null> {
-  return Contact.findOne({ phone, tenantId });
+  const variants = phoneVariants(phone);
+  if (variants.length === 0) return null;
+  return Contact.findOne({ phone: { $in: variants }, tenantId });
 }
 
-/** Idempotent — used by the inbound-webhook flow to attach a Message to a Contact. */
+/**
+ * Idempotent — used by the inbound-webhook flow to attach a Message to a
+ * Contact, and by the web-chat link flow to find the same person by the
+ * number an agent typed.
+ *
+ * Finds on any stored form, creates only in the canonical one, so the two
+ * paths converge on one contact instead of the split closing only after a
+ * migration.
+ */
 export async function findOrCreateContactByPhone(
   tenantId: string,
   phone: string,
@@ -45,7 +64,9 @@ export async function findOrCreateContactByPhone(
 ): Promise<ContactDoc> {
   const existing = await findContactByPhoneAndTenant(phone, tenantId);
   if (existing) return existing;
-  return createContact({ tenantId, phone, name });
+  // Falls back to the raw value when it cannot be parsed: a number we do
+  // not recognise is still better stored than dropped.
+  return createContact({ tenantId, phone: normalizePhone(phone) ?? phone, name });
 }
 
 export interface ListContactsOptions {

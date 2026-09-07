@@ -2,13 +2,16 @@ import { env } from '../../config/env';
 import { ApiError } from '../../lib/ApiError';
 import type { AuthContext } from '../../types/express';
 import { Tenant } from '../tenants/tenant.model';
-import { findContactByIdAndTenant } from '../contacts/contact.repository';
+import { findContactByIdAndTenant, findOrCreateContactByPhone } from '../contacts/contact.repository';
+import { normalizePhone } from '../../lib/phone';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
 import {
   findConversationByIdAndTenant,
+  findOrCreateConversation,
   recordGuestInboundActivity,
   recordOutboundActivity,
 } from '../conversations/conversation.repository';
+import { resolveSendingPhoneNumberId } from '../conversations/conversation.service';
 import { visibleWhatsAppPhoneNumberId } from '../conversations/conversation.access';
 import { createMessage, listMessagesByConversation } from '../messages/message.repository';
 import { Message, type MessageLean } from '../messages/message.model';
@@ -135,6 +138,67 @@ export async function issueGuestLinkForConversation(
     token,
     expiresAt: expiresAt.toISOString(),
     reused: false,
+  };
+}
+
+/**
+ * The link for a customer identified by their phone number.
+ *
+ * This is how an agent actually reaches for it: they have the number the
+ * customer messages them from, not a conversation id. The number is the
+ * join key — the same one Meta's webhooks resolve inbound WhatsApp
+ * messages by — so the web chat lands in the thread that already holds
+ * that customer's WhatsApp history rather than starting a second one
+ * beside it.
+ *
+ * Normalised before anything is looked up or created (see lib/phone.ts):
+ * "+91 98765-43210" and the bare digits Meta sends are the same person,
+ * and storing them as two contacts is exactly the failure this avoids.
+ */
+export async function issueGuestLinkForPhone(
+  auth: AuthContext,
+  phone: string,
+  name?: string,
+): Promise<{ url: string; token: string; expiresAt: string; conversationId: string; phone: string }> {
+  const normalized = normalizePhone(phone);
+  if (!normalized) {
+    throw ApiError.badRequest('INVALID_PHONE', 'That does not look like a phone number.');
+  }
+
+  const sendingNumberId = await resolveSendingPhoneNumberId(auth.tenantId, auth.userId);
+  if (!sendingNumberId) {
+    throw ApiError.badRequest(
+      'NO_WHATSAPP_NUMBER',
+      'This workspace has no connected WhatsApp number yet, so a chat cannot be started.',
+    );
+  }
+
+  const contact = await findOrCreateContactByPhone(auth.tenantId, normalized, name);
+  const conversation = await findOrCreateConversation(
+    auth.tenantId,
+    String(contact._id),
+    sendingNumberId,
+  );
+
+  // findOrCreate is keyed on (tenant, contact), so an existing chat comes
+  // back on whatever number it was created with — possibly a colleague's.
+  // Issuing a link for it would be a way to read a conversation this agent
+  // is not allowed to see.
+  const scope = visibleWhatsAppPhoneNumberId(auth);
+  if (scope && String(conversation.whatsappPhoneNumberId) !== scope) {
+    throw ApiError.forbidden(
+      'CONVERSATION_OWNED_BY_ANOTHER_NUMBER',
+      'This contact already has a chat on a different WhatsApp number.',
+    );
+  }
+
+  const link = await issueGuestLinkForConversation(auth, String(conversation._id));
+  return {
+    url: link.url,
+    token: link.token,
+    expiresAt: link.expiresAt,
+    conversationId: String(conversation._id),
+    phone: normalized,
   };
 }
 

@@ -24,3 +24,16 @@ export const guestReplySchema = z.object({
 export const guestConversationIdParamSchema = z.object({
   conversationId: z.string().min(1),
 });
+
+/**
+ * The phone is validated by normalizePhone rather than a regex here.
+ *
+ * People paste "+91 98765-43210", "0091...", and the bare digits Meta
+ * sends, and all three are the same customer — a strict E.164 regex at
+ * this layer would reject two of them before the normaliser ever sees
+ * them, which is the split this whole path exists to close.
+ */
+export const guestLinkByPhoneSchema = z.object({
+  phone: z.string().trim().min(5).max(32),
+  name: z.string().trim().min(1).max(120).optional(),
+});

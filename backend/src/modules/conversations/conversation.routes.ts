@@ -19,6 +19,8 @@ import {
 } from './conversation.controller';
 import { messageRouter } from '../messages/message.routes';
 import { guestAdminRouter } from '../guest/guestAdmin.routes';
+import { issueGuestLinkByPhoneHandler } from '../guest/guest.controller';
+import { guestLinkByPhoneSchema } from '../guest/guest.validation';
 
 export const conversationRouter = Router();
 
@@ -65,5 +67,16 @@ conversationRouter.delete(
 
 // GET/POST /api/conversations/:id/messages — nested, own permission checks
 // (CHAT_SEND/CHAT_MEDIA/CHAT_TEMPLATE) applied per-request in message.controller.ts.
+// Declared before the nested /:conversationId routers so "guest-link" is
+// never read as a conversation id. Issuing a link hands a customer a
+// private channel into the chat, so it needs CHAT_SEND rather than the
+// baseline CHAT_READ this router already requires.
+conversationRouter.post(
+  '/guest-link',
+  requirePermission('CHAT_SEND'),
+  validate({ body: guestLinkByPhoneSchema }),
+  issueGuestLinkByPhoneHandler,
+);
+
 conversationRouter.use('/:conversationId/messages', messageRouter);
 conversationRouter.use('/:conversationId/guest', guestAdminRouter);

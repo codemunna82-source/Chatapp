@@ -158,7 +158,10 @@ export interface UpdateConversationBody {
  * removed from the workspace since, and a conversation pinned to a number
  * that no longer exists would fail on every send instead of falling back.
  */
-async function resolveSendingPhoneNumberId(tenantId: string, actorUserId: string): Promise<string | null> {
+/** Exported so the web-chat link flow starts a conversation on the same
+ *  number an ordinary send would use — two answers to "which number does
+ *  this agent send from" would eventually disagree. */
+export async function resolveSendingPhoneNumberId(tenantId: string, actorUserId: string): Promise<string | null> {
   const assignedId = await findAssignedPhoneNumberId(actorUserId, tenantId);
   if (assignedId) {
     const assigned = await findPhoneNumberByIdAndTenant(assignedId, tenantId);

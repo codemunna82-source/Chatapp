@@ -5,8 +5,10 @@ import { Conversation } from '../conversations/conversation.model';
 import { Message } from '../messages/message.model';
 import { GuestSession } from './guestSession.model';
 import { createGuestSession, findSessionByToken } from './guestSession.repository';
+import { Contact } from '../contacts/contact.model';
 import {
   issueGuestLinkForConversation,
+  issueGuestLinkForPhone,
   revokeGuestLinkForConversation,
   resolveGuestContextFromToken,
   postGuestMessage,
@@ -228,5 +230,53 @@ describe('read receipts from the web window', () => {
 
     const inbound = await Message.findById(mine.id).lean();
     expect(inbound?.status).toBe('DELIVERED');
+  });
+});
+
+describe('issuing a link by phone number', () => {
+  it('reuses the contact Meta already created from bare digits', async () => {
+    // The case this whole path exists for. An inbound WhatsApp message
+    // stores `from` exactly as Meta sends it — no leading +. An agent then
+    // types the number the way a person writes it. Matching only on the
+    // exact string would create a second contact, a second conversation,
+    // and a customer whose web messages never appear in the thread the
+    // agent is reading.
+    const { auth, tenantId, phoneNumber } = await fixture();
+    const webhookContact = await Contact.create({ tenantId, phone: '919876543210' });
+
+    const link = await issueGuestLinkForPhone(auth, '+91 98765-43210');
+
+    const contacts = await Contact.find({ tenantId, phone: { $in: ['919876543210', '+919876543210'] } });
+    expect(contacts).toHaveLength(1);
+    expect(String(contacts[0]!._id)).toBe(String(webhookContact._id));
+    expect(link.phone).toBe('+919876543210');
+    expect(String(phoneNumber._id)).toBeTruthy();
+
+    const guest = await resolveGuestContextFromToken(link.token);
+    expect(guest.contactId).toBe(String(webhookContact._id));
+  });
+
+  it('creates the contact in canonical form when it is new', async () => {
+    const { auth, tenantId } = await fixture();
+    await issueGuestLinkForPhone(auth, '00919999988888', 'New Customer');
+
+    const contact = await Contact.findOne({ tenantId, phone: '+919999988888' });
+    expect(contact).not.toBeNull();
+    expect(contact?.name).toBe('New Customer');
+  });
+
+  it('lands the customer in the conversation their WhatsApp messages already use', async () => {
+    const { auth, conversation, contact } = await fixture();
+
+    const link = await issueGuestLinkForPhone(auth, contact.phone);
+    const guest = await resolveGuestContextFromToken(link.token);
+
+    expect(guest.conversationId).toBe(String(conversation._id));
+    expect(link.conversationId).toBe(String(conversation._id));
+  });
+
+  it('refuses something that is not a phone number', async () => {
+    const { auth } = await fixture();
+    await expect(issueGuestLinkForPhone(auth, '12345')).rejects.toMatchObject({ code: 'INVALID_PHONE' });
   });
 });
