@@ -7,11 +7,13 @@ import { logger } from '../lib/logger';
 import { isRedisConfigured, getRedisConnection } from '../queues/connection';
 import { resolveAuthContextFromToken } from '../modules/auth/authContext.service';
 import { resolveGuestContextFromToken } from '../modules/guest/guest.service';
-import { tenantRoom, userRoom, phoneNumberRoom, conversationRoom } from './rooms';
+import { tenantRoom, userRoom, phoneNumberRoom, conversationRoom, agentsRoom, guestPresenceRoom } from './rooms';
+import { broadcastAgentPresence, countOnlineAgents } from './presence';
 import { visibleWhatsAppPhoneNumberId } from '../modules/conversations/conversation.access';
 import { registerConversationHandlers } from './events/conversation';
 import { registerTypingHandlers } from './events/typing';
 import { registerGuestCallHandlers, registerAgentWebCallHandlers } from './events/webCall';
+import { registerGuestTypingHandlers } from './events/guestTyping';
 import { createSocketRealtimeEmitter } from './realtimeEmitterImpl';
 import { setRealtimeEmitter } from '../realtime/events';
 import type { AppServer, AppSocket } from './types';
@@ -95,9 +97,19 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
     // ask for a second room at all.
     if (guest) {
       void socket.join(conversationRoom(guest.conversationId));
+      // A room carrying nothing but availability. Guests are never in the
+      // agent or tenant rooms, which hold the whole workspace's messages.
+      void socket.join(guestPresenceRoom(guest.tenantId));
       logger.debug({ conversationId: guest.conversationId, socketId: socket.id }, 'Guest socket connected');
 
       registerGuestCallHandlers(io as AppServer, socket, guest);
+      registerGuestTypingHandlers(socket, guest);
+
+      // Answer the question the page opens with, rather than leaving it
+      // showing "offline" until an agent happens to connect or leave.
+      void countOnlineAgents(io as AppServer, guest.tenantId).then((count) => {
+        socket.emit('agent:presence', { online: count > 0 });
+      });
 
       // The same reasoning as the agent re-validation below: a link can be
       // revoked or expire while the page is still open, and a long-lived
@@ -136,6 +148,10 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
     const scope = visibleWhatsAppPhoneNumberId(auth);
     void socket.join(scope ? phoneNumberRoom(scope) : tenantRoom(auth.tenantId));
     void socket.join(userRoom(auth.userId));
+    // One room every agent joins, whichever visibility room they landed
+    // in, so "is anyone from this workspace here" is a single lookup.
+    void socket.join(agentsRoom(auth.tenantId));
+    void broadcastAgentPresence(io as AppServer, auth.tenantId);
     logger.debug({ userId: auth.userId, tenantId: auth.tenantId, socketId: socket.id }, 'Socket connected');
 
     registerConversationHandlers(io as AppServer, socket, auth);
@@ -161,6 +177,9 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
 
     socket.on('disconnect', (reason) => {
       clearInterval(revalidate);
+      // After the socket has left its rooms, so the count reflects who is
+      // actually still here rather than including the one just lost.
+      void broadcastAgentPresence(io as AppServer, auth.tenantId);
       logger.debug({ socketId: socket.id, reason }, 'Socket disconnected');
     });
   });
