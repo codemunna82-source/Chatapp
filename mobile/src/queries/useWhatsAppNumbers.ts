@@ -31,3 +31,14 @@ export function useRegisterWhatsAppNumber() {
     },
   });
 }
+
+/** Completes Meta's registration for a number that is still "Pending". */
+export function useRegisterNumberForCloudApi() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => whatsappApi.registerNumberForCloudApi(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.whatsappNumbers });
+    },
+  });
+}

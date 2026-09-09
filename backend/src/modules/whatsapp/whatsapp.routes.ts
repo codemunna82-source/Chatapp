@@ -2,13 +2,14 @@ import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/rbac.middleware';
 import { validate } from '../../middleware/validate.middleware';
-import { registerPhoneNumberSchema, connectWhatsAppSchema } from './whatsapp.validation';
+import { registerPhoneNumberSchema, connectWhatsAppSchema, numberIdParamSchema } from './whatsapp.validation';
 import {
   listPhoneNumbersHandler,
   registerPhoneNumberHandler,
   connectWhatsAppHandler,
   whatsappStatusHandler,
   disconnectWhatsAppHandler,
+  registerNumberForCloudApiHandler,
 } from './whatsapp.controller';
 import { whatsappSignupPageHandler, whatsappSignupCallbackHandler } from './signupPage.controller';
 
@@ -38,3 +39,11 @@ whatsappRouter.use(requireAuth, requireRole('MASTER_ADMIN'));
 
 whatsappRouter.get('/numbers', listPhoneNumbersHandler);
 whatsappRouter.post('/numbers', validate({ body: registerPhoneNumberSchema }), registerPhoneNumberHandler);
+// The step the admin path used to skip. Safe to repeat: Meta's "already
+// registered" is reported as success, because re-running this is how a
+// half-finished setup is recovered.
+whatsappRouter.post(
+  '/numbers/:id/register',
+  validate({ params: numberIdParamSchema }),
+  registerNumberForCloudApiHandler,
+);

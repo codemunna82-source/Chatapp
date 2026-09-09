@@ -14,3 +14,5 @@ export const connectWhatsAppSchema = z.object({
   // regex guessing at it would reject valid codes the day they change it.
   code: z.string().trim().min(10).max(2048),
 });
+
+export const numberIdParamSchema = z.object({ id: z.string().min(1) });

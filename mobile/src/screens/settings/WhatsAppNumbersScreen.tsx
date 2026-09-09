@@ -1,12 +1,16 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TextField } from '../../components/TextField';
 import { Button } from '../../components/Button';
 import { InlineBanner } from '../../components/InlineBanner';
 import { LoadingIndicator } from '../../components/LoadingIndicator';
 import { useTheme } from '../../theme/ThemeProvider';
-import { useWhatsAppNumbers, useRegisterWhatsAppNumber } from '../../queries/useWhatsAppNumbers';
+import {
+  useWhatsAppNumbers,
+  useRegisterWhatsAppNumber,
+  useRegisterNumberForCloudApi,
+} from '../../queries/useWhatsAppNumbers';
 import { getApiErrorMessage } from '../../api/client';
 import type { WhatsAppNumber } from '../../api/types';
 
@@ -80,6 +84,7 @@ function NumberHealthNote({ health }: { health: NonNullable<WhatsAppNumber['heal
 function NumberRow({ item }: { item: WhatsAppNumber }) {
   const { colors, spacing, typography, radius } = useTheme();
   const placeholder = isPlaceholder(item);
+  const register = useRegisterNumberForCloudApi();
   return (
     <View
       style={[
@@ -103,6 +108,28 @@ function NumberRow({ item }: { item: WhatsAppNumber }) {
           </Text>
         ) : null}
         {!placeholder && item.health ? <NumberHealthNote health={item.health} /> : null}
+
+        {/* The step adding a number by hand does not do. Until Meta's
+            registration has run the number sits "Pending" in WhatsApp
+            Manager and every send fails, with nothing here saying so. */}
+        {!placeholder ? (
+          <Pressable
+            onPress={() =>
+              register.mutate(item.id, {
+                onSuccess: (res) => Alert.alert('WhatsApp number', res.message),
+                onError: (err) => Alert.alert('Registration failed', getApiErrorMessage(err)),
+              })
+            }
+            disabled={register.isPending}
+            style={{ marginTop: spacing.sm }}
+            accessibilityRole="button"
+            accessibilityLabel="Register this number for the Cloud API"
+          >
+            <Text style={[typography.caption, { color: colors.primary, fontWeight: '600' }]}>
+              {register.isPending ? 'Registering…' : 'Register for Cloud API'}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );

@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
-import { listPhoneNumbersForTenant, registerPhoneNumberForTenant } from './whatsapp.service';
+import { listPhoneNumbersForTenant, registerPhoneNumberForTenant, registerNumberForCloudApi } from './whatsapp.service';
 import {
   connectWhatsAppForUser,
   disconnectWhatsAppForUser,
@@ -41,4 +41,17 @@ export const disconnectWhatsAppHandler = asyncHandler(async (req: Request, res: 
   const auth = getTenantContext(req);
   await disconnectWhatsAppForUser(auth.tenantId, auth.userId);
   res.status(200).json({ success: true, data: { connected: false } });
+});
+
+/**
+ * Runs Meta's registration for a number already stored here.
+ *
+ * The repair for a number added by hand: WhatsApp Manager shows it as
+ * "Pending" and every send fails until POST /{id}/register has run, and
+ * the admin path never ran it.
+ */
+export const registerNumberForCloudApiHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const result = await registerNumberForCloudApi(auth.tenantId, req.params.id as string);
+  res.status(200).json({ success: true, data: result });
 });

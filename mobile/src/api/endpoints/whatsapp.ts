@@ -20,3 +20,19 @@ export async function registerWhatsAppNumber(input: RegisterWhatsAppNumberInput)
   const res = await apiClient.post<ApiSuccess<WhatsAppNumber>>('/whatsapp/numbers', input);
   return res.data.data;
 }
+
+/**
+ * Runs Meta's Cloud API registration for a number already added here.
+ *
+ * Adding a number in WhatsApp Manager and pasting its id is not enough:
+ * until this runs Meta leaves it "Pending" and every send fails. Safe to
+ * repeat — "already registered" comes back as success.
+ */
+export async function registerNumberForCloudApi(
+  id: string,
+): Promise<{ registered: boolean; message: string }> {
+  const res = await apiClient.post<ApiSuccess<{ registered: boolean; message: string }>>(
+    `/whatsapp/numbers/${id}/register`,
+  );
+  return res.data.data;
+}

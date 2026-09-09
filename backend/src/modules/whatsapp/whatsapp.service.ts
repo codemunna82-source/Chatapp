@@ -1,7 +1,7 @@
 import { Types } from 'mongoose';
 import { WhatsAppAccount, type WhatsAppAccountDoc } from './whatsappAccount.model';
 import { WhatsAppPhoneNumber, type WhatsAppPhoneNumberDoc } from './whatsappPhoneNumber.model';
-import { findPhoneNumbersByTenant } from './whatsapp.repository';
+import { findPhoneNumbersByTenant, findPhoneNumberByIdAndTenant } from './whatsapp.repository';
 import { ApiError } from '../../lib/ApiError';
 import { env } from '../../config/env';
 import { decryptSecret, isEncryptedEnvelope } from '../../lib/crypto';
@@ -9,6 +9,7 @@ import { logger } from '../../lib/logger';
 import { getMetaGateway } from '../../integrations/meta';
 import type { MetaCredentials } from '../../integrations/meta';
 import { describeNumberHealth, type NumberHealth } from './numberHealth';
+import { registerPhoneNumber } from '../../integrations/meta/oauth';
 
 /**
  * Turns a stored `accessTokenRef` into the token to actually call Meta with.
@@ -227,6 +228,58 @@ export async function listPhoneNumbersForTenant(tenantId: string): Promise<Publi
  * before it is stored, so a typo fails here — naming the problem — instead
  * of at 3am inside a send.
  */
+/**
+ * Registers an already-stored number for Cloud API use.
+ *
+ * Adding a number in WhatsApp Manager and pasting its id here is not
+ * enough: until POST /{id}/register runs, Meta leaves the number
+ * "Pending" and every send fails with a "not registered" error. The
+ * Embedded Signup path has always done this; the admin path never did,
+ * which is why a hand-registered number could look correctly configured
+ * and still be unable to send.
+ *
+ * Meta's own error text is passed through. "Already registered" is not
+ * treated as a failure — re-running this is how you recover from a partial
+ * setup, and it has to be safe to repeat.
+ */
+export async function registerNumberForCloudApi(
+  tenantId: string,
+  numberId: string,
+): Promise<{ registered: boolean; message: string }> {
+  if (!env.META_REGISTER_PIN) {
+    throw ApiError.badRequest(
+      'REGISTER_PIN_MISSING',
+      'META_REGISTER_PIN is not set on the server. Choose any six digits, set it, and keep it the same ' +
+        'from then on — it is the number\'s two-step verification PIN, and changing it breaks re-registration.',
+    );
+  }
+
+  const number = await findPhoneNumberByIdAndTenant(numberId, tenantId);
+  if (!number) {
+    throw ApiError.notFound('WHATSAPP_NUMBER_NOT_FOUND', 'That number is not registered to this workspace.');
+  }
+
+  const credentials = await resolveMetaCredentialsForPhoneNumber(tenantId, numberId);
+
+  try {
+    await registerPhoneNumber(credentials.accessToken, number.phoneNumberId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown error';
+    // Meta says this when the number is already usable. Reporting it as a
+    // failure would send an admin looking for a problem they do not have.
+    if (/already registered/i.test(message)) {
+      return { registered: true, message: 'This number was already registered for the Cloud API.' };
+    }
+    throw ApiError.badRequest('WHATSAPP_REGISTER_FAILED', `Meta refused the registration: ${message}`);
+  }
+
+  // Meta reports the new state a moment later, so this is read rather than
+  // assumed — the point of the screen is to show what Meta thinks, not
+  // what we hoped.
+  await refreshNumberHealth(number);
+  return { registered: true, message: 'Registered for the Cloud API. It may take a minute to leave "Pending".' };
+}
+
 export async function registerPhoneNumberForTenant(
   tenantId: string,
   phoneNumberId: string,
