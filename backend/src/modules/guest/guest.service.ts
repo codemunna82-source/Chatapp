@@ -4,6 +4,7 @@ import type { AuthContext } from '../../types/express';
 import { Tenant } from '../tenants/tenant.model';
 import { findContactByIdAndTenant, findOrCreateContactByPhone } from '../contacts/contact.repository';
 import { normalizePhone } from '../../lib/phone';
+import type { GuestMediaKind } from './guestMedia.service';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
 import {
   findConversationByIdAndTenant,
@@ -326,12 +327,13 @@ export async function postGuestMessage(guest: GuestContext, text: string): Promi
  * Stored the same way a typed message is — direction IN, on the same
  * conversation — so the agent reads one thread rather than photos landing
  * somewhere separate from the words around them. The bytes were already
- * put away by storeGuestImage; this only records the message that points
+ * put away by storeGuestMedia; this only records the message that points
  * at them.
  */
-export async function postGuestImageMessage(
+export async function postGuestMediaMessage(
   guest: GuestContext,
   mediaId: string,
+  kind: GuestMediaKind,
 ): Promise<GuestMessageView> {
   const [conversation, phoneNumber, contact] = await Promise.all([
     findConversationByIdAndTenant(guest.conversationId, guest.tenantId),
@@ -347,14 +349,19 @@ export async function postGuestImageMessage(
     conversationId: guest.conversationId,
     recipientPhone: phoneNumber?.displayPhoneNumber ?? '',
     direction: 'IN',
-    type: 'image',
+    type: kind,
     mediaId,
     status: 'DELIVERED',
   });
 
-  // The chat list has one line per conversation and cannot show a picture,
-  // so it gets the same placeholder the WhatsApp ingestion path uses.
-  const updated = await recordGuestInboundActivity(guest.conversationId, guest.tenantId, '[image]');
+  // The chat list has one line per conversation and can show neither a
+  // picture nor a recording, so it gets the same placeholder the WhatsApp
+  // ingestion path uses for the same message types.
+  const updated = await recordGuestInboundActivity(
+    guest.conversationId,
+    guest.tenantId,
+    kind === 'image' ? '[image]' : '[voice message]',
+  );
 
   const realtime = getRealtimeEmitter();
   realtime.emitMessageNew(guest.tenantId, toRealtimeMessage(message), guest.whatsappPhoneNumberId);
@@ -367,7 +374,7 @@ export async function postGuestImageMessage(
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
     contactName: contact?.name || contact?.phone || 'Web chat',
-    messageType: 'image',
+    messageType: kind,
   });
 
   return toGuestMessage(message as unknown as MessageLean);

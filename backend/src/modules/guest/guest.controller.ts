@@ -4,7 +4,7 @@ import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { getGuestContext } from '../../middleware/guestAuth.middleware';
 import { ApiError } from '../../lib/ApiError';
 import { buildIceServers } from '../calls/webCall.service';
-import { getGuestMediaBytes, storeGuestImage } from './guestMedia.service';
+import { getGuestMediaBytes, storeGuestMedia } from './guestMedia.service';
 import * as guestService from './guest.service';
 
 /* ------------------------------------------------------------------ *
@@ -106,30 +106,33 @@ export const uploadGuestMediaHandler = asyncHandler(async (req: Request, res: Re
   const guest = getGuestContext(req);
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
   if (files.length === 0) {
-    throw ApiError.badRequest('NO_FILES', 'No images were uploaded.');
+    throw ApiError.badRequest('NO_FILES', 'No files were uploaded.');
   }
 
   const sent = [];
   const failed = [];
   for (const file of files) {
     try {
-      const media = await storeGuestImage({
+      // The kind comes back from the store rather than being decided here:
+      // it is the same check that accepted the file, so a type this route
+      // thinks is a photo can never be filed as one the store called audio.
+      const { media, kind } = await storeGuestMedia({
         tenantId: guest.tenantId,
         whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
         buffer: file.buffer,
         mimeType: file.mimetype,
       });
-      sent.push(await guestService.postGuestImageMessage(guest, String(media._id)));
+      sent.push(await guestService.postGuestMediaMessage(guest, String(media._id), kind));
     } catch (err) {
       failed.push({
         filename: file.originalname,
-        message: err instanceof ApiError ? err.message : 'Could not send this image.',
+        message: err instanceof ApiError ? err.message : 'Could not send this file.',
       });
     }
   }
 
   if (sent.length === 0) {
-    throw ApiError.badRequest('UPLOAD_FAILED', failed[0]?.message ?? 'Could not send those images.');
+    throw ApiError.badRequest('UPLOAD_FAILED', failed[0]?.message ?? 'Could not send those files.');
   }
   res.status(201).json({ success: true, data: sent, meta: { failed } });
 });

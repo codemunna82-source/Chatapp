@@ -15,7 +15,7 @@ import {
   uploadGuestMediaHandler,
   getGuestMediaHandler,
 } from './guest.controller';
-import { GUEST_IMAGE_MAX_BYTES, GUEST_MAX_FILES_PER_REQUEST } from './guestMedia.service';
+import { GUEST_MAX_FILES_PER_REQUEST, GUEST_UPLOAD_MAX_BYTES } from './guestMedia.service';
 
 /**
  * The customer-facing web chat, mounted at /api/guest.
@@ -29,7 +29,9 @@ import { GUEST_IMAGE_MAX_BYTES, GUEST_MAX_FILES_PER_REQUEST } from './guestMedia
 // database, and a deployment can be replaced between two requests.
 const guestUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: GUEST_IMAGE_MAX_BYTES, files: GUEST_MAX_FILES_PER_REQUEST },
+  // The larger of the two per-kind limits; the exact one for this file is
+  // enforced in the store, which knows whether it is a photo or a recording.
+  limits: { fileSize: GUEST_UPLOAD_MAX_BYTES, files: GUEST_MAX_FILES_PER_REQUEST },
 });
 
 const mediaIdParamSchema = z.object({ id: z.string().min(1) });

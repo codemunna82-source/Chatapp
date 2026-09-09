@@ -8,15 +8,18 @@ import { Message } from '../messages/message.model';
 import type { GuestContext } from './guest.service';
 
 /**
- * Images the customer sends from the web chat window.
+ * Photos and voice notes the customer sends from the web chat window.
  *
  * Deliberately not media.service.ts's uploadMediaForTenant: that function
  * pushes the bytes to Meta, which is exactly right for something being
- * sent to WhatsApp and exactly wrong here. This image is not going to
+ * sent to WhatsApp and exactly wrong here. These files are not going to
  * WhatsApp — the customer is in our own window — so a Meta round trip
  * would cost a call, require live Meta credentials, and put a customer's
- * photo on Meta's servers for no reason.
+ * photo or recording on Meta's servers for no reason.
  */
+
+/** What a stored guest file is, as far as the message that points at it cares. */
+export type GuestMediaKind = 'image' | 'audio';
 
 /**
  * Wider than Meta's own list, because these files never reach Meta. WebP
@@ -25,20 +28,71 @@ import type { GuestContext } from './guest.service';
  * does not apply to this path.
  */
 const GUEST_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+/**
+ * What a browser's own recorder actually produces.
+ *
+ * Chrome and Firefox hand back Opus in a WebM container; Safari, including
+ * every iPhone, hands back AAC in an MP4 one. Both have to be here or
+ * voice notes work on half the phones that open the link. The rest are
+ * what a customer might attach from their files rather than record.
+ */
+const GUEST_AUDIO_TYPES = [
+  'audio/webm',
+  'audio/ogg',
+  'audio/mp4',
+  'audio/mpeg',
+  'audio/aac',
+  'audio/wav',
+  'audio/x-m4a',
+];
+
 export const GUEST_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+/**
+ * Roughly half an hour of Opus at the bitrate a browser records at, which
+ * is far longer than anyone speaks into a chat window — the limit is here
+ * to bound a request, not to cut anybody off.
+ */
+export const GUEST_AUDIO_MAX_BYTES = 16 * 1024 * 1024;
+/** What multer is given, since one request may carry either kind. */
+export const GUEST_UPLOAD_MAX_BYTES = Math.max(GUEST_IMAGE_MAX_BYTES, GUEST_AUDIO_MAX_BYTES);
 /** Enough for a handful of photos at once without letting one request carry an album. */
 export const GUEST_MAX_FILES_PER_REQUEST = 10;
 
-export function assertGuestImage(mimeType: string, sizeBytes: number): void {
-  if (!GUEST_IMAGE_TYPES.includes(mimeType)) {
-    throw ApiError.badRequest('UNSUPPORTED_MEDIA_TYPE', 'Only images can be sent here.');
-  }
-  if (sizeBytes > GUEST_IMAGE_MAX_BYTES) {
-    throw ApiError.badRequest('MEDIA_TOO_LARGE', 'That image is too large. The limit is 8 MB.');
-  }
+/**
+ * The kind, from a browser-supplied Content-Type.
+ *
+ * MediaRecorder reports its codec in the type — `audio/webm;codecs=opus` —
+ * and matching that against a bare list rejects every recording Chrome
+ * makes. Parameters are stripped before the comparison for exactly that
+ * reason.
+ */
+export function guestMediaKind(mimeType: string): GuestMediaKind | null {
+  const base = mimeType.split(';')[0]!.trim().toLowerCase();
+  if (GUEST_IMAGE_TYPES.includes(base)) return 'image';
+  if (GUEST_AUDIO_TYPES.includes(base)) return 'audio';
+  return null;
 }
 
-export interface StoreGuestImageInput {
+export function assertGuestMedia(mimeType: string, sizeBytes: number): GuestMediaKind {
+  const kind = guestMediaKind(mimeType);
+  if (!kind) {
+    throw ApiError.badRequest('UNSUPPORTED_MEDIA_TYPE', 'Only photos and voice messages can be sent here.');
+  }
+
+  const limit = kind === 'image' ? GUEST_IMAGE_MAX_BYTES : GUEST_AUDIO_MAX_BYTES;
+  if (sizeBytes > limit) {
+    throw ApiError.badRequest(
+      'MEDIA_TOO_LARGE',
+      kind === 'image'
+        ? 'That image is too large. The limit is 8 MB.'
+        : 'That recording is too long. The limit is 16 MB.',
+    );
+  }
+  return kind;
+}
+
+export interface StoreGuestMediaInput {
   tenantId: string;
   whatsappPhoneNumberId: string;
   buffer: Buffer;
@@ -53,20 +107,22 @@ export interface StoreGuestImageInput {
  * heard of Cloudinary, and adding CLOUDINARY_URL later moves new uploads
  * across without touching anything already stored.
  */
-export async function storeGuestImage(input: StoreGuestImageInput) {
-  assertGuestImage(input.mimeType, input.buffer.length);
+export async function storeGuestMedia(input: StoreGuestMediaInput) {
+  const kind = assertGuestMedia(input.mimeType, input.buffer.length);
 
   const sha256 = createHash('sha256').update(input.buffer).digest('hex');
   // The same photo sent twice — a retry, or a customer resending — stores once.
   const existing = await findMediaBySha256(input.tenantId, sha256);
-  if (existing) return existing;
+  if (existing) return { media: existing, kind };
 
   if (isCloudinaryConfigured()) {
     const uploaded = await uploadBufferToCloudinary(input.buffer, {
+      // Cloudinary files audio under its video resource type — there is no
+      // audio one. Sending 'image' for a recording makes the upload fail.
       folder: `voxo/${input.tenantId}/guest`,
-      resourceType: 'image',
+      resourceType: kind === 'image' ? 'image' : 'video',
     });
-    return Media.create({
+    const media = await Media.create({
       tenantId: input.tenantId,
       whatsappPhoneNumberId: input.whatsappPhoneNumberId,
       mimeType: input.mimeType,
@@ -76,9 +132,10 @@ export async function storeGuestImage(input: StoreGuestImageInput) {
       cloudinaryPublicId: uploaded.publicId,
       status: 'READY',
     });
+    return { media, kind };
   }
 
-  return Media.create({
+  const media = await Media.create({
     tenantId: input.tenantId,
     whatsappPhoneNumberId: input.whatsappPhoneNumberId,
     mimeType: input.mimeType,
@@ -90,6 +147,7 @@ export async function storeGuestImage(input: StoreGuestImageInput) {
     bytes: input.buffer,
     status: 'READY',
   });
+  return { media, kind };
 }
 
 /**
