@@ -19,6 +19,20 @@ const whatsappPhoneNumberSchema = new Schema(
     /** Meta-reported conversation cap: TIER_250 | TIER_1K | TIER_10K | TIER_100K | TIER_UNLIMITED. */
     messagingLimitTier: { type: String },
     /**
+     * Meta's verdict on the business display name — APPROVED, PENDING_REVIEW,
+     * DECLINED — and on the number itself.
+     *
+     * Stored so the customer-facing window can show a verification badge
+     * that means something. The badge is Meta's statement, not ours: it is
+     * shown only when Meta says APPROVED, and there is deliberately no way
+     * to set it by hand. A badge a business can switch on for itself is
+     * worth nothing to the customer looking at it, and claiming WhatsApp
+     * vouched for an account it has not reviewed is the kind of thing that
+     * gets a number banned.
+     */
+    nameStatus: { type: String },
+    codeVerificationStatus: { type: String },
+    /**
      * When the two fields above were last read from Meta.
      *
      * They used to be written once, at registration, and never again — so

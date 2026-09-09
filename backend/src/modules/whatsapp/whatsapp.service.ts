@@ -189,6 +189,8 @@ export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promi
 
     number.qualityRating = profile.qualityRating;
     number.messagingLimitTier = profile.messagingLimitTier;
+    number.nameStatus = profile.nameStatus;
+    number.codeVerificationStatus = profile.codeVerificationStatus;
     number.healthCheckedAt = new Date();
     await number.save();
   } catch (err) {

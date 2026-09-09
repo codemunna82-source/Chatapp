@@ -8,6 +8,10 @@ interface MetaPhoneNumberResponse {
   verified_name?: string;
   quality_rating?: string;
   messaging_limit_tier?: string;
+  /** APPROVED once Meta has reviewed and accepted the business display name. */
+  name_status?: string;
+  /** VERIFIED once the number itself has passed Meta's SMS/voice check. */
+  code_verification_status?: string;
 }
 
 /**
@@ -30,7 +34,10 @@ export async function fetchPhoneNumberProfile(
   // stops matching AxiosRequestConfig.
   const config: AxiosRequestConfig = {
     ...authConfig(accessToken),
-    params: { fields: 'display_phone_number,verified_name,quality_rating,messaging_limit_tier' },
+    params: {
+      fields:
+        'display_phone_number,verified_name,quality_rating,messaging_limit_tier,name_status,code_verification_status',
+    },
   };
   const res = await metaRequest<MetaPhoneNumberResponse>((client) => client.get(`/${phoneNumberId}`, config));
 
@@ -43,6 +50,8 @@ export async function fetchPhoneNumberProfile(
     verifiedName: res.verified_name,
     qualityRating: res.quality_rating,
     messagingLimitTier: res.messaging_limit_tier,
+    nameStatus: res.name_status,
+    codeVerificationStatus: res.code_verification_status,
   };
 }
 

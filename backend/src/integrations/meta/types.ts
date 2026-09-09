@@ -95,4 +95,13 @@ export interface PhoneNumberProfile {
    * a tier that has dropped is the same warning arriving a different way.
    */
   messagingLimitTier?: string;
+  /**
+   * Meta's own verdict on the business display name: APPROVED, PENDING_REVIEW,
+   * DECLINED, or absent. This is the only thing that can honestly be called
+   * "verified by WhatsApp" — it is Meta saying it reviewed the name and
+   * accepted it. Nothing on our side may claim it in Meta's place.
+   */
+  nameStatus?: string;
+  /** VERIFIED once the number itself has passed Meta's SMS/voice check. */
+  codeVerificationStatus?: string;
 }

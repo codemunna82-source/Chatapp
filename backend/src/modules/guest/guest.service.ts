@@ -246,15 +246,39 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
   conversationId: string;
   businessName: string;
   contactName?: string;
+  /**
+   * Whether Meta has reviewed and approved this business's display name.
+   *
+   * Reported so the window can show a verification badge that means
+   * something — and, just as importantly, show nothing when there is
+   * nothing to show. This is Meta's statement, read back from Meta, with
+   * no way for a business to set it for itself: a badge you can switch on
+   * for yourself tells the customer looking at it precisely nothing, and
+   * claiming WhatsApp vouched for an account it has not reviewed is both a
+   * lie to that customer and grounds for losing the number.
+   */
+  verifiedByWhatsApp: boolean;
+  /** The business's own number, as the customer would see it in WhatsApp. */
+  businessPhone?: string;
 }> {
-  const [tenant, contact] = await Promise.all([
+  const [tenant, contact, phoneNumber] = await Promise.all([
     Tenant.findById(guest.tenantId).select('name').lean(),
     findContactByIdAndTenant(guest.contactId, guest.tenantId),
+    findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId),
   ]);
+
+  // APPROVED is the only value that means "Meta reviewed this and accepted
+  // it". PENDING_REVIEW and DECLINED are both "not verified", and treating
+  // a pending review as a pass would put the badge up during exactly the
+  // window in which Meta has not decided.
+  const verifiedByWhatsApp = phoneNumber?.nameStatus === 'APPROVED';
+
   return {
     conversationId: guest.conversationId,
     businessName: tenant?.name ?? 'Support',
     contactName: contact?.name ?? undefined,
+    verifiedByWhatsApp,
+    businessPhone: phoneNumber?.displayPhoneNumber ?? undefined,
   };
 }
 
