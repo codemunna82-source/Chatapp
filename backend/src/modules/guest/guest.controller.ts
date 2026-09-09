@@ -58,6 +58,12 @@ export const issueGuestLinkHandler = asyncHandler(async (req: Request, res: Resp
   });
 });
 
+export const guestLinkStatusHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const conversationId = req.params.conversationId as string;
+  res.status(200).json({ success: true, data: await guestService.getGuestLinkStatus(auth, conversationId) });
+});
+
 export const revokeGuestLinkHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const conversationId = req.params.conversationId as string;

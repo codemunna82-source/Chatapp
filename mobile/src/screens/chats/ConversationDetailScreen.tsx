@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
@@ -27,6 +27,12 @@ import { ForwardSheet, buildForwardBody } from './ForwardSheet';
 import { ImageViewerModal } from './ImageViewerModal';
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
+import {
+  useGuestLinkStatus,
+  useIssueGuestLink,
+  useRevokeGuestLink,
+  useSendGuestReply,
+} from '../../queries/useGuestChat';
 import {
   useMessages,
   flattenMessages,
@@ -288,11 +294,82 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     [sendMessage],
   );
 
+  const guestLinkQuery = useGuestLinkStatus(conversationId);
+  const issueGuestLink = useIssueGuestLink(conversationId);
+  const revokeGuestLink = useRevokeGuestLink(conversationId);
+  const sendGuestReply = useSendGuestReply(conversationId);
+
+  const guestActive = guestLinkQuery.data?.active ?? false;
+  const withinWhatsAppWindow =
+    (conversationQuery.data?.isDemo ?? false) ||
+    (conversationQuery.data?.withinCustomerServiceWindow ?? false);
+  /**
+   * Outside Meta's window a live web window is the only way through, so
+   * that is where a reply goes. Inside it, WhatsApp stays the default —
+   * the customer is far more likely to be reading there than to still
+   * have the link open.
+   */
+  const replyingViaWeb = !withinWhatsAppWindow && guestActive;
+
+  const shareGuestLink = useCallback(
+    async (url: string) => {
+      const name = conversationQuery.data?.contact?.name || 'there';
+      await Share.share({
+        message: `Hi ${name}, continue our conversation privately here: ${url}`,
+      });
+    },
+    [conversationQuery.data],
+  );
+
+  const handleGuestLink = useCallback(() => {
+    if (issueGuestLink.isPending || revokeGuestLink.isPending) return;
+
+    const create = () => {
+      issueGuestLink.mutate(undefined, {
+        onSuccess: (link) => {
+          void shareGuestLink(link.url);
+        },
+        onError: (err) => Alert.alert('Could not create link', getApiErrorMessage(err)),
+      });
+    };
+
+    if (!guestActive) {
+      create();
+      return;
+    }
+
+    // The URL of a live link cannot be shown again — only its hash is
+    // stored — so the honest offer is to replace it, which is also what
+    // makes every copy already sent stop working.
+    Alert.alert(
+      'A link is already active',
+      'The existing link cannot be shown again. Creating a new one will stop the old link working.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'New link',
+          style: 'destructive',
+          onPress: () =>
+            revokeGuestLink.mutate(undefined, {
+              onSuccess: create,
+              onError: (err) => Alert.alert('Could not replace link', getApiErrorMessage(err)),
+            }),
+        },
+      ],
+    );
+  }, [guestActive, issueGuestLink, revokeGuestLink, shareGuestLink]);
+
   const handleSendText = useCallback(
     (text: string) => {
+      if (replyingViaWeb) {
+        sendGuestReply.mutate(text, {
+          onError: (err) => Alert.alert('Message not sent', getApiErrorMessage(err)),
+        });
+        return;
+      }
       submitSend({ type: 'text', text, replyToMessageId: replyingTo?.id });
     },
-    [submitSend, replyingTo],
+    [replyingViaWeb, sendGuestReply, submitSend, replyingTo],
   );
 
   const handleRetry = useCallback(
@@ -459,6 +536,23 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               <Ionicons name="search" size={21} color="#FFFFFF" style={{ opacity: pressed ? 0.5 : 1 }} />
             )}
           </Pressable>
+          <Pressable
+            onPress={handleGuestLink}
+            style={styles.headerAction}
+            accessibilityRole="button"
+            accessibilityLabel={guestActive ? 'Replace private chat link' : 'Send a private chat link'}
+          >
+            {({ pressed }) => (
+              <Ionicons
+                // Filled once a window is live, so the state is readable
+                // without opening anything.
+                name={guestActive ? 'link' : 'link-outline'}
+                size={21}
+                color="#FFFFFF"
+                style={{ opacity: pressed ? 0.5 : 1 }}
+              />
+            )}
+          </Pressable>
           {contactId ? (
           <Pressable
             onPress={() => placeCall(contactId)}
@@ -493,6 +587,8 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     forwardSelected,
     searchOpen,
     closeSearch,
+    guestActive,
+    handleGuestLink,
   ]);
   const handleOpenImage = useCallback((localUri: string) => setViewerUri(localUri), []);
 
@@ -588,6 +684,14 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
                 <InlineBanner message={callError} />
               </View>
             ) : null}
+            {replyingViaWeb ? (
+              <View style={styles.callErrorWrap}>
+                <InlineBanner
+                  tone="warning"
+                  message="WhatsApp's 24-hour window has closed. Replies go to the customer's web chat window, not to WhatsApp."
+                />
+              </View>
+            ) : null}
             <FlashList
               ref={listRef}
               data={renderItems}
@@ -631,7 +735,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               // A demo chat always has an open composer: the backend skips
               // the window rule for it too, so this is not the client
               // deciding to ignore a server constraint.
-              withinWindow={(conversation?.isDemo ?? false) || (conversation?.withinCustomerServiceWindow ?? false)}
+              // A live web window is a real way to reach the customer, so
+              // the composer stays open on it — handleSendText routes the
+              // message down whichever channel is actually available.
+              withinWindow={withinWhatsAppWindow || guestActive}
               sending={sendMessage.isPending}
               onSendText={handleSendText}
               onAttach={() => setAttachSheetOpen(true)}

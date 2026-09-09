@@ -204,6 +204,26 @@ export async function issueGuestLinkForPhone(
   };
 }
 
+/**
+ * Whether this conversation has a live web chat window.
+ *
+ * The agent app needs this to know whether replying outside Meta's
+ * 24-hour window is possible at all — without it the only honest thing
+ * the composer could do is offer the option and let it fail.
+ *
+ * The URL is deliberately absent: the token was returned once, at
+ * creation, and only its hash is stored. Reporting "there is one" is
+ * everything that can truthfully be said about a link already sent.
+ */
+export async function getGuestLinkStatus(
+  auth: AuthContext,
+  conversationId: string,
+): Promise<{ active: boolean; expiresAt?: string }> {
+  const session = await findActiveSessionForConversation(conversationId, auth.tenantId);
+  if (!session) return { active: false };
+  return { active: true, expiresAt: session.expiresAt.toISOString() };
+}
+
 export async function revokeGuestLinkForConversation(
   auth: AuthContext,
   conversationId: string,
