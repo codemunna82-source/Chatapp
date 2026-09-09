@@ -36,3 +36,12 @@ export function emitWebCallReject(callId: string): void {
 export function emitWebCallEnd(callId: string): void {
   getSocket().emit('web:call:end', { callId });
 }
+
+/** The agent calling into the customer's web chat window. The ack carries the new call's id. */
+export function emitWebCallInvite(
+  conversationId: string,
+  sdp: string,
+  ack: (res: { success: boolean; callId?: string; error?: string }) => void,
+): void {
+  getSocket().emit('web:call:invite', { conversationId, sdp }, ack);
+}

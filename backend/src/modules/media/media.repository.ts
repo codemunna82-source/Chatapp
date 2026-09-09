@@ -22,6 +22,17 @@ export async function findMediaByIdAndTenant(id: string, tenantId: string): Prom
   return Media.findOne({ _id: id, tenantId });
 }
 
+/**
+ * The same lookup, with the stored bytes.
+ *
+ * `bytes` is select:false so no ordinary media query drags megabytes
+ * along; only the path that actually serves a file asks for them.
+ */
+export async function findMediaWithBytesByIdAndTenant(id: string, tenantId: string): Promise<MediaDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Media.findOne({ _id: id, tenantId }).select('+bytes');
+}
+
 export async function markMediaReady(id: string, tenantId: string, metaMediaId: string): Promise<MediaDoc | null> {
   return Media.findOneAndUpdate(
     { _id: id, tenantId },

@@ -3,7 +3,13 @@ import { ApiError } from '../../lib/ApiError';
 import { logger } from '../../lib/logger';
 import { recordAudit } from '../audit/auditLog.service';
 import { validateMediaFile } from './media.validation';
-import { createMedia, markMediaReady, findMediaBySha256, findMediaByIdAndTenant, setMediaCloudinaryRef } from './media.repository';
+import {
+  createMedia,
+  markMediaReady,
+  findMediaBySha256,
+  findMediaWithBytesByIdAndTenant,
+  setMediaCloudinaryRef,
+} from './media.repository';
 import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
 import { getMetaGateway } from '../../integrations/meta';
 import { isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer } from '../../integrations/cloudinary';
@@ -131,12 +137,18 @@ async function fetchMediaBytes(
   tenantId: string,
   mediaId: string,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
-  const media = await findMediaByIdAndTenant(mediaId, tenantId);
+  const media = await findMediaWithBytesByIdAndTenant(mediaId, tenantId);
   if (!media) {
     throw ApiError.notFound('MEDIA_NOT_FOUND', 'Media not found');
   }
-  if (!media.metaMediaId) {
-    throw ApiError.badRequest('MEDIA_NOT_READY', 'This media has not finished uploading yet');
+
+  // Held here, so there is nothing to go and get. This is an image a
+  // customer sent from the web chat window: it never went to WhatsApp and
+  // has no Meta id, and the check below used to reject it as "not
+  // finished uploading" — which is why those images never appeared in the
+  // agent app at all.
+  if (media.bytes) {
+    return { buffer: Buffer.from(media.bytes), mimeType: media.mimeType };
   }
 
   if (media.storageRef.startsWith('https://')) {
@@ -146,6 +158,12 @@ async function fetchMediaBytes(
     } catch (err) {
       logger.warn({ err, mediaId }, 'Cloudinary fetch failed for cached media — falling back to Meta');
     }
+  }
+
+  // Only now does a Meta id matter: it is what the fallback below needs,
+  // not a precondition for serving a file we already have.
+  if (!media.metaMediaId) {
+    throw ApiError.badRequest('MEDIA_NOT_READY', 'This media has not finished uploading yet');
   }
 
   const credentials = await resolveMetaCredentialsForPhoneNumber(tenantId, String(media.whatsappPhoneNumberId));

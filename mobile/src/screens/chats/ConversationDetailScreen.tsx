@@ -27,6 +27,7 @@ import { ForwardSheet, buildForwardBody } from './ForwardSheet';
 import { ImageViewerModal } from './ImageViewerModal';
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
+import { useCallStore } from '../../calling/callStore';
 import {
   useGuestLinkStatus,
   useIssueGuestLink,
@@ -321,6 +322,21 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     [conversationQuery.data],
   );
 
+  /**
+   * A live web window means a call that actually connects inside the app.
+   * The WhatsApp path cannot do that — outbound WhatsApp calling is a
+   * hand-off to wa.me, which leaves VOXO entirely — so when both are
+   * possible the web one is plainly better for the agent.
+   */
+  const handleCall = useCallback(() => {
+    if (guestActive) {
+      const name = conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Customer';
+      void useCallStore.getState().placeWebCall(conversationId, name);
+      return;
+    }
+    if (contactId) placeCall(contactId);
+  }, [guestActive, conversationId, contactId, placeCall, conversationQuery.data]);
+
   const handleGuestLink = useCallback(() => {
     if (issueGuestLink.isPending || revokeGuestLink.isPending) return;
 
@@ -555,7 +571,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           </Pressable>
           {contactId ? (
           <Pressable
-            onPress={() => placeCall(contactId)}
+            onPress={handleCall}
             disabled={callPending}
             style={styles.headerAction}
             accessibilityRole="button"
@@ -575,7 +591,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         </View>
       ),
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- placeCall is a stable closure from usePlaceCall; including it would re-run this on every render
   }, [
     navigation,
     conversationQuery.data,
@@ -589,6 +604,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     closeSearch,
     guestActive,
     handleGuestLink,
+    handleCall,
   ]);
   const handleOpenImage = useCallback((localUri: string) => setViewerUri(localUri), []);
 

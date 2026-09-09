@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ApiError } from '../../lib/ApiError';
-import { isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer } from '../../integrations/cloudinary';
+import { isCloudinaryConfigured, uploadBufferToCloudinary } from '../../integrations/cloudinary';
 import { Media } from '../media/media.model';
 import { findMediaBySha256 } from '../media/media.repository';
 import { getMediaBytesForTenant } from '../media/media.service';
@@ -114,19 +114,8 @@ export async function getGuestMediaBytes(
     throw ApiError.notFound('MEDIA_NOT_FOUND', 'Media not found');
   }
 
-  // +bytes: the field is select:false so nothing else ever loads it.
-  const media = await Media.findOne({ _id: mediaId, tenantId: guest.tenantId }).select('+bytes');
-  if (!media) {
-    throw ApiError.notFound('MEDIA_NOT_FOUND', 'Media not found');
-  }
-
-  if (media.bytes) {
-    return { buffer: Buffer.from(media.bytes), mimeType: media.mimeType };
-  }
-  if (media.storageRef.startsWith('https://')) {
-    return { buffer: await fetchCloudinaryBuffer(media.storageRef), mimeType: media.mimeType };
-  }
-  // Anything left came from WhatsApp, so it is fetched back through the
-  // existing Meta-backed proxy rather than duplicating that logic here.
+  // Everything past the ownership check is the same problem the agent side
+  // already solves — stored bytes, then Cloudinary, then Meta — so it uses
+  // the same function rather than a second copy that could drift from it.
   return getMediaBytesForTenant(guest.tenantId, mediaId);
 }

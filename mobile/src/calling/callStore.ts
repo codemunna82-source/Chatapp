@@ -2,9 +2,15 @@ import { create } from 'zustand';
 import * as callsApi from '../api/endpoints/calls';
 import { getApiErrorMessage } from '../api/client';
 import { answerIncomingCall, MicrophoneUnavailableError, type CallSession } from './callSession';
-import { answerWebCall, type WebCallSession } from './webCallSession';
+import { answerWebCall, placeWebCall, type WebCallSession, type WebCallOutgoingSession } from './webCallSession';
 import { getWebCallIceServers } from '../api/endpoints/calls';
-import { emitWebCallAnswer, emitWebCallEnd, emitWebCallIce, emitWebCallReject } from '../sockets/actions';
+import {
+  emitWebCallAnswer,
+  emitWebCallEnd,
+  emitWebCallIce,
+  emitWebCallInvite,
+  emitWebCallReject,
+} from '../sockets/actions';
 
 /**
  * The one live call this device is handling.
@@ -76,6 +82,10 @@ interface CallState {
 
   ring: (payload: IncomingCallPayload) => void;
   ringWeb: (payload: WebIncomingCallPayload) => void;
+  /** Calls the customer in their web chat window. */
+  placeWebCall: (conversationId: string, contactName: string) => Promise<void>;
+  /** The customer picked up — apply their answer. */
+  applyWebAnswer: (callId: string, sdp: string) => void;
   /** A trickled candidate from the far end; buffered if the call is not answered yet. */
   addRemoteIce: (callId: string, candidate: RTCIceCandidateInit) => void;
   answer: () => Promise<void>;
@@ -95,6 +105,8 @@ interface CallState {
  */
 let session: CallSession | null = null;
 let webSession: WebCallSession | null = null;
+/** Set instead of webSession when this device is the one calling. */
+let outgoingWebSession: WebCallOutgoingSession | null = null;
 /**
  * Candidates that arrived before the call was answered.
  *
@@ -110,6 +122,8 @@ function closeSession() {
   session = null;
   webSession?.close();
   webSession = null;
+  outgoingWebSession?.close();
+  outgoingWebSession = null;
   pendingRemoteIce = [];
 }
 
@@ -176,8 +190,86 @@ export const useCallStore = create<CallState>((set, get) => ({
       webSession.addRemoteCandidate(candidate);
       return;
     }
+    if (outgoingWebSession) {
+      outgoingWebSession.addRemoteCandidate(candidate);
+      return;
+    }
     // Still ringing: hold them until there is a connection to put them in.
     pendingRemoteIce.push(candidate);
+  },
+
+  placeWebCall: async (conversationId, contactName) => {
+    if (get().phase !== 'idle') return;
+
+    // 'connecting' rather than a new phase: the overlay already renders it
+    // as "Connecting…" with a hang-up button and no ringer, which is
+    // exactly an outgoing call.
+    pendingRemoteIce = [];
+    set({
+      ...IDLE,
+      phase: 'connecting',
+      channel: 'web',
+      contactName,
+    });
+
+    try {
+      const iceServers = await getWebCallIceServers();
+      const outgoing = await placeWebCall({
+        iceServers,
+        onIceCandidate: (candidate) => {
+          const { callId } = get();
+          if (callId) emitWebCallIce(callId, candidate);
+        },
+        onStateChange: (state) => {
+          if (state === 'failed') {
+            closeSession();
+            set({ phase: 'failed', message: 'The connection dropped.' });
+          } else if (state === 'ended') {
+            closeSession();
+            set({ phase: 'ended', message: 'Call ended' });
+          }
+        },
+      });
+
+      // Hung up while the microphone and ICE were being set up.
+      if (get().phase !== 'connecting') {
+        outgoing.close();
+        return;
+      }
+      outgoingWebSession = outgoing;
+
+      emitWebCallInvite(conversationId, outgoing.offerSdp, (res) => {
+        if (!res?.success || !res.callId) {
+          closeSession();
+          set({ phase: 'failed', message: res?.error ?? 'Could not start the call.' });
+          return;
+        }
+        set({ callId: res.callId });
+        // Candidates found before the server handed back an id had nowhere
+        // to be addressed; they go now.
+        for (const queued of pendingRemoteIce.splice(0)) outgoing.addRemoteCandidate(queued);
+      });
+    } catch (err) {
+      closeSession();
+      set({
+        phase: 'failed',
+        message:
+          err instanceof MicrophoneUnavailableError
+            ? 'VOXO needs microphone access to make calls. Enable it in your phone settings.'
+            : getApiErrorMessage(err, 'Could not start the call.'),
+      });
+    }
+  },
+
+  applyWebAnswer: (callId, sdp) => {
+    if (get().callId !== callId || !outgoingWebSession) return;
+    outgoingWebSession
+      .applyAnswer(sdp)
+      .then(() => set({ phase: 'active', connectedAt: Date.now() }))
+      .catch(() => {
+        closeSession();
+        set({ phase: 'failed', message: 'Could not connect the call.' });
+      });
   },
 
   answer: async () => {
@@ -316,6 +408,7 @@ export const useCallStore = create<CallState>((set, get) => ({
     const next = !get().muted;
     session?.setMuted(next);
     webSession?.setMuted(next);
+    outgoingWebSession?.setMuted(next);
     set({ muted: next });
   },
 

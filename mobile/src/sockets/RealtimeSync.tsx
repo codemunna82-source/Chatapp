@@ -183,6 +183,14 @@ export function RealtimeSync(): null {
     [],
   );
 
+  useSocketEvent<{ callId: string; sdp: string }>(
+    'web:call:answered',
+    (payload) => {
+      useCallStore.getState().applyWebAnswer(payload.callId, payload.sdp);
+    },
+    [],
+  );
+
   useSocketEvent<{ callId: string; candidate: RTCIceCandidateInit }>(
     'web:call:ice',
     (payload) => {
