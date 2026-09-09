@@ -123,9 +123,15 @@ export const fcmGateway: PushGateway = {
                 notification: {
                   channelId: payload.channelId,
                   tag: payload.collapseKey,
-                  // Tells Android to open the app rather than needing the
-                  // payload to name an activity.
-                  clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+                  // No clickAction on purpose. It names an intent action,
+                  // and Android opens whichever activity declares it — so
+                  // an action no activity declares means the notification
+                  // arrives, shows, and does nothing at all when tapped.
+                  // This app's MainActivity declares MAIN/LAUNCHER and the
+                  // voxo:// scheme, and nothing else. Left unset, FCM
+                  // launches the launcher activity, which is what
+                  // expo-notifications expects and where the tap handler
+                  // reads the data payload.
                 },
               },
             },
