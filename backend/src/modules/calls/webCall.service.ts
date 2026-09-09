@@ -52,6 +52,17 @@ export function hasTurnConfigured(): boolean {
   return env.TURN_URLS.trim().length > 0;
 }
 
+/**
+ * How long a call may sit ringing before it stops counting as live.
+ *
+ * Without this, a call nobody answers stays RINGING in the database
+ * forever, and the "one call at a time per conversation" check then
+ * refuses every future call on that conversation — one unanswered ring
+ * permanently disabled calling for that customer. Sixty seconds is longer
+ * than either client rings for, so a real call is never cut short by it.
+ */
+export const RINGING_TTL_MS = 60_000;
+
 export interface StartWebCallInput {
   tenantId: string;
   conversationId: string;
@@ -99,14 +110,42 @@ export async function findLiveWebCall(callId: string): Promise<CallLogDoc | null
   });
 }
 
-/** The live call for a conversation, if any — what a second caller collides with. */
+/**
+ * The live call for a conversation, if any — what a second caller collides with.
+ *
+ * A ringing row older than RINGING_TTL_MS does not count: it is the
+ * remains of a call whose caller closed the tab or lost the network, and
+ * treating it as live would refuse every subsequent call on this
+ * conversation for good.
+ */
 export async function findLiveWebCallForConversation(conversationId: string): Promise<CallLogDoc | null> {
   if (!Types.ObjectId.isValid(conversationId)) return null;
+  const ringingSince = new Date(Date.now() - RINGING_TTL_MS);
   return CallLog.findOne({
     conversationId,
     provider: 'web',
-    status: { $in: ['RINGING', 'ANSWERED'] },
+    $or: [{ status: 'ANSWERED' }, { status: 'RINGING', startedAt: { $gte: ringingSince } }],
   }).sort({ _id: -1 });
+}
+
+/**
+ * Routes an agent-placed call to the device that placed it, without
+ * pretending it has been answered.
+ *
+ * The two are separate on purpose. The agent's app needs to be the one
+ * device the customer's answer and candidates reach, which is what
+ * answeredByUserId decides — but marking the call ANSWERED at the moment
+ * it starts ringing makes every unanswered call record as a completed one,
+ * with a duration counted from the ring. The status still moves when
+ * somebody actually picks up.
+ */
+export async function claimWebCallForAgent(callId: string, userId: string): Promise<CallLogDoc | null> {
+  if (!Types.ObjectId.isValid(callId)) return null;
+  return CallLog.findOneAndUpdate(
+    { _id: callId, provider: 'web', status: 'RINGING' },
+    { $set: { answeredByUserId: userId } },
+    { new: true },
+  );
 }
 
 /**

@@ -3,7 +3,7 @@ import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { getGuestContext } from '../../middleware/guestAuth.middleware';
 import { ApiError } from '../../lib/ApiError';
-import { buildIceServers } from '../calls/webCall.service';
+import { buildIceServers, hasTurnConfigured } from '../calls/webCall.service';
 import { getGuestMediaBytes, storeGuestMedia } from './guestMedia.service';
 import * as guestService from './guest.service';
 
@@ -37,7 +37,14 @@ export const postGuestMessageHandler = asyncHandler(async (req: Request, res: Re
  */
 export const getGuestIceHandler = asyncHandler(async (req: Request, res: Response) => {
   getGuestContext(req);
-  res.status(200).json({ success: true, data: { iceServers: buildIceServers() } });
+  // hasTurn rides along so a call that never connects can say why. Without
+  // a relay, a browser and a phone on mobile networks usually cannot reach
+  // each other at all, and the failure is otherwise indistinguishable from
+  // the far end simply not picking up.
+  res.status(200).json({
+    success: true,
+    data: { iceServers: buildIceServers(), hasTurn: hasTurnConfigured() },
+  });
 });
 
 export const markGuestReadHandler = asyncHandler(async (req: Request, res: Response) => {

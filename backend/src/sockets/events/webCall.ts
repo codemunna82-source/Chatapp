@@ -3,6 +3,7 @@ import { conversationRoom, tenantRoom, userRoom, phoneNumberRoom } from '../room
 import {
   startWebCall,
   answerWebCall,
+  claimWebCallForAgent,
   endWebCall,
   findLiveWebCall,
   findLiveWebCallForConversation,
@@ -135,7 +136,20 @@ export function registerGuestCallHandlers(io: AppServer, socket: AppSocket, gues
       ack?.({ success: false, error: 'Call not found' });
       return;
     }
-    agentTarget(io, call).emit('web:call:answered', { callId: String(call._id), sdp: payload.sdp });
+
+    // This is the moment the call is answered, and the row has to say so:
+    // it is where the duration is measured from, and a call left RINGING
+    // ages out of "live" after a minute and takes the conversation's
+    // signalling with it. The agent it belongs to was recorded when they
+    // placed it.
+    const answered = call.answeredByUserId
+      ? await answerWebCall(String(call._id), String(call.answeredByUserId))
+      : null;
+
+    agentTarget(io, answered ?? call).emit('web:call:answered', {
+      callId: String(call._id),
+      sdp: payload.sdp,
+    });
     ack?.({ success: true });
   });
 
@@ -200,11 +214,16 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
       whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
       direction: 'OUTBOUND',
     });
-    // Claimed immediately: the agent who placed it is the one device the
-    // customer's answer and candidates have to reach.
-    await answerWebCall(String(call._id), auth.userId);
+    // Recorded against the agent who placed it, because that is the one
+    // device the customer's answer and candidates have to reach — but the
+    // call is still ringing, and marking it answered here would make every
+    // call the customer ignores record as a completed one.
+    await claimWebCallForAgent(String(call._id), auth.userId);
 
-    io.to(conversationRoom(conversationId)).emit('web:call:incoming', {
+    // socket.to, not io.to: the agent placing the call is in this
+    // conversation's room whenever they have the chat open, and io.to
+    // would ring their own phone for the call they just placed.
+    socket.to(conversationRoom(conversationId)).emit('web:call:incoming', {
       callId: String(call._id),
       conversationId,
       sdp: payload.sdp,
@@ -237,7 +256,7 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
       return;
     }
 
-    io.to(conversationRoom(String(claimed.conversationId))).emit('web:call:answered', {
+    socket.to(conversationRoom(String(claimed.conversationId))).emit('web:call:answered', {
       callId: String(claimed._id),
       sdp: payload.sdp,
     });
@@ -251,7 +270,7 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
 
     const ended = await endWebCall(payload.callId, 'REJECTED');
     if (!ended) return;
-    io.to(conversationRoom(String(ended.conversationId))).emit('web:call:ended', {
+    socket.to(conversationRoom(String(ended.conversationId))).emit('web:call:ended', {
       callId: String(ended._id),
       status: 'REJECTED',
       durationSeconds: 0,
@@ -263,7 +282,10 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
     if (!payload?.callId || payload.candidate == null) return;
     const call = await findLiveWebCall(payload.callId);
     if (!call || String(call.tenantId) !== auth.tenantId) return;
-    io.to(conversationRoom(String(call.conversationId))).emit('web:call:ice', {
+    // Excluding the sender matters here more than anywhere: an agent in
+    // the conversation room would otherwise be fed its own candidates back
+    // and try to add them to its own connection.
+    socket.to(conversationRoom(String(call.conversationId))).emit('web:call:ice', {
       callId: String(call._id),
       candidate: payload.candidate,
     });
@@ -276,7 +298,7 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
 
     const ended = await endWebCall(payload.callId, live.status === 'ANSWERED' ? 'COMPLETED' : 'REJECTED');
     if (!ended) return;
-    io.to(conversationRoom(String(ended.conversationId))).emit('web:call:ended', {
+    socket.to(conversationRoom(String(ended.conversationId))).emit('web:call:ended', {
       callId: String(ended._id),
       status: ended.status,
       durationSeconds: ended.duration ?? 0,

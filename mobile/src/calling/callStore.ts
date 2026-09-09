@@ -117,7 +117,30 @@ let outgoingWebSession: WebCallOutgoingSession | null = null;
  */
 let pendingRemoteIce: RTCIceCandidateInit[] = [];
 
+/**
+ * Our own candidates, gathered before the server handed back a call id.
+ *
+ * The same problem in the opposite direction, and the one that actually
+ * stopped calls connecting. Gathering starts the instant the offer's local
+ * description is set — milliseconds — while the id they must be addressed
+ * with only arrives on the invite's acknowledgement, a network round trip
+ * later. Every candidate found in between used to be discarded, which on a
+ * fast connection is most of them.
+ */
+let pendingLocalIce: unknown[] = [];
+
+/** Gives up on an outgoing call nobody answers, rather than sitting on "Connecting…". */
+let ringTimer: ReturnType<typeof setTimeout> | null = null;
+const RING_TIMEOUT_MS = 45_000;
+
+function clearRingTimer() {
+  if (ringTimer) clearTimeout(ringTimer);
+  ringTimer = null;
+}
+
 function closeSession() {
+  clearRingTimer();
+  pendingLocalIce = [];
   session?.close();
   session = null;
   webSession?.close();
@@ -218,10 +241,18 @@ export const useCallStore = create<CallState>((set, get) => ({
         iceServers,
         onIceCandidate: (candidate) => {
           const { callId } = get();
-          if (callId) emitWebCallIce(callId, candidate);
+          // Queued rather than dropped when the id is not back yet — see
+          // pendingLocalIce.
+          if (!callId) {
+            pendingLocalIce.push(candidate);
+            return;
+          }
+          emitWebCallIce(callId, candidate);
         },
         onStateChange: (state) => {
-          if (state === 'failed') {
+          if (state === 'connected') {
+            clearRingTimer();
+          } else if (state === 'failed') {
             closeSession();
             set({ phase: 'failed', message: 'The connection dropped.' });
           } else if (state === 'ended') {
@@ -245,9 +276,17 @@ export const useCallStore = create<CallState>((set, get) => ({
           return;
         }
         set({ callId: res.callId });
-        // Candidates found before the server handed back an id had nowhere
-        // to be addressed; they go now.
+        // Both queues drain here: theirs into the connection, ours onto
+        // the wire. Neither had anywhere to go until this id existed.
         for (const queued of pendingRemoteIce.splice(0)) outgoing.addRemoteCandidate(queued);
+        for (const queued of pendingLocalIce.splice(0)) emitWebCallIce(res.callId, queued);
+
+        ringTimer = setTimeout(() => {
+          if (get().callId !== res.callId) return;
+          emitWebCallEnd(res.callId);
+          closeSession();
+          set({ phase: 'ended', message: 'No answer' });
+        }, RING_TIMEOUT_MS);
       });
     } catch (err) {
       closeSession();

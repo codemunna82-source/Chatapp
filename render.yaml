@@ -56,6 +56,17 @@ services:
         sync: false
       - key: META_BUSINESS_ACCOUNT_ID
         sync: false
+      # Relay for calls between the web chat window and the agent app.
+      # Without it those calls fail on most mobile networks: unlike a
+      # WhatsApp call, where Meta relays the media, this is a browser and a
+      # phone trying to reach each other across two carrier NATs. STUN
+      # alone does not get through. Values come from a TURN provider.
+      - key: TURN_URLS
+        sync: false
+      - key: TURN_USERNAME
+        sync: false
+      - key: TURN_CREDENTIAL
+        sync: false
       - key: META_PHONE_NUMBER_ID
         sync: false
       - key: META_API_VERSION

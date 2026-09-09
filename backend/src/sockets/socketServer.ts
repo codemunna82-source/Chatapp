@@ -13,6 +13,7 @@ import { visibleWhatsAppPhoneNumberId } from '../modules/conversations/conversat
 import { registerConversationHandlers } from './events/conversation';
 import { registerTypingHandlers } from './events/typing';
 import { registerGuestCallHandlers, registerAgentWebCallHandlers } from './events/webCall';
+import { hasTurnConfigured } from '../modules/calls/webCall.service';
 import { registerGuestTypingHandlers } from './events/guestTyping';
 import { createSocketRealtimeEmitter } from './realtimeEmitterImpl';
 import { setRealtimeEmitter } from '../realtime/events';
@@ -59,6 +60,18 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
     logger.info('Socket.IO using the Redis adapter (horizontal scaling enabled)');
   } else {
     logger.warn('REDIS_URL not configured — Socket.IO running single-instance only, no cross-instance fan-out');
+  }
+
+  // Said out loud at boot because the symptom is otherwise a mystery: with
+  // STUN alone, a browser and a phone on mobile networks usually cannot
+  // reach each other, so calls ring, appear to be answered, and then sit
+  // silent until they time out. Nothing in the logs would point at the
+  // missing relay.
+  if (!hasTurnConfigured()) {
+    logger.warn(
+      'TURN_URLS not configured — web calls between the chat window and the agent app will fail ' +
+        'on most mobile networks. STUN alone cannot traverse carrier NAT.',
+    );
   }
 
   io.use(async (socket, next) => {
