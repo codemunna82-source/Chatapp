@@ -16,6 +16,18 @@ const whatsappPhoneNumberSchema = new Schema(
     phoneNumberId: { type: String, required: true }, // Meta phone_number_id — webhook tenant resolution key
     displayPhoneNumber: { type: String, required: true },
     qualityRating: { type: String }, // Meta-reported: GREEN | YELLOW | RED | UNKNOWN
+    /** Meta-reported conversation cap: TIER_250 | TIER_1K | TIER_10K | TIER_100K | TIER_UNLIMITED. */
+    messagingLimitTier: { type: String },
+    /**
+     * When the two fields above were last read from Meta.
+     *
+     * They used to be written once, at registration, and never again — so
+     * a number that was GREEN the day it was connected reported GREEN
+     * forever, including after Meta had moved it to RED. A rating nobody
+     * refreshes is worse than none: it is a warning light wired to
+     * nothing. This is what makes staleness visible and refreshable.
+     */
+    healthCheckedAt: { type: Date },
     status: { type: String, enum: PHONE_NUMBER_STATUSES, default: 'PENDING', required: true },
   },
   { timestamps: true },

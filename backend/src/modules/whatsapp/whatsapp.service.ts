@@ -8,6 +8,7 @@ import { decryptSecret, isEncryptedEnvelope } from '../../lib/crypto';
 import { logger } from '../../lib/logger';
 import { getMetaGateway } from '../../integrations/meta';
 import type { MetaCredentials } from '../../integrations/meta';
+import { describeNumberHealth, type NumberHealth } from './numberHealth';
 
 /**
  * Turns a stored `accessTokenRef` into the token to actually call Meta with.
@@ -130,6 +131,15 @@ export interface PublicWhatsAppNumber {
   displayPhoneNumber: string;
   status: string;
   qualityRating?: string;
+  messagingLimitTier?: string;
+  /** When quality and tier were last read from Meta — null if never. */
+  healthCheckedAt?: string;
+  /**
+   * The rating turned into something actionable. Computed here rather than
+   * in each client so every surface says the same thing about the same
+   * number.
+   */
+  health: NumberHealth;
 }
 
 function toPublicWhatsAppNumber(n: WhatsAppPhoneNumberDoc): PublicWhatsAppNumber {
@@ -139,12 +149,71 @@ function toPublicWhatsAppNumber(n: WhatsAppPhoneNumberDoc): PublicWhatsAppNumber
     displayPhoneNumber: n.displayPhoneNumber,
     status: n.status,
     qualityRating: n.qualityRating ?? undefined,
+    messagingLimitTier: n.messagingLimitTier ?? undefined,
+    healthCheckedAt: n.healthCheckedAt ? n.healthCheckedAt.toISOString() : undefined,
+    health: describeNumberHealth({
+      qualityRating: n.qualityRating ?? undefined,
+      messagingLimitTier: n.messagingLimitTier ?? undefined,
+      healthCheckedAt: n.healthCheckedAt ?? undefined,
+    }),
   };
 }
 
-/** The tenant's WhatsApp numbers, for the admin's "sends from" picker. */
+/**
+ * How old a health reading may be before it is refetched.
+ *
+ * Meta moves a rating over hours, not seconds, so this is about being
+ * usefully current rather than live — and about not spending a Graph call
+ * every time the settings screen is opened.
+ */
+const HEALTH_STALE_AFTER_MS = 15 * 60 * 1000;
+
+/**
+ * Re-reads one number's quality rating and messaging tier from Meta.
+ *
+ * Never throws. This runs behind a list request the user is waiting on,
+ * and a Graph hiccup must not turn "here are your numbers" into an error —
+ * the stored values are still shown, just older.
+ */
+export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promise<void> {
+  try {
+    const credentials = await resolveMetaCredentialsForPhoneNumber(
+      String(number.tenantId),
+      String(number._id),
+    );
+    const profile = await getMetaGateway().fetchPhoneNumberProfile(
+      credentials.accessToken,
+      number.phoneNumberId,
+    );
+
+    number.qualityRating = profile.qualityRating;
+    number.messagingLimitTier = profile.messagingLimitTier;
+    number.healthCheckedAt = new Date();
+    await number.save();
+  } catch (err) {
+    logger.warn({ err, phoneNumberId: number.phoneNumberId }, 'Could not refresh WhatsApp number health');
+  }
+}
+
+/**
+ * The tenant's WhatsApp numbers, for the admin's "sends from" picker and
+ * the health screen.
+ *
+ * Stale readings are refreshed in the background rather than awaited: the
+ * caller gets the stored values immediately and the next open shows the
+ * new ones. Blocking this on a Graph round trip per number would make the
+ * screen as slow as Meta happens to be that minute, for a rating that
+ * moves over hours.
+ */
 export async function listPhoneNumbersForTenant(tenantId: string): Promise<PublicWhatsAppNumber[]> {
   const numbers = await findPhoneNumbersByTenant(tenantId);
+
+  const cutoff = Date.now() - HEALTH_STALE_AFTER_MS;
+  for (const number of numbers) {
+    const checkedAt = number.healthCheckedAt?.getTime() ?? 0;
+    if (checkedAt < cutoff) void refreshNumberHealth(number);
+  }
+
   return numbers.map(toPublicWhatsAppNumber);
 }
 

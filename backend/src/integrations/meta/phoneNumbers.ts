@@ -7,6 +7,7 @@ interface MetaPhoneNumberResponse {
   display_phone_number?: string;
   verified_name?: string;
   quality_rating?: string;
+  messaging_limit_tier?: string;
 }
 
 /**
@@ -29,7 +30,7 @@ export async function fetchPhoneNumberProfile(
   // stops matching AxiosRequestConfig.
   const config: AxiosRequestConfig = {
     ...authConfig(accessToken),
-    params: { fields: 'display_phone_number,verified_name,quality_rating' },
+    params: { fields: 'display_phone_number,verified_name,quality_rating,messaging_limit_tier' },
   };
   const res = await metaRequest<MetaPhoneNumberResponse>((client) => client.get(`/${phoneNumberId}`, config));
 
@@ -41,6 +42,7 @@ export async function fetchPhoneNumberProfile(
     displayPhoneNumber: res.display_phone_number ?? phoneNumberId,
     verifiedName: res.verified_name,
     qualityRating: res.quality_rating,
+    messagingLimitTier: res.messaging_limit_tier,
   };
 }
 

@@ -88,4 +88,11 @@ export interface PhoneNumberProfile {
   displayPhoneNumber: string;
   verifiedName?: string;
   qualityRating?: string;
+  /**
+   * How many unique customers this number may start conversations with in
+   * 24 hours (TIER_250, TIER_1K, …). Read alongside the quality rating
+   * because they move together: Meta lowers the tier as quality falls, and
+   * a tier that has dropped is the same warning arriving a different way.
+   */
+  messagingLimitTier?: string;
 }

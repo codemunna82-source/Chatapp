@@ -21,6 +21,62 @@ function isPlaceholder(n: WhatsAppNumber): boolean {
   return !/^\d+$/.test(n.phoneNumberId);
 }
 
+/**
+ * The quality rating, said in words.
+ *
+ * Meta lowers the sending limit before it restricts a number, so a drop is
+ * the last moment there is still something to do about it — and "YELLOW"
+ * on its own tells an operator none of that. Shown on every number rather
+ * than only when bad: a rating that appears only in trouble is one nobody
+ * learns to read.
+ */
+function NumberHealthNote({ health }: { health: NonNullable<WhatsAppNumber['health']> }) {
+  const { colors, typography, spacing } = useTheme();
+  const tint =
+    health.level === 'critical'
+      ? colors.danger
+      : health.level === 'warn'
+        ? colors.warning
+        : health.level === 'ok'
+          ? colors.success
+          : colors.textSecondary;
+
+  return (
+    <View style={{ marginTop: spacing.xs }}>
+      <View style={styles.healthLine}>
+        <Ionicons
+          name={
+            health.level === 'critical'
+              ? 'warning'
+              : health.level === 'warn'
+                ? 'alert-circle-outline'
+                : health.level === 'ok'
+                  ? 'shield-checkmark-outline'
+                  : 'help-circle-outline'
+          }
+          size={14}
+          color={tint}
+        />
+        <Text style={[typography.caption, { color: tint, marginLeft: 4, fontWeight: '600' }]}>
+          {health.headline}
+        </Text>
+      </View>
+      {/* Only where it changes what to do — a healthy number needs no
+          paragraph, but a falling one needs the reason and the remedy. */}
+      {health.level === 'warn' || health.level === 'critical' ? (
+        <Text style={[typography.caption, { color: colors.textSecondary, marginTop: 2 }]}>
+          {health.detail}
+        </Text>
+      ) : null}
+      {health.stale ? (
+        <Text style={[typography.caption, { color: colors.textSecondary, marginTop: 2 }]}>
+          Not checked recently — reopen this screen to refresh.
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function NumberRow({ item }: { item: WhatsAppNumber }) {
   const { colors, spacing, typography, radius } = useTheme();
   const placeholder = isPlaceholder(item);
@@ -46,6 +102,7 @@ function NumberRow({ item }: { item: WhatsAppNumber }) {
             Demo placeholder — messages sent from this will not reach WhatsApp.
           </Text>
         ) : null}
+        {!placeholder && item.health ? <NumberHealthNote health={item.health} /> : null}
       </View>
     </View>
   );
@@ -163,5 +220,6 @@ export function WhatsAppNumbersScreen() {
 }
 
 const styles = StyleSheet.create({
+  healthLine: { flexDirection: 'row', alignItems: 'center' },
   row: { flexDirection: 'row', alignItems: 'flex-start' },
 });

@@ -287,4 +287,17 @@ export interface WhatsAppNumber {
   displayPhoneNumber: string;
   status: 'PENDING' | 'CONNECTED' | 'DISCONNECTED' | 'RESTRICTED';
   qualityRating?: string;
+  messagingLimitTier?: string;
+  /** When the server last read quality and tier from Meta. */
+  healthCheckedAt?: string;
+  /**
+   * The rating already turned into something readable. Computed on the
+   * server so every surface says the same thing about the same number.
+   */
+  health?: {
+    level: 'ok' | 'warn' | 'critical' | 'unknown';
+    headline: string;
+    detail: string;
+    stale: boolean;
+  };
 }
