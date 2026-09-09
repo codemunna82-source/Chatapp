@@ -95,6 +95,10 @@ export function registerGuestCallHandlers(io: AppServer, socket: AppSocket, gues
       contactId: guest.contactId,
       whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
       direction: 'INBOUND',
+      // Held only while it rings, so an agent woken by the push can pick
+      // the call up from GET /calls/pending instead of finding a ring
+      // that was delivered to a socket nobody had open.
+      sdpOffer: payload.sdp,
     });
     const callId = String(call._id);
 

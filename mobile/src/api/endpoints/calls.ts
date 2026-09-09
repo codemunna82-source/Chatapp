@@ -24,6 +24,12 @@ export interface PendingCall {
   contactName?: string;
   fromPhone: string;
   sdpOffer?: string;
+  /**
+   * Which signalling path answers this call. WhatsApp calls go back to
+   * Meta; web ones over the socket. Optional so an older server that does
+   * not send it is read as the WhatsApp call it can only have been.
+   */
+  channel?: 'meta' | 'web';
 }
 
 /**
@@ -62,4 +68,26 @@ export async function rejectCall(callId: string): Promise<CallLog> {
 export async function hangUpCall(callId: string): Promise<CallLog> {
   const res = await apiClient.post<ApiSuccess<CallLog>>(`/calls/${encodeURIComponent(callId)}/hangup`, {});
   return res.data.data;
+}
+
+export interface IceServer {
+  urls: string[];
+  username?: string;
+  credential?: string;
+}
+
+/**
+ * ICE configuration for a call with the web chat window.
+ *
+ * Fetched rather than built in, because both ends have to be handed the
+ * same relay: a phone and a browser configured with different TURN servers
+ * gather candidates that can never pair up, and that failure presents as a
+ * call that rings, answers, and is silent.
+ *
+ * Not needed for WhatsApp calls — Meta relays that media itself, so each
+ * side only ever has to reach Meta.
+ */
+export async function getWebCallIceServers(): Promise<IceServer[]> {
+  const res = await apiClient.get<ApiSuccess<{ iceServers: IceServer[] }>>('/calls/ice');
+  return res.data.data.iceServers;
 }

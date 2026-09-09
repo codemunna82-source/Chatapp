@@ -6,7 +6,12 @@ import { useSocketEvent } from './useSocketEvent';
 import { useSocketConnection } from './useSocketConnected';
 import { useMessageAlert } from './useMessageAlert';
 import { useActiveConversationStore } from '../store/activeConversationStore';
-import { useCallStore, type IncomingCallPayload, type CallEndedPayload } from '../calling/callStore';
+import {
+  useCallStore,
+  type IncomingCallPayload,
+  type CallEndedPayload,
+  type WebIncomingCallPayload,
+} from '../calling/callStore';
 import { upsertMessageInCache, patchMessageStatusInCache } from '../queries/useMessages';
 import { queryKeys } from '../queries/keys';
 import type { Message, Conversation, MessageStatus } from '../api/types';
@@ -165,6 +170,34 @@ export function RealtimeSync(): null {
       useCallStore.getState().ring(payload);
     },
     [],
+  );
+
+  // Calls from the web chat window take the same overlay but a completely
+  // separate signalling path — see webCallSession.ts for why they cannot
+  // share the WhatsApp one.
+  useSocketEvent<WebIncomingCallPayload>(
+    'web:call:incoming',
+    (payload) => {
+      useCallStore.getState().ringWeb(payload);
+    },
+    [],
+  );
+
+  useSocketEvent<{ callId: string; candidate: RTCIceCandidateInit }>(
+    'web:call:ice',
+    (payload) => {
+      useCallStore.getState().addRemoteIce(payload.callId, payload.candidate);
+    },
+    [],
+  );
+
+  useSocketEvent<CallEndedPayload>(
+    'web:call:ended',
+    (payload) => {
+      useCallStore.getState().remoteEnded(payload);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.calls });
+    },
+    [queryClient],
   );
 
   useSocketEvent<CallEndedPayload>(

@@ -6,11 +6,12 @@ import { useCallStore } from './callStore';
 /**
  * Picks up a call that started ringing while the app was closed.
  *
- * The `call:incoming` socket event only reaches a device with the app
- * alive; the push notification reaches one that isn't, but carries no
- * WebRTC offer and nothing replays the socket event afterwards. So when
- * the app comes to the foreground it asks the server directly whether one
- * of its own calls is ringing right now.
+ * The `call:incoming` and `web:call:incoming` socket events only reach a
+ * device with the app alive; the push notification reaches one that isn't,
+ * but carries no WebRTC offer and nothing replays the socket event
+ * afterwards. So when the app comes to the foreground it asks the server
+ * directly whether one of its own calls is ringing right now — either
+ * kind.
  *
  * No UI — mounted once beside RealtimeSync.
  */
@@ -26,7 +27,18 @@ export function PendingCallSync(): null {
       inFlight.current = true;
       try {
         const pending = await fetchPendingCall();
-        if (pending?.sdpOffer) {
+        if (!pending?.sdpOffer) return;
+        // Answered down completely different paths, so the store has to be
+        // told which this is rather than inferring it from the ids.
+        if (pending.channel === 'web') {
+          useCallStore.getState().ringWeb({
+            callId: pending.callId,
+            conversationId: '',
+            contactId: pending.contactId,
+            contactName: pending.contactName,
+            sdp: pending.sdpOffer,
+          });
+        } else {
           useCallStore.getState().ring(pending);
         }
       } catch {

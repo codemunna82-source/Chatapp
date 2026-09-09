@@ -59,6 +59,14 @@ export interface StartWebCallInput {
   whatsappPhoneNumberId: string;
   /** INBOUND when the customer places it, OUTBOUND when the agent does. */
   direction: 'INBOUND' | 'OUTBOUND';
+  /**
+   * The caller's offer, kept only while the call rings.
+   *
+   * A socket event reaches an app that is open; a push reaches a phone
+   * that is asleep and carries no offer. Without this, an agent woken by
+   * the notification would open the app to a call they cannot answer.
+   */
+  sdpOffer?: string;
 }
 
 export async function startWebCall(input: StartWebCallInput): Promise<CallLogDoc> {
@@ -70,6 +78,7 @@ export async function startWebCall(input: StartWebCallInput): Promise<CallLogDoc
     direction: input.direction,
     status: 'RINGING',
     provider: 'web',
+    sdpOffer: input.sdpOffer,
     startedAt: new Date(),
   });
 }
@@ -111,7 +120,12 @@ export async function answerWebCall(callId: string, userId: string): Promise<Cal
   if (!Types.ObjectId.isValid(callId)) return null;
   return CallLog.findOneAndUpdate(
     { _id: callId, provider: 'web', status: 'RINGING' },
-    { $set: { status: 'ANSWERED', answeredByUserId: userId, startedAt: new Date() } },
+    {
+      $set: { status: 'ANSWERED', answeredByUserId: userId, startedAt: new Date() },
+      // Worthless once answered, and an SDP kept past its call is an
+      // unbounded blob on every historical row.
+      $unset: { sdpOffer: '' },
+    },
     { new: true },
   );
 }
@@ -129,6 +143,7 @@ export async function endWebCall(callId: string, status: CallStatus): Promise<Ca
   const answered = call.status === 'ANSWERED';
   call.status = status;
   call.endedAt = endedAt;
+  call.sdpOffer = undefined;
   call.duration = answered && call.startedAt
     ? Math.max(0, Math.round((endedAt.getTime() - call.startedAt.getTime()) / 1000))
     : 0;

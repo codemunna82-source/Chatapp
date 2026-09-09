@@ -251,6 +251,13 @@ export interface PendingCall {
   contactName?: string;
   fromPhone: string;
   sdpOffer?: string;
+  /**
+   * Which signalling path answers this call. A WhatsApp call is answered
+   * by posting an SDP back to Meta; a web one over the socket. The app
+   * cannot tell them apart from the ids alone, and guessing wrong would
+   * hand a browser's offer to Meta's API.
+   */
+  channel: 'meta' | 'web';
 }
 
 /**
@@ -271,16 +278,23 @@ export async function findPendingCallForUser(auth: AuthContext): Promise<Pending
   if (!scope) return null;
 
   const call = await repo.findRingingCallForNumber(scope, PENDING_CALL_MAX_AGE_MS);
-  if (!call || String(call.tenantId) !== auth.tenantId || !call.providerCallId) return null;
+  if (!call || String(call.tenantId) !== auth.tenantId) return null;
+
+  // A web call is identified by our own row; a WhatsApp one by Meta's id,
+  // without which it cannot be answered at all. The app has to be told
+  // which, because the two are answered down completely different paths.
+  const isWeb = call.provider === 'web';
+  if (!isWeb && !call.providerCallId) return null;
 
   const contact = await contactRepo.findContactByIdAndTenant(String(call.contactId), auth.tenantId);
   return {
-    callId: call.providerCallId,
+    callId: isWeb ? String(call._id) : (call.providerCallId as string),
     callLogId: String(call._id),
     contactId: String(call.contactId),
     contactName: contact?.name ?? undefined,
     fromPhone: contact?.phone ?? '',
     sdpOffer: call.sdpOffer ?? undefined,
+    channel: isWeb ? ('web' as const) : ('meta' as const),
   };
 }
 
