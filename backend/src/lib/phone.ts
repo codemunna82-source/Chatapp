@@ -41,3 +41,19 @@ export function phoneVariants(raw: string | null | undefined): string[] {
   if (!canonical) return raw ? [String(raw)] : [];
   return [canonical, canonical.slice(1)];
 }
+
+/**
+ * The form WhatsApp itself uses: digits, no leading `+`.
+ *
+ * This is what Meta sends as `messages[].from` for the very same customer,
+ * so sending it back is the one representation guaranteed to address the
+ * person the webhook was about. It is also already the convention at this
+ * boundary — placing a call built `wa.me/<digits>` by stripping the plus
+ * by hand — and having one function say so keeps the two from drifting.
+ *
+ * Storage stays canonical `+E.164`: that is what people read, and what
+ * makes one customer one contact. Only the wire to Meta uses this.
+ */
+export function toWhatsAppId(phone: string): string {
+  return (normalizePhone(phone) ?? phone).replace(/^\+/, '');
+}

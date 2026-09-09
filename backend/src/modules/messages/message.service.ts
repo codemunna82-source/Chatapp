@@ -17,6 +17,7 @@ import { mockMetaGateway } from '../../integrations/meta/mock/mockMetaGateway';
 import { getRealtimeEmitter } from '../../realtime/events';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
 import type { MessageDoc } from './message.model';
+import { toWhatsAppId } from '../../lib/phone';
 
 /**
  * Message types this service can actually dispatch through the Meta
@@ -167,7 +168,17 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     // Demo sends never leave this server, whatever META_MOCK_MODE is set to.
     const gateway = isDemoContact ? mockMetaGateway : getMetaGateway();
 
-    const metaMessageId = await dispatch(gateway, credentials, contact.phone, input, replyToMetaMessageId);
+    // Digits without the plus — the form Meta's own webhook uses for this
+    // customer. Contacts are stored canonically (+E.164), so sending the
+    // stored string verbatim would put a `+` on the wire for every contact
+    // once the duplicate merge has canonicalised them.
+    const metaMessageId = await dispatch(
+      gateway,
+      credentials,
+      toWhatsAppId(contact.phone),
+      input,
+      replyToMetaMessageId,
+    );
 
     const sentMessage = await attachMetaMessageId(String(localMessage._id), input.tenantId, metaMessageId);
     const updatedConversation = await recordOutboundActivity(

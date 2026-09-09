@@ -1,4 +1,4 @@
-import { normalizePhone, phoneVariants } from './phone';
+import { normalizePhone, phoneVariants, toWhatsAppId } from './phone';
 
 /**
  * No database: this is the rule that decides whether a customer's web-chat
@@ -47,5 +47,35 @@ describe('phoneVariants', () => {
     // would hide a row that genuinely exists under that exact string.
     expect(phoneVariants('weird-id')).toEqual(['weird-id']);
     expect(phoneVariants('')).toEqual([]);
+  });
+});
+
+describe('toWhatsAppId', () => {
+  it('sends digits back in the form Meta itself uses', () => {
+    // messages[].from on a Cloud API webhook is bare digits, so this is
+    // the one representation guaranteed to address the same person.
+    expect(toWhatsAppId('+919876543210')).toBe('919876543210');
+    expect(toWhatsAppId('919876543210')).toBe('919876543210');
+  });
+
+  it('strips the punctuation an agent typed before it reaches the wire', () => {
+    expect(toWhatsAppId('+91 98765-43210')).toBe('919876543210');
+    expect(toWhatsAppId('00919876543210')).toBe('919876543210');
+  });
+
+  it('passes through a value it cannot parse rather than mangling it', () => {
+    // Refusing to send is worse than sending what is stored: the number
+    // may be one Meta accepts and this parser does not know about.
+    expect(toWhatsAppId('weird-id')).toBe('weird-id');
+  });
+
+  it('never leaves a plus on the wire', () => {
+    // The regression this exists to prevent: contacts are stored
+    // canonically, so sending the stored string verbatim would put a `+`
+    // in front of every outbound message once the merge canonicalises
+    // the older rows.
+    for (const input of ['+919876543210', '00919876543210', '+1 (415) 555-1234']) {
+      expect(toWhatsAppId(input).startsWith('+')).toBe(false);
+    }
   });
 });

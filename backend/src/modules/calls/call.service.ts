@@ -15,6 +15,7 @@ import type { CallLogDoc } from './callLog.model';
 import type { WhatsAppPhoneNumberDoc } from '../whatsapp/whatsappPhoneNumber.model';
 import type { NormalizedCallItem } from '../../integrations/meta/webhookPayload';
 import type { ContactLean } from '../contacts/contact.model';
+import { toWhatsAppId } from '../../lib/phone';
 
 const WHATSAPP_DEEPLINK_PROVIDER = 'whatsapp_deeplink';
 
@@ -129,7 +130,7 @@ export async function initiateWhatsAppCall(
     contactId: String(contact._id),
   });
 
-  const digits = contact.phone.replace(/^\+/, '');
+  const digits = toWhatsAppId(contact.phone);
   return {
     call: toPublicCallLog(doc, contact),
     deepLink: `https://wa.me/${digits}`,
