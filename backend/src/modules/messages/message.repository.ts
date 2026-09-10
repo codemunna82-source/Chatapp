@@ -47,6 +47,17 @@ export async function findMessageByMetaIdAndTenant(
 export interface ListMessagesOptions {
   cursor?: string; // opaque cursor = _id of the oldest message already loaded
   limit?: number;
+  /**
+   * Leave reaction rows out of the page entirely.
+   *
+   * They are messages in this collection but not messages on screen, and
+   * counting them against the limit meant a page of thirty could come back
+   * with twenty visible messages — or, in a stretch of thread that is
+   * nothing but reactions, with none at all and a cursor saying there is
+   * more. The guest view fetches them separately, keyed to the page it
+   * actually got.
+   */
+  excludeReactions?: boolean;
   /** Case-insensitive substring match against the message text. */
   search?: string;
   /** Restrict to starred messages only. */
@@ -103,6 +114,43 @@ export async function findMessagesByIds(
  * Scoped to direction IN: an agent's reaction on the same message is
  * theirs and is not the customer's to clear.
  */
+/**
+ * The customer's reaction on one message — set, replaced, or cleared.
+ *
+ * One upsert rather than a delete followed by an insert. Two taps landing
+ * together on the old pair could both delete, then both insert, leaving
+ * the message with two reactions from the same person; matching on the
+ * row's identity — this conversation, this target, inbound — makes the
+ * write idempotent, so the second tap updates what the first created
+ * instead of racing it.
+ *
+ * `deletedAt` is unset on the way in, so reacting again after removing a
+ * reaction revives the same row rather than accumulating tombstones.
+ */
+export async function upsertGuestReaction(input: {
+  tenantId: string;
+  conversationId: string;
+  targetMessageId: string;
+  recipientPhone: string;
+  emoji: string;
+}): Promise<MessageDoc | null> {
+  if (!Types.ObjectId.isValid(input.targetMessageId)) return null;
+  return Message.findOneAndUpdate(
+    {
+      tenantId: input.tenantId,
+      conversationId: input.conversationId,
+      type: 'reaction',
+      direction: 'IN',
+      replyToMessageId: input.targetMessageId,
+    },
+    {
+      $set: { text: input.emoji, status: 'DELIVERED', recipientPhone: input.recipientPhone },
+      $unset: { deletedAt: '' },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+}
+
 export async function deleteGuestReactions(
   tenantId: string,
   conversationId: string,
@@ -122,6 +170,31 @@ export async function deleteGuestReactions(
   );
 }
 
+/**
+ * Every live reaction on a set of messages.
+ *
+ * Separate from the page query because a reaction and the message it is
+ * on are frequently nowhere near each other: react to something, exchange
+ * another thirty messages, and the two land on different pages — which
+ * showed the reaction on neither, since folding them together only ever
+ * worked when both happened to be in the same batch.
+ */
+export async function findReactionsForMessages(
+  tenantId: string,
+  conversationId: string,
+  messageIds: string[],
+): Promise<MessageLean[]> {
+  const valid = messageIds.filter((id) => Types.ObjectId.isValid(id));
+  if (valid.length === 0) return [];
+  return Message.find({
+    tenantId,
+    conversationId,
+    type: 'reaction',
+    replyToMessageId: { $in: valid },
+    deletedAt: { $exists: false },
+  }).lean<MessageLean[]>();
+}
+
 export async function listMessagesByConversation(
   tenantId: string,
   conversationId: string,
@@ -130,6 +203,9 @@ export async function listMessagesByConversation(
   const limit = Math.min(opts.limit ?? 30, 100);
   // Soft-deleted messages never come back down the wire.
   const filter: Record<string, unknown> = { tenantId, conversationId, deletedAt: { $exists: false } };
+  if (opts.excludeReactions) {
+    filter.type = { $ne: 'reaction' };
+  }
   if (opts.cursor && Types.ObjectId.isValid(opts.cursor)) {
     filter._id = { $lt: new Types.ObjectId(opts.cursor) };
   }

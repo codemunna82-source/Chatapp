@@ -28,10 +28,16 @@ export const guestMessageSchema = z.object({
  *
  * An empty string is allowed and means "remove my reaction" — the same
  * shape the WhatsApp API itself uses.
+ *
+ * The bound counts UTF-16 units, which is not the same as characters: a
+ * family emoji is four faces joined by zero-width joiners and comes to
+ * eleven, and a flag with a skin tone is longer still. Eight rejected
+ * every one of those with a 400. Thirty-two is still nowhere near a
+ * message and accepts any single glyph a keyboard can produce.
  */
 export const guestReactionSchema = z.object({
   messageId: messageIdSchema,
-  emoji: z.string().trim().max(8),
+  emoji: z.string().trim().max(32),
 });
 
 export const guestMessagesQuerySchema = z.object({

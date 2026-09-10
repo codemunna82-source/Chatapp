@@ -63,6 +63,18 @@ export function hasTurnConfigured(): boolean {
  */
 export const RINGING_TTL_MS = 60_000;
 
+/**
+ * How long an answered call may stay open before it stops counting as live.
+ *
+ * The ringing TTL only ever covered the ringing case, which left the same
+ * hole one step further along: a call that connects and whose two ends
+ * both vanish — a killed tab, a phone that lost signal — has no end event
+ * and sits ANSWERED forever, refusing every future call on that
+ * conversation. Four hours is far longer than any real call here and short
+ * enough that a zombie clears the same day.
+ */
+export const ANSWERED_TTL_MS = 4 * 60 * 60 * 1000;
+
 export interface StartWebCallInput {
   tenantId: string;
   conversationId: string;
@@ -120,11 +132,16 @@ export async function findLiveWebCall(callId: string): Promise<CallLogDoc | null
  */
 export async function findLiveWebCallForConversation(conversationId: string): Promise<CallLogDoc | null> {
   if (!Types.ObjectId.isValid(conversationId)) return null;
-  const ringingSince = new Date(Date.now() - RINGING_TTL_MS);
+  const now = Date.now();
+  const ringingSince = new Date(now - RINGING_TTL_MS);
+  const answeredSince = new Date(now - ANSWERED_TTL_MS);
   return CallLog.findOne({
     conversationId,
     provider: 'web',
-    $or: [{ status: 'ANSWERED' }, { status: 'RINGING', startedAt: { $gte: ringingSince } }],
+    $or: [
+      { status: 'ANSWERED', startedAt: { $gte: answeredSince } },
+      { status: 'RINGING', startedAt: { $gte: ringingSince } },
+    ],
   }).sort({ _id: -1 });
 }
 

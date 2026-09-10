@@ -17,7 +17,9 @@ import { visibleWhatsAppPhoneNumberId } from '../conversations/conversation.acce
 import {
   createMessage,
   deleteGuestReactions,
+  upsertGuestReaction,
   findMessagesByIds,
+  findReactionsForMessages,
   listMessagesByConversation,
 } from '../messages/message.repository';
 import { Message, type MessageLean } from '../messages/message.model';
@@ -118,24 +120,28 @@ function previewOf(doc: MessageLean): string {
 async function toGuestMessagePage(
   tenantId: string,
   conversationId: string,
-  docs: MessageLean[],
+  visible: MessageLean[],
 ): Promise<GuestMessageView[]> {
-  const reactions = docs.filter((d) => d.type === 'reaction' && d.replyToMessageId);
-  const visible = docs.filter((d) => d.type !== 'reaction');
-
-  const onPage = new Map(docs.map((d) => [String(d._id), d]));
+  const onPage = new Map(visible.map((d) => [String(d._id), d]));
   const missing = visible
     .filter((d) => d.replyToMessageId && !onPage.has(String(d.replyToMessageId)))
     .map((d) => String(d.replyToMessageId));
 
-  if (missing.length > 0) {
-    const fetched = await findMessagesByIds(tenantId, conversationId, [...new Set(missing)]);
-    for (const doc of fetched) onPage.set(String(doc._id), doc);
-  }
+  // Quotes whose target is off the page, and every reaction on this page's
+  // messages — both looked up by id rather than hoped for in the same
+  // batch, which is the only way either works once a thread is longer than
+  // one page.
+  const [quoted, reactions] = await Promise.all([
+    missing.length > 0
+      ? findMessagesByIds(tenantId, conversationId, [...new Set(missing)])
+      : Promise.resolve([]),
+    findReactionsForMessages(tenantId, conversationId, [...onPage.keys()]),
+  ]);
+  for (const doc of quoted) onPage.set(String(doc._id), doc);
 
   const byTarget = new Map<string, { emoji: string; mine: boolean }[]>();
   for (const r of reactions) {
-    if (!r.text) continue;
+    if (!r.text || !r.replyToMessageId) continue;
     const target = String(r.replyToMessageId);
     const list = byTarget.get(target) ?? [];
     list.push({ emoji: r.text, mine: r.direction === 'IN' });
@@ -373,6 +379,9 @@ export async function listGuestMessages(
   const page = await listMessagesByConversation(guest.tenantId, guest.conversationId, {
     cursor: opts.cursor,
     limit: opts.limit,
+    // Reactions are folded onto their targets below; counting them here
+    // would return short pages.
+    excludeReactions: true,
   });
   return {
     items: await toGuestMessagePage(guest.tenantId, guest.conversationId, page.items),
@@ -478,8 +487,10 @@ async function resolveQuotedMessage(
  * customer's reaction with the code it already has.
  *
  * One reaction per customer per message, like the app it is modelled on:
- * reacting again replaces, and an empty emoji removes. Both are handled by
- * clearing whatever they had first, so a double tap can never leave two.
+ * reacting again replaces, and an empty emoji removes. A replacement is a
+ * single upsert keyed on the row's identity rather than a delete followed
+ * by an insert — two taps arriving together could otherwise both delete
+ * and both insert, leaving one person with two reactions on one message.
  */
 export async function postGuestReaction(
   guest: GuestContext,
@@ -491,9 +502,8 @@ export async function postGuestReaction(
     throw ApiError.notFound('MESSAGE_NOT_FOUND', 'That message is no longer here.');
   }
 
-  await deleteGuestReactions(guest.tenantId, guest.conversationId, messageId);
-
   if (emoji.length === 0) {
+    await deleteGuestReactions(guest.tenantId, guest.conversationId, messageId);
     // Nothing is emitted for a removal. There is no message-deleted event
     // anywhere in this system — the agent app picks the change up on its
     // next fetch — and inventing a half-wired one for this single case
@@ -503,25 +513,24 @@ export async function postGuestReaction(
   }
 
   const phoneNumber = await findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId);
-  const row = await createMessage({
+  const row = await upsertGuestReaction({
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
+    targetMessageId: messageId,
     recipientPhone: phoneNumber?.displayPhoneNumber ?? '',
-    direction: 'IN',
-    type: 'reaction',
-    text: emoji,
-    replyToMessageId: messageId,
-    status: 'DELIVERED',
+    emoji,
   });
 
   // Not recordGuestInboundActivity: a reaction is not a new message, and
   // bumping the chat list with "[reaction]" every time someone taps a
   // thumbs-up would bury the actual conversation.
-  getRealtimeEmitter().emitMessageNew(
-    guest.tenantId,
-    toRealtimeMessage(row),
-    guest.whatsappPhoneNumberId,
-  );
+  if (row) {
+    getRealtimeEmitter().emitMessageNew(
+      guest.tenantId,
+      toRealtimeMessage(row),
+      guest.whatsappPhoneNumberId,
+    );
+  }
 
   return { messageId, emoji };
 }

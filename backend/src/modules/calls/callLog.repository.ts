@@ -83,6 +83,15 @@ export async function findRingingCallForNumber(
   return CallLog.findOne({
     whatsappPhoneNumberId,
     status: 'RINGING',
+    // Inbound only. This is what an app asks for on foreground — "is
+    // something ringing for me to answer" — and a call the agent placed
+    // themselves is not that. Once web calls stopped being marked ANSWERED
+    // the moment they were dialled, an agent's own outgoing call sat
+    // RINGING for its whole life and was handed back here to every agent
+    // on the number as an incoming call: answering it re-claimed the call
+    // from the device that placed it, and the customer's answer then went
+    // to the wrong phone and the real call never connected.
+    direction: 'INBOUND',
     createdAt: { $gte: new Date(Date.now() - maxAgeMs) },
   }).sort({ _id: -1 });
 }

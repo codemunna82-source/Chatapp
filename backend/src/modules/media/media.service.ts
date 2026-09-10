@@ -168,15 +168,25 @@ async function fetchMediaBytes(
   }
 
   if (media.storageRef.startsWith('https://')) {
+    const wantsVariant = Boolean(maxWidth) && media.mimeType.startsWith('image/');
+    const source = wantsVariant ? cloudinaryVariant(media.storageRef, maxWidth!) : media.storageRef;
     try {
-      const source =
-        maxWidth && media.mimeType.startsWith('image/')
-          ? cloudinaryVariant(media.storageRef, maxWidth)
-          : media.storageRef;
-      const buffer = await fetchCloudinaryBuffer(source);
-      return { buffer, mimeType: media.mimeType };
+      return { buffer: await fetchCloudinaryBuffer(source), mimeType: media.mimeType };
     } catch (err) {
-      logger.warn({ err, mediaId }, 'Cloudinary fetch failed for cached media — falling back to Meta');
+      // A derived URL can fail on its own — an unsupported transformation,
+      // a transformation quota — while the original is perfectly fine. The
+      // original is tried before giving up, because falling straight
+      // through to Meta turns a servable guest upload, which has no Meta id
+      // at all, into "this media has not finished uploading".
+      if (wantsVariant) {
+        try {
+          return { buffer: await fetchCloudinaryBuffer(media.storageRef), mimeType: media.mimeType };
+        } catch (originalErr) {
+          logger.warn({ err: originalErr, mediaId }, 'Cloudinary fetch failed for cached media — falling back to Meta');
+        }
+      } else {
+        logger.warn({ err, mediaId }, 'Cloudinary fetch failed for cached media — falling back to Meta');
+      }
     }
   }
 
