@@ -22,7 +22,6 @@ export const queryKeys = {
   subscription: ['subscription'] as const,
   dashboard: ['dashboard'] as const,
   calls: ['calls'] as const,
-  team: (status?: string) => ['team', { status: status ?? null }] as const,
   whatsappNumbers: ['whatsappNumbers'] as const,
   whatsappConnection: ['whatsappConnection'] as const,
   /** Whether a conversation has a live web chat window. */

@@ -25,9 +25,6 @@ export function useRegisterWhatsAppNumber() {
     mutationFn: whatsappApi.registerWhatsAppNumber,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.whatsappNumbers });
-      // The Team form's "sends from" picker reads the same list, and a
-      // member assigned to the old demo number should show the new one.
-      void queryClient.invalidateQueries({ queryKey: ['team'] });
     },
   });
 }

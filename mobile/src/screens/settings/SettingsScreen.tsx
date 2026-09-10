@@ -41,24 +41,36 @@ function SettingsRow({
   value,
   onPress,
   badgeCount,
+  disabled,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   value?: string;
-  onPress: () => void;
+  onPress?: () => void;
   badgeCount?: number;
+  /** A row that states where something lives rather than going there. */
+  disabled?: boolean;
 }) {
   const { colors, spacing, typography } = useTheme();
   return (
     <Pressable
-      onPress={onPress}
-      style={[styles.row, { paddingVertical: spacing.sm + 4, borderBottomColor: colors.border }]}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      style={[
+        styles.row,
+        { paddingVertical: spacing.sm + 4, borderBottomColor: colors.border },
+        disabled ? { opacity: 0.55 } : null,
+      ]}
     >
       <Ionicons name={icon} size={20} color={colors.textSecondary} />
       <Text style={[typography.body, { color: colors.textPrimary, flex: 1, marginLeft: spacing.md }]}>{label}</Text>
       {value ? <Text style={[typography.caption, { color: colors.textSecondary, marginRight: spacing.sm }]}>{value}</Text> : null}
       {badgeCount ? <Badge count={badgeCount} /> : null}
-      <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} style={{ marginLeft: spacing.xs }} />
+      {/* No chevron on a row that goes nowhere — the arrow is the promise
+          of a next screen, and there isn't one. */}
+      {disabled ? null : (
+        <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} style={{ marginLeft: spacing.xs }} />
+      )}
     </Pressable>
   );
 }
@@ -376,13 +388,17 @@ export function SettingsScreen({ navigation }: Props) {
           <SettingsRow icon="wallet-outline" label="Wallet" onPress={() => navigation.navigate('Wallet')} />
         ) : null}
         {isMasterAdmin ? (
+          // A signpost rather than a screen. User management moved to the
+          // web dashboard, and an admin who used to find it here will come
+          // looking — a row that simply vanished would read as the feature
+          // being gone rather than moved. It navigates nowhere on purpose:
+          // this app does not know the workspace's dashboard URL, and a
+          // link that guessed at one would be worse than a sentence.
           <SettingsRow
             icon="people-outline"
-            // "Team" was too vague to find when looking for user
-            // management. The screen creates, edits and disables members
-            // and sets their access expiry — this says so.
             label="User management"
-            onPress={() => navigation.navigate('Team')}
+            value="On the web dashboard"
+            disabled
           />
         ) : null}
         {/* Hidden from a member whose number was chosen for them.
