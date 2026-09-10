@@ -38,6 +38,18 @@ const guestSessionSchema = new Schema(
     revokedAt: { type: Date },
     /** Last time the customer actually used the link, for support questions about whether they ever opened it. */
     lastSeenAt: { type: Date },
+    /**
+     * Set when the CUSTOMER blocks the business from this window.
+     *
+     * Deliberately not `revokedAt`. Revoking is the agent taking the link
+     * back and is final — the token is gone and the customer has no way to
+     * undo it. Blocking is the customer's own choice about a link they are
+     * still holding, and in every messenger they have used it is a switch,
+     * not a demolition. So the session stays resolvable: the window still
+     * loads, still shows the history, and still offers Unblock. What the
+     * flag changes is that neither side may write while it is set.
+     */
+    blockedAt: { type: Date },
   },
   { timestamps: true },
 );

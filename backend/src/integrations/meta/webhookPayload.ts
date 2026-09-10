@@ -22,6 +22,8 @@ export interface NormalizedMessageItem {
   messageType: MessageType;
   text?: string;
   mediaRef?: { metaMediaId: string; mimeType?: string };
+  /** Present on `location` messages — the coordinates behind the text line. */
+  location?: { latitude: number; longitude: number; name?: string; address?: string };
   contactName?: string;
   timestamp: Date;
   raw: unknown;
@@ -101,6 +103,34 @@ function extractText(type: string, node: any): string | undefined {
   }
 }
 
+/**
+ * The coordinates of a `location` message, kept alongside the text line
+ * rather than only inside it.
+ *
+ * Meta sends latitude and longitude as JSON numbers, but a webhook body is
+ * an external system's output and this file validates rather than trusts:
+ * a pair that is not finite, or not on the globe, is dropped and the
+ * message keeps its text. Half a coordinate is worse than none — it draws
+ * a pin somewhere confidently wrong.
+ */
+function extractLocation(
+  type: string,
+  node: any,
+): { latitude: number; longitude: number; name?: string; address?: string } | undefined {
+  if (type !== 'location') return undefined;
+  const raw = node?.location;
+  const latitude = Number(raw?.latitude);
+  const longitude = Number(raw?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return undefined;
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return undefined;
+  return {
+    latitude,
+    longitude,
+    name: typeof raw.name === 'string' ? raw.name : undefined,
+    address: typeof raw.address === 'string' ? raw.address : undefined,
+  };
+}
+
 function extractMediaRef(type: string, node: any): { metaMediaId: string; mimeType?: string } | undefined {
   const mediaNode = node?.[type];
   if (mediaNode?.id) {
@@ -174,6 +204,7 @@ export function parseWebhookPayload(rawPayload: any): NormalizedWebhookItem[] {
           messageType,
           text: extractText(m.type, m),
           mediaRef: extractMediaRef(m.type, m),
+          location: extractLocation(m.type, m),
           contactName,
           timestamp: toDate(m.timestamp),
           raw: m,

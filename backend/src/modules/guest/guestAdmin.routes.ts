@@ -9,6 +9,7 @@ import {
   revokeGuestLinkHandler,
   sendGuestReplyHandler,
   guestLinkStatusHandler,
+  listGuestReportsHandler,
 } from './guest.controller';
 
 /**
@@ -34,6 +35,9 @@ guestAdminRouter.use(
 // Reading whether a window exists needs only the CHAT_READ this router
 // already required — it says nothing a reader of the chat cannot see.
 guestAdminRouter.get('/link', guestLinkStatusHandler);
+// What the customer complained about. Readable by whoever can already read
+// the conversation — the report is about messages they can see anyway.
+guestAdminRouter.get('/reports', listGuestReportsHandler);
 guestAdminRouter.post('/link', requirePermission('CHAT_SEND'), issueGuestLinkHandler);
 guestAdminRouter.delete('/link', requirePermission('CHAT_SEND'), revokeGuestLinkHandler);
 guestAdminRouter.post(

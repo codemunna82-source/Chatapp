@@ -82,6 +82,7 @@ async function handleIncomingMessage(
     direction: 'IN',
     type: item.messageType,
     text: item.text,
+    location: item.location,
     mediaId,
     metaMessageId: item.messageId,
     replyToMessageId,

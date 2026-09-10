@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GUEST_REPORT_REASONS } from './guestReport.model';
 
 /**
  * WhatsApp's own text limit. Matching it keeps the two channels
@@ -38,6 +39,58 @@ export const guestMessageSchema = z.object({
 export const guestReactionSchema = z.object({
   messageId: messageIdSchema,
   emoji: z.string().trim().max(32),
+});
+
+/**
+ * A place the customer shared.
+ *
+ * The bounds are the real ones: latitude past ±90 and longitude past ±180
+ * are not points on Earth, and a geolocation API that produced them has
+ * malfunctioned. Rejecting them here keeps a map pin from being drawn
+ * somewhere that does not exist and, more usefully, keeps the number out
+ * of the stored line the agent reads.
+ *
+ * `name` and `address` are optional because a browser's geolocation gives
+ * neither — it gives coordinates. They exist for the labelled places a
+ * future picker could offer, and for locations arriving from WhatsApp,
+ * where the sender may have chosen a named place.
+ */
+export const guestLocationSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  name: z.string().trim().max(120).optional(),
+  address: z.string().trim().max(300).optional(),
+  replyToMessageId: messageIdSchema.optional(),
+});
+
+/**
+ * A customer reporting the conversation, blocking it, or both.
+ *
+ * `block` alone is a valid submission — someone who wants the business to
+ * stop messaging them should not have to accuse them of anything first, so
+ * the reason is required only when a report is actually being filed.
+ */
+export const guestReportSchema = z
+  .object({
+    reason: z.enum(GUEST_REPORT_REASONS).optional(),
+    details: z.string().trim().max(1000).optional(),
+    /** The message the complaint is about, shown back to the customer before they submit. */
+    messageId: messageIdSchema.optional(),
+    /** Whether to also stop this window from being written to, in either direction. */
+    block: z.boolean().default(false),
+    /** Whether a report is being filed at all, as opposed to only blocking. */
+    report: z.boolean().default(true),
+  })
+  .refine((v) => v.block || v.report, {
+    message: 'Nothing to do: choose to report, to block, or both.',
+  })
+  .refine((v) => !v.report || Boolean(v.reason), {
+    message: 'Choose a reason for the report.',
+    path: ['reason'],
+  });
+
+export const guestBlockSchema = z.object({
+  blocked: z.boolean(),
 });
 
 export const guestMessagesQuerySchema = z.object({

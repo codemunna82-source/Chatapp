@@ -5,13 +5,23 @@ import { requireGuest } from '../../middleware/guestAuth.middleware';
 import { guestConsolePageHandler, guestConsoleScriptHandler } from './guestConsole.controller';
 import { guestRateLimiter } from '../../middleware/rateLimit.middleware';
 import { validate } from '../../middleware/validate.middleware';
-import { guestMessageSchema, guestMessagesQuerySchema, guestReactionSchema } from './guest.validation';
+import {
+  guestBlockSchema,
+  guestLocationSchema,
+  guestMessageSchema,
+  guestMessagesQuerySchema,
+  guestReactionSchema,
+  guestReportSchema,
+} from './guest.validation';
 import {
   getGuestSessionHandler,
   listGuestMessagesHandler,
   postGuestMessageHandler,
   markGuestReadHandler,
   postGuestReactionHandler,
+  postGuestLocationHandler,
+  postGuestReportHandler,
+  setGuestBlockHandler,
   getGuestIceHandler,
   uploadGuestMediaHandler,
   getGuestMediaHandler,
@@ -52,6 +62,12 @@ guestRouter.get('/session', getGuestSessionHandler);
 guestRouter.get('/messages', validate({ query: guestMessagesQuerySchema }), listGuestMessagesHandler);
 guestRouter.post('/messages', validate({ body: guestMessageSchema }), postGuestMessageHandler);
 guestRouter.post('/reactions', validate({ body: guestReactionSchema }), postGuestReactionHandler);
+guestRouter.post('/location', validate({ body: guestLocationSchema }), postGuestLocationHandler);
+// Reporting and blocking stay reachable from a blocked window, unlike the
+// send routes: the switch that turns the block off is the one thing
+// someone in that state has come here to press.
+guestRouter.post('/report', validate({ body: guestReportSchema }), postGuestReportHandler);
+guestRouter.post('/block', validate({ body: guestBlockSchema }), setGuestBlockHandler);
 guestRouter.post('/read', markGuestReadHandler);
 guestRouter.get('/ice', getGuestIceHandler);
 guestRouter.post('/media', guestUpload.array('files', GUEST_MAX_FILES_PER_REQUEST), uploadGuestMediaHandler);

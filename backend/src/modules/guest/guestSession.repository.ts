@@ -77,6 +77,54 @@ export function touchSession(sessionId: string): void {
   void GuestSession.updateOne({ _id: sessionId }, { $set: { lastSeenAt: new Date() } }).catch(() => {});
 }
 
+/**
+ * The customer blocking, or unblocking, the business from their window.
+ *
+ * Scoped to the one session rather than the conversation: the block is a
+ * property of this link, and a link the agent later reissues is a fresh
+ * decision the customer has not made yet.
+ */
+export async function setSessionBlocked(sessionId: string, blocked: boolean): Promise<Date | null> {
+  if (!Types.ObjectId.isValid(sessionId)) return null;
+  const blockedAt = blocked ? new Date() : null;
+  await GuestSession.updateOne(
+    { _id: sessionId },
+    blocked ? { $set: { blockedAt } } : { $unset: { blockedAt: '' } },
+  );
+  return blockedAt;
+}
+
+/**
+ * Whether this session is blocked, read fresh.
+ *
+ * A socket resolves its guest context once, at connect, and then holds it
+ * for as long as the tab is open — so a block set five minutes into a
+ * session is invisible to every handler on that socket. HTTP has no such
+ * problem, because the token is re-resolved per request. This is the query
+ * that closes the gap for the socket, and it exists rather than trusting
+ * the window to disconnect itself: a block enforced only by the client
+ * that asked for it is not enforced.
+ */
+export async function isSessionBlocked(sessionId: string): Promise<boolean> {
+  if (!Types.ObjectId.isValid(sessionId)) return false;
+  const session = await GuestSession.findById(sessionId).select('blockedAt').lean();
+  return Boolean(session?.blockedAt);
+}
+
+/**
+ * Whether the customer has blocked the live link for a conversation.
+ *
+ * Read by the agent's side before it writes into the web window, so a
+ * reply cannot be stored into a chat the customer has closed off.
+ */
+export async function isConversationBlockedByGuest(
+  conversationId: string,
+  tenantId: string,
+): Promise<boolean> {
+  const session = await findActiveSessionForConversation(conversationId, tenantId);
+  return Boolean(session?.blockedAt);
+}
+
 /** Revokes every live link for a conversation. Returns how many were closed. */
 export async function revokeSessionsForConversation(conversationId: string, tenantId: string): Promise<number> {
   if (!Types.ObjectId.isValid(conversationId)) return 0;

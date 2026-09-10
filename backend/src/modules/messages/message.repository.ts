@@ -20,6 +20,8 @@ export interface CreateMessageInput {
   metaMessageId?: string;
   replyToMessageId?: string;
   status?: MessageStatus;
+  /** Only for `type: 'location'` — see the schema for why it is not parsed out of `text`. */
+  location?: { latitude: number; longitude: number; name?: string; address?: string };
 }
 
 export async function createMessage(input: CreateMessageInput): Promise<MessageDoc> {

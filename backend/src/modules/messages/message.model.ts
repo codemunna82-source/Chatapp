@@ -42,6 +42,31 @@ const messageSchema = new Schema(
     mediaId: { type: Schema.Types.ObjectId, ref: 'Media' },
     metaMessageId: { type: String }, // Meta's wamid — used to correlate status webhooks
     replyToMessageId: { type: Schema.Types.ObjectId, ref: 'Message' },
+    /**
+     * Where a `location` message points.
+     *
+     * Kept as its own sub-document rather than parsed back out of `text`.
+     * `text` holds the same human-readable line WhatsApp ingestion has
+     * always written — "Cafe (12.97, 77.59)" — because the chat list, the
+     * search index and the push preview all read it, and none of them
+     * wants to learn about coordinates. But a client drawing a map pin
+     * needs numbers, and recovering them from a display string that also
+     * has to hold a free-text place name is the kind of parse that works
+     * until someone sends a shop called "Bar (open 24, 7)".
+     *
+     * Absent on every other message type.
+     */
+    location: {
+      type: new Schema(
+        {
+          latitude: { type: Number, required: true },
+          longitude: { type: Number, required: true },
+          name: { type: String },
+          address: { type: String },
+        },
+        { _id: false },
+      ),
+    },
     status: { type: String, enum: MESSAGE_STATUSES, default: 'QUEUED', required: true },
     /**
      * When each delivery milestone happened, for the message-info view.

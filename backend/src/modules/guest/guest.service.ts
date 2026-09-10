@@ -31,8 +31,11 @@ import {
   findActiveSessionForConversation,
   findSessionByToken,
   revokeSessionsForConversation,
+  setSessionBlocked,
   touchSession,
 } from './guestSession.repository';
+import { countRecentGuestReports, createGuestReport, listGuestReportsForConversation } from './guestReport.repository';
+import type { GuestReportLean, GuestReportReason } from './guestReport.model';
 
 /**
  * What a resolved web-chat token stands for. Deliberately narrower than
@@ -47,6 +50,8 @@ export interface GuestContext {
   conversationId: string;
   contactId: string;
   whatsappPhoneNumberId: string;
+  /** Set while the customer has blocked this window; neither side may write. */
+  blockedAt?: Date;
 }
 
 /** How the customer sees a message — never the stored row. */
@@ -76,6 +81,8 @@ export interface GuestMessageView {
   };
   /** Emoji reactions on this message, most-used first. */
   reactions?: { emoji: string; mine: boolean }[];
+  /** Present on `type: 'location'` — what the map pin should be drawn at. */
+  location?: { latitude: number; longitude: number; name?: string; address?: string };
 }
 
 /**
@@ -86,7 +93,7 @@ export interface GuestMessageView {
  * leaking the moment it lands.
  */
 function toGuestMessage(doc: MessageLean): GuestMessageView {
-  return {
+  const view: GuestMessageView = {
     id: String(doc._id),
     from: doc.direction === 'IN' ? 'me' : 'business',
     type: doc.type,
@@ -95,10 +102,40 @@ function toGuestMessage(doc: MessageLean): GuestMessageView {
     mediaId: doc.mediaId ? String(doc.mediaId) : undefined,
     createdAt: doc.createdAt.toISOString(),
   };
+  // Only when the coordinates are actually there. A location that arrived
+  // before this field existed, or through a path that never filled it, has
+  // its text line and nothing else — which renders as an ordinary message
+  // rather than as a map pin pointing at (0, 0) off the coast of Ghana.
+  const place = doc.location;
+  if (doc.type === 'location' && place && typeof place.latitude === 'number' && typeof place.longitude === 'number') {
+    view.location = {
+      latitude: place.latitude,
+      longitude: place.longitude,
+      name: place.name ?? undefined,
+      address: place.address ?? undefined,
+    };
+  }
+  return view;
+}
+
+/**
+ * The one line a location message shows in a list, a quote or a push.
+ *
+ * Built once here and stored as the message's `text` so every reader —
+ * the chat list, the agent app, the notification, a search — gets the same
+ * sentence without any of them knowing what a coordinate is.
+ */
+export function locationLine(input: { latitude: number; longitude: number; name?: string }): string {
+  const coords = `${input.latitude.toFixed(6)}, ${input.longitude.toFixed(6)}`;
+  return `${input.name?.trim() || 'Location'} (${coords})`;
 }
 
 /** One line standing in for a message inside a quote. */
 function previewOf(doc: MessageLean): string {
+  // Before the text check, not after: a location's text is its full
+  // coordinate line, and a quote showing "Location (12.971599, 77.594566)"
+  // spends its one line on digits nobody reads.
+  if (doc.type === 'location') return `[location] ${doc.location?.name ?? ''}`.trim();
   if (doc.text) return doc.text;
   if (doc.type === 'image') return '[photo]';
   if (doc.type === 'audio') return '[voice message]';
@@ -176,7 +213,22 @@ export async function resolveGuestContextFromToken(token: string): Promise<Guest
     conversationId: String(session.conversationId),
     contactId: String(session.contactId),
     whatsappPhoneNumberId: String(session.whatsappPhoneNumberId),
+    blockedAt: session.blockedAt ?? undefined,
   };
+}
+
+/**
+ * Refuses a write from a window the customer has blocked.
+ *
+ * Its own error code rather than a 403 with prose: the window has to tell
+ * these apart to react to them. An expired link means "this chat is over",
+ * a blocked one means "you turned this off, here is the button to turn it
+ * back on" — and the second is a state the customer chose and can undo.
+ */
+export function assertGuestNotBlocked(guest: GuestContext): void {
+  if (guest.blockedAt) {
+    throw ApiError.forbidden('GUEST_BLOCKED', 'You blocked this chat. Unblock it to send messages.');
+  }
 }
 
 /**
@@ -309,10 +361,58 @@ export async function issueGuestLinkForPhone(
 export async function getGuestLinkStatus(
   auth: AuthContext,
   conversationId: string,
-): Promise<{ active: boolean; expiresAt?: string }> {
+): Promise<{ active: boolean; expiresAt?: string; blockedByCustomer?: boolean }> {
   const session = await findActiveSessionForConversation(conversationId, auth.tenantId);
   if (!session) return { active: false };
-  return { active: true, expiresAt: session.expiresAt.toISOString() };
+  return {
+    active: true,
+    expiresAt: session.expiresAt.toISOString(),
+    // So the composer can say why it is disabled instead of failing on
+    // send. The agent finding out at the moment they press the button is
+    // the worst time to learn this.
+    blockedByCustomer: Boolean(session.blockedAt),
+  };
+}
+
+/** What the workspace sees of a report. */
+export interface GuestReportView {
+  id: string;
+  reason: string;
+  details?: string;
+  reportedMessageId?: string;
+  reportedMessagePreview?: string;
+  blocked: boolean;
+  status: string;
+  createdAt: string;
+}
+
+/**
+ * The reports a customer filed on this conversation.
+ *
+ * Scoped through the same conversation visibility check the rest of the
+ * agent routes use, so a report is readable by exactly the people who can
+ * already read the chat it is about.
+ */
+export async function listGuestReports(
+  auth: AuthContext,
+  conversationId: string,
+): Promise<GuestReportView[]> {
+  const conversation = await findConversationByIdAndTenant(conversationId, auth.tenantId);
+  const scope = visibleWhatsAppPhoneNumberId(auth);
+  if (!conversation || (scope && String(conversation.whatsappPhoneNumberId) !== scope)) {
+    throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
+  }
+  const rows: GuestReportLean[] = await listGuestReportsForConversation(auth.tenantId, conversationId);
+  return rows.map((row) => ({
+    id: String(row._id),
+    reason: row.reason,
+    details: row.details ?? undefined,
+    reportedMessageId: row.reportedMessageId ? String(row.reportedMessageId) : undefined,
+    reportedMessagePreview: row.reportedMessagePreview ?? undefined,
+    blocked: Boolean(row.blocked),
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+  }));
 }
 
 export async function revokeGuestLinkForConversation(
@@ -350,6 +450,15 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
   verifiedByWhatsApp: boolean;
   /** The business's own number, as the customer would see it in WhatsApp. */
   businessPhone?: string;
+  /**
+   * Whether the customer has blocked this window.
+   *
+   * Sent on every session load rather than only in the response to the tap
+   * that set it, because the state outlives the tab: someone who blocks,
+   * closes the page and comes back a week later has to find the window in
+   * the state they left it, with the Unblock button where they can see it.
+   */
+  blocked: boolean;
 }> {
   const [tenant, contact, phoneNumber] = await Promise.all([
     Tenant.findById(guest.tenantId).select('name').lean(),
@@ -369,6 +478,7 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
     contactName: contact?.name ?? undefined,
     verifiedByWhatsApp,
     businessPhone: phoneNumber?.displayPhoneNumber ?? undefined,
+    blocked: Boolean(guest.blockedAt),
   };
 }
 
@@ -402,6 +512,8 @@ export async function postGuestMessage(
   text: string,
   replyToMessageId?: string,
 ): Promise<GuestMessageView> {
+  assertGuestNotBlocked(guest);
+
   const [conversation, phoneNumber, contact] = await Promise.all([
     findConversationByIdAndTenant(guest.conversationId, guest.tenantId),
     findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId),
@@ -497,6 +609,8 @@ export async function postGuestReaction(
   messageId: string,
   emoji: string,
 ): Promise<{ messageId: string; emoji: string | null }> {
+  assertGuestNotBlocked(guest);
+
   const target = await resolveQuotedMessage(guest, messageId);
   if (!target) {
     throw ApiError.notFound('MESSAGE_NOT_FOUND', 'That message is no longer here.');
@@ -549,6 +663,8 @@ export async function postGuestMediaMessage(
   mediaId: string,
   kind: GuestMediaKind,
 ): Promise<GuestMessageView> {
+  assertGuestNotBlocked(guest);
+
   const [conversation, phoneNumber, contact] = await Promise.all([
     findConversationByIdAndTenant(guest.conversationId, guest.tenantId),
     findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId),
@@ -595,6 +711,159 @@ export async function postGuestMediaMessage(
 }
 
 /**
+ * A place the customer shared from the web window.
+ *
+ * Written as a `location` message, the same type WhatsApp ingestion writes
+ * when a customer drops a pin in the app — so the agent's thread shows one
+ * kind of location message whichever channel it came in through, and
+ * nothing downstream needed a second case.
+ *
+ * `text` carries the readable line and `location` the numbers. Both, not
+ * one: see the schema comment for why the coordinates are not parsed back
+ * out of the sentence.
+ */
+export async function postGuestLocationMessage(
+  guest: GuestContext,
+  input: { latitude: number; longitude: number; name?: string; address?: string; replyToMessageId?: string },
+): Promise<GuestMessageView> {
+  assertGuestNotBlocked(guest);
+
+  const [conversation, phoneNumber, contact] = await Promise.all([
+    findConversationByIdAndTenant(guest.conversationId, guest.tenantId),
+    findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId),
+    findContactByIdAndTenant(guest.contactId, guest.tenantId),
+  ]);
+  if (!conversation) {
+    throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'This conversation no longer exists');
+  }
+
+  const quoted = await resolveQuotedMessage(guest, input.replyToMessageId);
+  const text = locationLine(input);
+
+  const message = await createMessage({
+    tenantId: guest.tenantId,
+    conversationId: guest.conversationId,
+    recipientPhone: phoneNumber?.displayPhoneNumber ?? '',
+    direction: 'IN',
+    type: 'location',
+    text,
+    location: {
+      latitude: input.latitude,
+      longitude: input.longitude,
+      name: input.name?.trim() || undefined,
+      address: input.address?.trim() || undefined,
+    },
+    replyToMessageId: quoted ? String(quoted._id) : undefined,
+    status: 'DELIVERED',
+  });
+
+  const updated = await recordGuestInboundActivity(guest.conversationId, guest.tenantId, text);
+
+  const realtime = getRealtimeEmitter();
+  realtime.emitMessageNew(guest.tenantId, toRealtimeMessage(message), guest.whatsappPhoneNumberId);
+  if (updated) {
+    realtime.emitConversationUpdated(guest.tenantId, toRealtimeConversation(updated));
+  }
+
+  await pushIncomingMessage({
+    tenantId: guest.tenantId,
+    conversationId: guest.conversationId,
+    whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
+    contactName: contact?.name || contact?.phone || 'Web chat',
+    messageType: 'location',
+    text,
+  });
+
+  const view = toGuestMessage(message as unknown as MessageLean);
+  if (quoted) {
+    view.replyTo = {
+      id: String(quoted._id),
+      from: quoted.direction === 'IN' ? 'me' : 'business',
+      preview: previewOf(quoted),
+    };
+  }
+  return view;
+}
+
+/** A customer may file this many reports through one link per day. */
+const GUEST_REPORTS_PER_DAY = 5;
+
+/**
+ * The customer reporting this conversation, blocking it, or both.
+ *
+ * Blocking and reporting are one call because they are one decision on the
+ * customer's screen, and splitting them would mean a window that reported
+ * successfully and then failed to block — leaving someone who asked to
+ * stop hearing from a business still hearing from them.
+ *
+ * The reported message is copied into the report rather than referenced,
+ * so a workspace cannot make the evidence disappear by deleting the
+ * message. And the report is stored, not emailed or logged: it has a
+ * listing route on the agent side, because a complaint written into a
+ * collection nobody reads is not a complaint, it is a shrug with a
+ * database write.
+ */
+export async function submitGuestReport(
+  guest: GuestContext,
+  input: {
+    reason?: GuestReportReason;
+    details?: string;
+    messageId?: string;
+    block: boolean;
+    report: boolean;
+  },
+): Promise<{ reportId?: string; blocked: boolean; reportedMessagePreview?: string }> {
+  let reportId: string | undefined;
+  let reportedMessagePreview: string | undefined;
+
+  if (input.report) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    if ((await countRecentGuestReports(guest.sessionId, since)) >= GUEST_REPORTS_PER_DAY) {
+      throw ApiError.tooManyRequests(
+        'GUEST_REPORT_LIMIT',
+        'You have already sent several reports today. We are looking at them.',
+      );
+    }
+
+    // Scoped to this conversation by resolveQuotedMessage, so a customer
+    // cannot attach someone else's message to their complaint.
+    const target = await resolveQuotedMessage(guest, input.messageId);
+    reportedMessagePreview = target ? previewOf(target).slice(0, 500) : undefined;
+
+    const report = await createGuestReport({
+      tenantId: guest.tenantId,
+      conversationId: guest.conversationId,
+      contactId: guest.contactId,
+      guestSessionId: guest.sessionId,
+      reason: input.reason ?? 'OTHER',
+      details: input.details?.trim() || undefined,
+      reportedMessageId: target ? String(target._id) : undefined,
+      reportedMessagePreview,
+      blocked: input.block,
+    });
+    reportId = String(report._id);
+  }
+
+  if (input.block) {
+    await setSessionBlocked(guest.sessionId, true);
+  }
+
+  return { reportId, blocked: input.block, reportedMessagePreview };
+}
+
+/**
+ * The customer turning the block on or off.
+ *
+ * Separate from the report because unblocking exists: someone who blocked
+ * a business and changed their mind is not filing anything, and the report
+ * they already sent stays filed either way.
+ */
+export async function setGuestBlock(guest: GuestContext, blocked: boolean): Promise<{ blocked: boolean }> {
+  await setSessionBlocked(guest.sessionId, blocked);
+  return { blocked };
+}
+
+/**
  * An agent's reply delivered through the web window instead of WhatsApp.
  *
  * This exists because the two channels have different rules. A WhatsApp
@@ -625,6 +894,18 @@ export async function sendGuestReply(
     throw ApiError.badRequest(
       'GUEST_LINK_INACTIVE',
       'This conversation has no active web chat link, so there is no web window to deliver to',
+    );
+  }
+
+  // A block is the customer's decision, so it binds this side too. Storing
+  // the message anyway and letting the socket carry it would mean the
+  // window either shows it — making the block a lie — or silently drops
+  // it, leaving the agent believing they answered someone who never heard
+  // them. Refusing here is the only version that is true on both screens.
+  if (session.blockedAt) {
+    throw ApiError.conflict(
+      'GUEST_BLOCKED',
+      'This customer has blocked the web chat, so a message cannot be delivered to it.',
     );
   }
 

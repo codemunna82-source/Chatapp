@@ -12,6 +12,10 @@ import { conversationVisibleTo, findConversationByIdAndTenant } from '../../modu
 import { visibleWhatsAppPhoneNumberId } from '../../modules/conversations/conversation.access';
 import { findContactByIdAndTenant } from '../../modules/contacts/contact.repository';
 import { pushIncomingCall } from '../../modules/notifications/push.service';
+import {
+  isConversationBlockedByGuest,
+  isSessionBlocked,
+} from '../../modules/guest/guestSession.repository';
 import type { GuestContext } from '../../modules/guest/guest.service';
 import type { AuthContext } from '../../types/express';
 import type { AppServer, AppSocket } from '../types';
@@ -78,6 +82,15 @@ export function registerGuestCallHandlers(io: AppServer, socket: AppSocket, gues
   socket.on('web:call:start', async (payload: SdpPayload, ack?: Ack) => {
     if (!payload?.sdp) {
       ack?.({ success: false, error: 'sdp is required' });
+      return;
+    }
+
+    // The block covers calls too, and is read fresh rather than off the
+    // context this socket resolved at connect: a customer who blocks
+    // mid-session still has that socket open, and a check against the
+    // stale copy would let the very next tap ring the agent anyway.
+    if (await isSessionBlocked(guest.sessionId)) {
+      ack?.({ success: false, error: 'You blocked this chat. Unblock it to call.' });
       return;
     }
 
@@ -204,6 +217,13 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
     }
     if (await findLiveWebCallForConversation(conversationId)) {
       ack?.({ success: false, error: 'A call is already in progress' });
+      return;
+    }
+    // The customer's block binds this direction too, and this is the only
+    // place it can: the ring goes over a socket, not through the guest
+    // HTTP routes where the flag is checked on every request.
+    if (await isConversationBlockedByGuest(conversationId, auth.tenantId)) {
+      ack?.({ success: false, error: 'This customer has blocked the web chat.' });
       return;
     }
 

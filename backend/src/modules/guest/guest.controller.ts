@@ -5,6 +5,7 @@ import { getGuestContext } from '../../middleware/guestAuth.middleware';
 import { ApiError } from '../../lib/ApiError';
 import { buildIceServers, hasTurnConfigured } from '../calls/webCall.service';
 import { getGuestMediaBytes, storeGuestMedia } from './guestMedia.service';
+import type { GuestReportReason } from './guestReport.model';
 import * as guestService from './guest.service';
 
 /* ------------------------------------------------------------------ *
@@ -53,6 +54,40 @@ export const postGuestReactionHandler = asyncHandler(async (req: Request, res: R
   res.status(200).json({ success: true, data: await guestService.postGuestReaction(guest, messageId, emoji) });
 });
 
+export const postGuestLocationHandler = asyncHandler(async (req: Request, res: Response) => {
+  const guest = getGuestContext(req);
+  const body = req.body as {
+    latitude: number;
+    longitude: number;
+    name?: string;
+    address?: string;
+    replyToMessageId?: string;
+  };
+  res.status(201).json({ success: true, data: await guestService.postGuestLocationMessage(guest, body) });
+});
+
+/**
+ * Reporting the conversation, blocking it, or both — one call, because it
+ * is one decision on the customer's screen.
+ */
+export const postGuestReportHandler = asyncHandler(async (req: Request, res: Response) => {
+  const guest = getGuestContext(req);
+  const body = req.body as {
+    reason?: GuestReportReason;
+    details?: string;
+    messageId?: string;
+    block: boolean;
+    report: boolean;
+  };
+  res.status(201).json({ success: true, data: await guestService.submitGuestReport(guest, body) });
+});
+
+export const setGuestBlockHandler = asyncHandler(async (req: Request, res: Response) => {
+  const guest = getGuestContext(req);
+  const { blocked } = req.body as { blocked: boolean };
+  res.status(200).json({ success: true, data: await guestService.setGuestBlock(guest, blocked) });
+});
+
 export const markGuestReadHandler = asyncHandler(async (req: Request, res: Response) => {
   const guest = getGuestContext(req);
   res.status(200).json({ success: true, data: await guestService.markBusinessMessagesRead(guest) });
@@ -84,6 +119,12 @@ export const revokeGuestLinkHandler = asyncHandler(async (req: Request, res: Res
     success: true,
     data: await guestService.revokeGuestLinkForConversation(auth, conversationId),
   });
+});
+
+export const listGuestReportsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const conversationId = req.params.conversationId as string;
+  res.status(200).json({ success: true, data: await guestService.listGuestReports(auth, conversationId) });
 });
 
 export const sendGuestReplyHandler = asyncHandler(async (req: Request, res: Response) => {
