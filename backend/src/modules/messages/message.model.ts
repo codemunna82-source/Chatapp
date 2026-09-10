@@ -115,6 +115,31 @@ messageSchema.index(
 messageSchema.index({ metaMessageId: 1 }, { unique: true, sparse: true });
 
 type MessageAttrs = InferSchemaType<typeof messageSchema> & Timestamps;
+/**
+ * One reaction per customer per message.
+ *
+ * The guest reaction path upserts on exactly this filter, and an upsert is
+ * only idempotent when an index makes the match unique — without one, two
+ * taps arriving together both miss and both insert, which is the duplicate
+ * this was supposed to prevent.
+ *
+ * Partial, so it constrains nothing but inbound reaction rows: outbound
+ * reactions are the agent's and are not limited to one, and ordinary
+ * messages are untouched. `deletedAt` is excluded so a removed reaction
+ * does not block reacting again.
+ */
+messageSchema.index(
+  { conversationId: 1, replyToMessageId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      type: 'reaction',
+      direction: 'IN',
+      deletedAt: { $exists: false },
+    },
+  },
+);
+
 export type MessageDoc = HydratedDocument<MessageAttrs>;
 /** A `.lean()` row — see lib/modelTypes.ts. Structurally a superset-compatible
  *  match for MessageDoc, so serialisers accept either. */

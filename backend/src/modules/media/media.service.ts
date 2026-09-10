@@ -168,8 +168,15 @@ async function fetchMediaBytes(
   }
 
   if (media.storageRef.startsWith('https://')) {
-    const wantsVariant = Boolean(maxWidth) && media.mimeType.startsWith('image/');
-    const source = wantsVariant ? cloudinaryVariant(media.storageRef, maxWidth!) : media.storageRef;
+    const source =
+      maxWidth && media.mimeType.startsWith('image/')
+        ? cloudinaryVariant(media.storageRef, maxWidth)
+        : media.storageRef;
+    // Only worth a second attempt if the first one asked for something
+    // different. cloudinaryVariant returns the input unchanged for a URL it
+    // does not recognise, and re-issuing an identical failing request only
+    // doubles the wait before the fallback.
+    const wantsVariant = source !== media.storageRef;
     try {
       return { buffer: await fetchCloudinaryBuffer(source), mimeType: media.mimeType };
     } catch (err) {
