@@ -67,6 +67,13 @@ services:
         sync: false
       - key: TURN_CREDENTIAL
         sync: false
+      # Where the customer's web chat window is served from — the origin
+      # only, no path. The link an agent sends into a WhatsApp thread is
+      # built as <this>/c/<token>, so without it issuing a link fails with
+      # GUEST_LINK_NOT_CONFIGURED and the web window cannot be reached at
+      # all. Must be the domain the chat frontend is deployed on.
+      - key: GUEST_LINK_BASE_URL
+        sync: false
       # Firebase service account JSON, as one line. Drives every push
       # notification: the agent app's, and — since the web chat window
       # asks for permission too — the customer's browser. Without it
