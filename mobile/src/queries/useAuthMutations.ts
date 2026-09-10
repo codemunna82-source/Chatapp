@@ -7,7 +7,8 @@ import { unregisterForPushNotifications } from '../notifications/pushRegistratio
 export function useLogin() {
   const setSession = useAuthStore((s) => s.setSession);
   return useMutation({
-    mutationFn: (vars: { email: string; password: string }) => authApi.login(vars.email, vars.password),
+    mutationFn: (vars: { identifier: string; password: string }) =>
+      authApi.login(vars.identifier, vars.password),
     onSuccess: (tokens) => setSession(tokens),
   });
 }

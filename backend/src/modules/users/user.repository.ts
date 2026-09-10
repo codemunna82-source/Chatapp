@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { User, type UserDoc, type UserRole, type UserStatus } from './user.model';
 import type { Permission } from './permission';
+import { phoneVariants } from '../../lib/phone';
 import { invalidateAuthContext } from '../auth/authContext.service';
 
 /**
@@ -12,6 +13,8 @@ import { invalidateAuthContext } from '../auth/authContext.service';
 export interface CreateUserInput {
   tenantId: string;
   email: string;
+  /** Canonical E.164. Normalised by the caller before it gets here. */
+  phone?: string;
   passwordHash: string;
   role: UserRole;
   permissions?: Permission[];
@@ -25,6 +28,7 @@ export async function createUser(input: CreateUserInput): Promise<UserDoc> {
   return User.create({
     tenantId: input.tenantId,
     email: input.email.toLowerCase(),
+    phone: input.phone,
     passwordHash: input.passwordHash,
     role: input.role,
     permissions: input.permissions ?? [],
@@ -75,6 +79,8 @@ export interface UpdateUserPatch {
   validUntil?: Date;
   status?: UserStatus;
   displayName?: string;
+  /** Canonical E.164, normalised by the caller. */
+  phone?: string;
   /** `null` clears the assignment; omitted leaves it untouched. */
   whatsappPhoneNumberId?: string | null;
 }
@@ -131,6 +137,26 @@ export async function updateUserByIdAndTenant(
 /** Soft-disable — never hard-delete a user, to preserve audit/message history integrity. */
 export async function disableUserByIdAndTenant(id: string, tenantId: string): Promise<UserDoc | null> {
   return updateUserByIdAndTenant(id, tenantId, { status: 'DISABLED' });
+}
+
+/**
+ * A sign-in lookup by phone number.
+ *
+ * Matches every stored form the same number might be under, not just the
+ * canonical one — see phoneVariants. Accounts written before normalisation
+ * existed, or imported from somewhere that kept the bare digits, are the
+ * same person and must not be a failed login.
+ */
+export async function findUserByPhone(phone: string): Promise<UserDoc | null> {
+  const variants = phoneVariants(phone);
+  if (variants.length === 0) return null;
+  return User.findOne({ phone: { $in: variants } }).select('+passwordHash');
+}
+
+export async function countUsersByPhone(phone: string): Promise<number> {
+  const variants = phoneVariants(phone);
+  if (variants.length === 0) return 0;
+  return User.countDocuments({ phone: { $in: variants } });
 }
 
 export async function countUsersByTenantAndEmail(email: string): Promise<number> {

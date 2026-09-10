@@ -72,6 +72,7 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
   const disableMember = useDisableTeamMember();
 
   const [email, setEmail] = useState(member?.email ?? '');
+  const [phone, setPhone] = useState(member?.phone ?? '');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState(member?.displayName ?? '');
   const [role, setRole] = useState<UserRole>(member?.role ?? 'SUB_USER');
@@ -169,6 +170,7 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
       createMember.mutate(
         {
           email: email.trim(),
+          phone: phone.trim(),
           password,
           role,
           permissions: role === 'MASTER_ADMIN' ? [] : permissions,
@@ -200,11 +202,25 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
 
       {isEdit ? (
         <View style={{ marginBottom: spacing.md }}>
-          <Text style={[typography.label, { color: colors.textSecondary, marginBottom: spacing.xs }]}>Email</Text>
-          <Text style={[typography.body, { color: colors.textSecondary }]}>{member?.email}</Text>
+          <Text style={[typography.label, { color: colors.textSecondary, marginBottom: spacing.xs }]}>
+            Signs in with
+          </Text>
+          <Text style={[typography.body, { color: colors.textSecondary }]}>
+            {member?.phone ?? member?.email}
+          </Text>
         </View>
       ) : (
         <>
+          {/* First, because it is what they will sign in with — the
+              email is the account's address, not its key. */}
+          <TextField
+            label="Phone number"
+            placeholder="+91 98765 43210"
+            value={phone}
+            onChangeText={setPhone}
+            autoCapitalize="none"
+            keyboardType="phone-pad"
+          />
           <TextField label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
           <TextField label="Temporary password" value={password} onChangeText={setPassword} secureTextEntry />
         </>
@@ -468,7 +484,7 @@ function TeamMemberFormBody({ member, onClose }: FormBodyProps) {
             label="Save"
             onPress={handleSave}
             loading={mutation.isPending}
-            disabled={!isEdit && (!email.trim() || password.length < 8)}
+            disabled={!isEdit && (!email.trim() || !phone.trim() || password.length < 8)}
           />
         </View>
       </View>

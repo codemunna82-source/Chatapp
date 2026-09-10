@@ -93,6 +93,11 @@ services:
         value: Demo Tenant
       - key: SEED_MASTER_ADMIN_EMAIL
         sync: false
+      # The number the seeded admin signs in with, in full E.164
+      # (+919876543210). Optional: left unset, the admin is created without
+      # one and signs in by email, then adds a number from the app.
+      - key: SEED_MASTER_ADMIN_PHONE
+        sync: false
       - key: SEED_MASTER_ADMIN_PASSWORD
         sync: false
       # Seeds a demo WhatsApp account/contact/conversation even though

@@ -1,5 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { User, computeSubscriptionStatus } from '../users/user.model';
+import { findUserByPhone } from '../users/user.repository';
+import { normalizePhone } from '../../lib/phone';
 import { RefreshToken } from './refreshToken.model';
 import { hashPassword, verifyPassword } from '../../lib/password';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../lib/jwt';
@@ -33,6 +35,8 @@ export interface AuthTokens {
     id: string;
     tenantId: string;
     email: string;
+    /** What this person signs in with. Absent on accounts created before phone sign-in existed. */
+    phone?: string;
     role: 'MASTER_ADMIN' | 'SUB_USER';
     permissions: Permission[];
     displayName?: string;
@@ -99,6 +103,7 @@ export async function getCurrentUser(userId: string, tenantId: string): Promise<
     id: String(user._id),
     tenantId: String(user.tenantId),
     email: user.email,
+    phone: user.phone ?? undefined,
     role: user.role as 'MASTER_ADMIN' | 'SUB_USER',
     permissions: (user.permissions ?? []) as Permission[],
     displayName: user.displayName ?? undefined,
@@ -111,17 +116,37 @@ export async function getCurrentUser(userId: string, tenantId: string): Promise<
   };
 }
 
-export async function login(email: string, password: string, meta: RequestMeta): Promise<AuthTokens> {
-  const user = await User.findOne({ email: email.toLowerCase() }).select('+passwordHash');
-  // Constant-shape response whether the email doesn't exist or the password
-  // is wrong — never reveal which one it was.
+/**
+ * Signing in with a phone number, or an email.
+ *
+ * Which one it is comes from the value, not from a second field the person
+ * has to choose: normalizePhone accepts "+91 98765-43210", "0091…" and the
+ * bare digits and returns one canonical form, and returns null for
+ * anything with an @ in it. So a number is looked up as a number and
+ * everything else as an email, with nothing to get wrong at the keyboard.
+ *
+ * Email still works, and that is load-bearing rather than legacy. Phone
+ * was added after accounts existed, so every account that predates it has
+ * no number — including the MASTER_ADMIN, who is the only person who can
+ * set the missing ones. Phone-only sign-in would have locked that person
+ * out of the workspace they administer, with the fix on the other side of
+ * the door.
+ */
+export async function login(identifier: string, password: string, meta: RequestMeta): Promise<AuthTokens> {
+  const asPhone = normalizePhone(identifier);
+  const user = asPhone
+    ? await findUserByPhone(asPhone)
+    : await User.findOne({ email: identifier.trim().toLowerCase() }).select('+passwordHash');
+
+  // Constant-shape response whether the account doesn't exist or the
+  // password is wrong — never reveal which one it was.
   if (!user) {
-    throw ApiError.unauthorized('INVALID_CREDENTIALS', 'Invalid email or password');
+    throw ApiError.unauthorized('INVALID_CREDENTIALS', 'Invalid phone number or password');
   }
 
   const passwordOk = await verifyPassword(user.passwordHash, password);
   if (!passwordOk) {
-    throw ApiError.unauthorized('INVALID_CREDENTIALS', 'Invalid email or password');
+    throw ApiError.unauthorized('INVALID_CREDENTIALS', 'Invalid phone number or password');
   }
 
   if (user.status === 'DISABLED') {
@@ -161,6 +186,7 @@ export async function login(email: string, password: string, meta: RequestMeta):
       id: String(user._id),
       tenantId: String(user.tenantId),
       email: user.email,
+      phone: user.phone ?? undefined,
       role: user.role as 'MASTER_ADMIN' | 'SUB_USER',
       permissions: (user.permissions ?? []) as Permission[],
       displayName: user.displayName ?? undefined,
@@ -234,6 +260,7 @@ export async function refresh(refreshTokenRaw: string, meta: RequestMeta): Promi
       id: String(user._id),
       tenantId: String(user.tenantId),
       email: user.email,
+      phone: user.phone ?? undefined,
       role: user.role as 'MASTER_ADMIN' | 'SUB_USER',
       permissions: (user.permissions ?? []) as Permission[],
       displayName: user.displayName ?? undefined,

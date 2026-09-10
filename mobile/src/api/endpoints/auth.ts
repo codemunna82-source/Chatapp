@@ -1,8 +1,16 @@
 import { apiClient } from '../client';
 import type { ApiSuccess, AuthTokens, AuthUser } from '../types';
 
-export async function login(email: string, password: string): Promise<AuthTokens> {
-  const res = await apiClient.post<ApiSuccess<AuthTokens>>('/auth/login', { email, password });
+/**
+ * Signs in with a phone number — or an email, which the server also
+ * accepts for accounts created before phone sign-in existed.
+ *
+ * The field is `identifier` rather than `phone` for that reason: naming it
+ * after one of the two things it takes would be a lie the next person
+ * reading this has to discover.
+ */
+export async function login(identifier: string, password: string): Promise<AuthTokens> {
+  const res = await apiClient.post<ApiSuccess<AuthTokens>>('/auth/login', { identifier, password });
   return res.data.data;
 }
 

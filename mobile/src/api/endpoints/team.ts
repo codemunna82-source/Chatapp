@@ -16,6 +16,8 @@ export async function listTeamMembers(
 
 export interface CreateTeamMemberInput {
   email: string;
+  /** Required: it is what the member signs in with. Full E.164, e.g. +919876543210. */
+  phone: string;
   password: string;
   role: UserRole;
   permissions: Permission[];
@@ -32,6 +34,8 @@ export async function createTeamMember(input: CreateTeamMemberInput): Promise<Te
 
 export interface UpdateTeamMemberInput {
   id: string;
+  /** Changing the number this member signs in with. */
+  phone?: string;
   role?: UserRole;
   permissions?: Permission[];
   validUntil?: string;

@@ -8,8 +8,10 @@ function meta(req: Request) {
 }
 
 export const loginHandler = asyncHandler(async (req: Request, res: Response) => {
-  const { email, password } = req.body as { email: string; password: string };
-  const result = await authService.login(email, password, meta(req));
+  // The schema has already folded phone / email / identifier into one
+  // field, so there is nothing to choose between here.
+  const { identifier, password } = req.body as { identifier: string; password: string };
+  const result = await authService.login(identifier, password, meta(req));
   res.status(200).json({ success: true, data: result });
 });
 

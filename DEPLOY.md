@@ -69,7 +69,10 @@ identical setup with plain dashboard clicks.
    - `META_MOCK_MODE=true`, leave the other `META_*` vars blank for now
    - `RATE_LIMIT_WINDOW_MS=60000`, `RATE_LIMIT_MAX=100`, `LOG_LEVEL=info`
    - `SEED_TENANT_NAME`, `SEED_MASTER_ADMIN_EMAIL`,
-     `SEED_MASTER_ADMIN_PASSWORD` — real values for your first login
+     `SEED_MASTER_ADMIN_PHONE`, `SEED_MASTER_ADMIN_PASSWORD` — real values
+     for your first login. Sign-in is by phone number, so set the phone in
+     full E.164 (`+919876543210`); leaving it blank still works and signs
+     you in with the email instead
    - `SEED_DEMO_DATA=true` — since `NODE_ENV=production`, the seed script
      otherwise skips creating a demo contact/conversation to test chat with
      (that skip exists to protect a real customer's tenant, which this

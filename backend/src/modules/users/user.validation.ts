@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizePhone } from '../../lib/phone';
 import { PERMISSIONS } from './permission';
 import { USER_ROLES, USER_STATUSES } from './user.model';
 
@@ -12,8 +13,36 @@ import { USER_ROLES, USER_STATUSES } from './user.model';
  */
 const whatsappPhoneNumberIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Not a valid WhatsApp number id');
 
+/**
+ * A sign-in phone number.
+ *
+ * Validated by normalizePhone rather than a regex, for the same reason
+ * contacts are: people type "+91 98765-43210", "0091…" and bare digits,
+ * and all three are the same number. A strict E.164 regex would reject two
+ * of them before the normaliser that understands them ever ran.
+ *
+ * The country code is required, because it is what makes the number
+ * unambiguous — "9876543210" is a different person in a different country,
+ * and a login that guessed would eventually guess wrong.
+ */
+const loginPhoneSchema = z
+  .string()
+  .trim()
+  .min(5)
+  .max(32)
+  .refine((v) => normalizePhone(v) !== null, {
+    message: 'Enter the full number with country code, e.g. +91 98765 43210',
+  });
+
 export const createUserSchema = z.object({
   email: z.string().email().toLowerCase(),
+  /**
+   * Required, because sign-in is by phone number. A user created without
+   * one would be an account nobody can get into — and the only way to fix
+   * it afterwards is an admin editing them, which is a strange thing to
+   * make routine.
+   */
+  phone: loginPhoneSchema,
   password: z.string().min(8),
   role: z.enum(USER_ROLES).default('SUB_USER'),
   permissions: z.array(z.enum(PERMISSIONS)).default([]),
@@ -31,6 +60,8 @@ export const updateUserSchema = z
     validUntil: z.coerce.date().optional(),
     status: z.enum(USER_STATUSES).optional(),
     displayName: z.string().trim().min(1).optional(),
+    /** Changing what someone signs in with. Optional here — an edit is not a re-registration. */
+    phone: loginPhoneSchema.optional(),
     // `null` clears the assignment. `undefined` cannot: it is
     // indistinguishable from a patch that simply doesn't touch this field.
     whatsappPhoneNumberId: whatsappPhoneNumberIdSchema.nullable().optional(),

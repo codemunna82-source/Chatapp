@@ -14,6 +14,9 @@ export async function createTestTenant(name = 'Test Tenant') {
 export interface CreateTestUserOpts {
   tenantId: string;
   email: string;
+  /** What this user signs in with. Omitted leaves the account email-only,
+   *  which is the state every account created before phone sign-in is in. */
+  phone?: string;
   password?: string;
   role?: UserRole;
   permissions?: Permission[];
@@ -31,6 +34,10 @@ export async function createTestUser(opts: CreateTestUserOpts) {
   return User.create({
     tenantId: opts.tenantId,
     email: opts.email.toLowerCase(),
+    // Spread, so an omitted phone is an ABSENT field rather than an
+    // explicit null — the unique index covers strings only, and a row of
+    // nulls is the shape that turns a later index change into a collision.
+    ...(opts.phone ? { phone: opts.phone } : {}),
     passwordHash,
     role: opts.role ?? 'SUB_USER',
     permissions: opts.permissions ?? [],

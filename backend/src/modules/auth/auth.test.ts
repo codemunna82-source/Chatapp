@@ -24,6 +24,80 @@ describe('POST /api/auth/login', () => {
     expect(res.body.data.user.email).toBe('admin@voxo.test');
   });
 
+  /**
+   * The headline of phone sign-in: the number is what people type, in
+   * whatever shape their fingers produce it.
+   */
+  it('logs in with a phone number', async () => {
+    const tenant = await createTestTenant();
+    await createTestUser({
+      tenantId: String(tenant._id),
+      email: 'phone-login@voxo.test',
+      phone: '+919876500001',
+      password: 'Password123!',
+    });
+
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: '+919876500001', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.user.phone).toBe('+919876500001');
+  });
+
+  it('accepts the number however it was typed', async () => {
+    const tenant = await createTestTenant();
+    await createTestUser({
+      tenantId: String(tenant._id),
+      email: 'phone-forms@voxo.test',
+      phone: '+919876500002',
+      password: 'Password123!',
+    });
+
+    // Spaces, dashes and the 00 international prefix are all routine in a
+    // number someone types or pastes, and all three are the same account.
+    for (const typed of ['+91 98765 00002', '+91-98765-00002', '0091 9876500002']) {
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ identifier: typed, password: 'Password123!' });
+      expect(res.status).toBe(200);
+    }
+  });
+
+  /**
+   * The compatibility case this design exists for. Phone was added after
+   * accounts existed, so every older account — the MASTER_ADMIN who is the
+   * only person able to set the missing numbers included — has none. If
+   * this test fails, that person is locked out of their own workspace with
+   * the fix on the other side of the door.
+   */
+  it('still logs in an account that has no phone number', async () => {
+    const tenant = await createTestTenant();
+    await createTestUser({
+      tenantId: String(tenant._id),
+      email: 'legacy@voxo.test',
+      password: 'Password123!',
+    });
+
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: 'legacy@voxo.test', password: 'Password123!' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.user.phone).toBeUndefined();
+  });
+
+  it('rejects a phone number nobody signed up with', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: '+919999900000', password: 'Password123!' });
+
+    expect(res.status).toBe(401);
+    // Same code whether the account is missing or the password is wrong —
+    // otherwise this endpoint answers "does this number have an account".
+    expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
+  });
+
   it('rejects an incorrect password without leaking which field was wrong', async () => {
     const tenant = await createTestTenant();
     await createTestUser({ tenantId: String(tenant._id), email: 'admin2@voxo.test', password: 'Password123!' });

@@ -169,6 +169,16 @@ const envSchema = z.object({
 
   SEED_TENANT_NAME: z.string().default('Demo Tenant'),
   SEED_MASTER_ADMIN_EMAIL: z.string().email().default('admin@example.com'),
+  /**
+   * The number the seeded admin signs in with.
+   *
+   * No default, unlike the email: a default would put the same phone
+   * number on every deployment that ever ran the seed, and the number is
+   * globally unique — the second one to reach a shared database would fail
+   * on the index with a message about a number its operator never chose.
+   * Left empty, the admin is created without one and signs in by email.
+   */
+  SEED_MASTER_ADMIN_PHONE: z.string().optional().default(''),
   SEED_MASTER_ADMIN_PASSWORD: z.string().min(8).default('ChangeMe123!'),
   // seed.ts normally only creates demo WhatsApp/chat data outside production
   // (a real customer tenant shouldn't get fake contacts). Set true to opt a

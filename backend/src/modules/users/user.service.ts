@@ -1,4 +1,5 @@
 import { ApiError } from '../../lib/ApiError';
+import { normalizePhone } from '../../lib/phone';
 import { hashPassword } from '../../lib/password';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './user.repository';
@@ -12,6 +13,8 @@ export interface PublicUser {
   id: string;
   tenantId: string;
   email: string;
+  /** What this person signs in with. Absent on accounts created before it existed. */
+  phone?: string;
   role: string;
   permissions: string[];
   status: string;
@@ -31,6 +34,7 @@ export function toPublicUser(user: UserDoc): PublicUser {
     id: String(user._id),
     tenantId: String(user.tenantId),
     email: user.email,
+    phone: user.phone ?? undefined,
     role: user.role,
     permissions: user.permissions ?? [],
     status: user.status,
@@ -81,6 +85,15 @@ export async function createUserForTenant(
     throw ApiError.conflict('EMAIL_ALREADY_EXISTS', 'A user with this email already exists');
   }
 
+  // Checked globally, not per tenant, because the phone number IS the
+  // sign-in identifier and login has no workspace to scope by. Two
+  // workspaces holding the same number would make "who is this" ambiguous
+  // at exactly the moment it has to be certain.
+  const phone = normalizePhone(body.phone)!;
+  if ((await repo.countUsersByPhone(phone)) > 0) {
+    throw ApiError.conflict('PHONE_ALREADY_EXISTS', 'A user with this phone number already exists');
+  }
+
   if (body.whatsappPhoneNumberId) {
     await assertPhoneNumberBelongsToTenant(tenantId, body.whatsappPhoneNumberId);
   }
@@ -89,6 +102,7 @@ export async function createUserForTenant(
   const user = await repo.createUser({
     tenantId,
     email: body.email,
+    phone,
     passwordHash,
     role: body.role,
     permissions: body.permissions,
@@ -104,7 +118,7 @@ export async function createUserForTenant(
     action: 'user.create',
     targetType: 'User',
     targetId: user._id,
-    metadata: { email: user.email, role: user.role },
+    metadata: { email: user.email, phone: user.phone, role: user.role },
   });
 
   return toPublicUser(user);
@@ -135,7 +149,23 @@ export async function updateUserForTenant(
   if (patch.whatsappPhoneNumberId) {
     await assertPhoneNumberBelongsToTenant(tenantId, patch.whatsappPhoneNumberId);
   }
-  const user = await repo.updateUserByIdAndTenant(id, tenantId, patch);
+
+  // Normalised before the uniqueness check and before the write, so the
+  // two agree. Checking the typed form and storing the canonical one would
+  // let "+91 98765 43210" past a check that only ever compared it against
+  // "+919876543210", and the unique index would then reject the save with
+  // an error the API has no wording for.
+  let normalizedPatch = patch;
+  if (patch.phone !== undefined) {
+    const phone = normalizePhone(patch.phone)!;
+    const holder = await repo.findUserByPhone(phone);
+    if (holder && String(holder._id) !== id) {
+      throw ApiError.conflict('PHONE_ALREADY_EXISTS', 'A user with this phone number already exists');
+    }
+    normalizedPatch = { ...patch, phone };
+  }
+
+  const user = await repo.updateUserByIdAndTenant(id, tenantId, normalizedPatch);
   if (!user) {
     throw ApiError.notFound('USER_NOT_FOUND', 'User not found');
   }
@@ -145,7 +175,7 @@ export async function updateUserForTenant(
     action: 'user.update',
     targetType: 'User',
     targetId: user._id,
-    metadata: patch,
+    metadata: normalizedPatch,
   });
   return toPublicUser(user);
 }

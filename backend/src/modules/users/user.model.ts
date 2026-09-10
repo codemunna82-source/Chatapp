@@ -15,6 +15,21 @@ const userSchema = new Schema(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
     email: { type: String, required: true, trim: true, lowercase: true },
+    /**
+     * The number this person signs in with, in canonical E.164.
+     *
+     * Optional on the schema even though every new account gets one, and
+     * that is deliberate: it was added after accounts already existed, and
+     * a required field would have made every one of them unsaveable —
+     * including the MASTER_ADMIN who is the only person able to set the
+     * missing values. Login therefore accepts either this or the email,
+     * which is what keeps that from being a lockout with no way out.
+     *
+     * Always stored through normalizePhone, so "+91 98765-43210",
+     * "0091…" and the bare digits are one value rather than three
+     * accounts.
+     */
+    phone: { type: String, trim: true },
     passwordHash: { type: String, required: true, select: false },
     role: { type: String, enum: USER_ROLES, required: true },
     permissions: {
@@ -56,11 +71,22 @@ const userSchema = new Schema(
   { timestamps: true },
 );
 
-// Email is globally unique across the platform, not just per-tenant: a
-// User document belongs to exactly one tenant, and POST /api/auth/login
-// takes only { email, password } with no tenant selector — the login
-// lookup must resolve to a single account without prior tenant context.
+// Both sign-in identifiers are globally unique across the platform, not
+// just per-tenant: a User document belongs to exactly one tenant, and
+// POST /api/auth/login takes one identifier and a password with no tenant
+// selector — so the lookup must resolve to a single account without any
+// prior tenant context. Two workspaces holding the same phone number would
+// make "who is this" ambiguous at the moment it has to be certain.
 userSchema.index({ email: 1 }, { unique: true });
+// Partial rather than sparse. A sparse unique index still indexes an
+// explicit null, so two accounts saved with `phone: null` — which is what
+// a form submitting an empty field produces — would collide with each
+// other and the second would be rejected as a duplicate phone number
+// nobody entered. Restricting the index to actual strings sidesteps it.
+userSchema.index(
+  { phone: 1 },
+  { unique: true, partialFilterExpression: { phone: { $type: 'string' } } },
+);
 userSchema.index({ tenantId: 1, status: 1 });
 
 /**

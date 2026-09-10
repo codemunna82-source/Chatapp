@@ -13,8 +13,18 @@ import { getApiErrorMessage } from '../../api/client';
 import { useTheme } from '../../theme/ThemeProvider';
 import { selectionFeedback } from '../../utils/haptics';
 
+/**
+ * Sign-in is by phone number now.
+ *
+ * Not validated as a phone number here, though — only as "something was
+ * typed". The server accepts a number or an email, because accounts made
+ * before phone sign-in existed have no number, and rejecting an email on
+ * this screen would lock those people out of an app that would have let
+ * them in. What the label says is what almost everyone will type; what the
+ * field accepts is deliberately wider.
+ */
 const loginSchema = z.object({
-  email: z.string().trim().min(1, 'Email is required').email('Enter a valid email'),
+  identifier: z.string().trim().min(1, 'Enter your phone number'),
   password: z.string().min(1, 'Password is required'),
 });
 type LoginForm = z.infer<typeof loginSchema>;
@@ -29,7 +39,7 @@ export function LoginScreen() {
     control,
     handleSubmit,
     formState: { errors },
-  } = useForm<LoginForm>({ resolver: zodResolver(loginSchema), defaultValues: { email: '', password: '' } });
+  } = useForm<LoginForm>({ resolver: zodResolver(loginSchema), defaultValues: { identifier: '', password: '' } });
 
   const onSubmit = (values: LoginForm) => {
     login.mutate(values);
@@ -72,24 +82,30 @@ export function LoginScreen() {
 
           <Controller
             control={control}
-            name="email"
+            name="identifier"
             render={({ field: { onChange, onBlur, value } }) => (
               <TextField
-                label="Email"
+                label="Phone number"
+                // The country code is what makes the number unambiguous,
+                // and the placeholder is the only place that gets said
+                // before someone types the wrong thing and is told no.
+                placeholder="+91 98765 43210"
                 value={value}
                 onChangeText={onChange}
                 onBlur={onBlur}
-                error={errors.email?.message}
+                error={errors.identifier?.message}
                 autoCapitalize="none"
-                autoComplete="email"
-                keyboardType="email-address"
-                textContentType="emailAddress"
+                // phone-pad, not numeric: it has the + and the country
+                // code cannot be typed without it.
+                keyboardType="phone-pad"
+                autoComplete="tel"
+                textContentType="telephoneNumber"
                 // Enter moves to the password instead of dismissing the
                 // keyboard and leaving the user to aim at the next field.
                 returnKeyType="next"
                 onSubmitEditing={() => passwordRef.current?.focus()}
                 submitBehavior="submit"
-                testID="login-email"
+                testID="login-identifier"
               />
             )}
           />

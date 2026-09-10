@@ -10,6 +10,7 @@
  */
 import { connectMongo, disconnectMongo } from '../lib/mongoose';
 import { env } from '../config/env';
+import { normalizePhone } from '../lib/phone';
 import { Tenant } from '../modules/tenants/tenant.model';
 import { User } from '../modules/users/user.model';
 import { hashPassword } from '../lib/password';
@@ -128,9 +129,15 @@ async function ensureTenantAndAdmin(): Promise<string> {
   const oneYearFromNow = new Date();
   oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
 
+  // Absent rather than null when unset: the unique index covers strings
+  // only, but writing an explicit null on every seeded admin is the sort
+  // of thing a later index change turns into a collision.
+  const adminPhone = normalizePhone(env.SEED_MASTER_ADMIN_PHONE) ?? undefined;
+
   const admin = await User.create({
     tenantId: tenant._id,
     email: env.SEED_MASTER_ADMIN_EMAIL.toLowerCase(),
+    ...(adminPhone ? { phone: adminPhone } : {}),
     passwordHash,
     role: 'MASTER_ADMIN',
     permissions: [],
@@ -145,7 +152,12 @@ async function ensureTenantAndAdmin(): Promise<string> {
 
   console.log('Tenant + Master Admin created:');
   console.log(`  Tenant: ${tenant.name} (${tenant._id})`);
-  console.log(`  Master Admin: ${admin.email} / ${env.SEED_MASTER_ADMIN_PASSWORD}`);
+  console.log(
+    `  Master Admin: ${admin.phone ?? admin.email} / ${env.SEED_MASTER_ADMIN_PASSWORD}`,
+  );
+  if (!admin.phone) {
+    console.log('  ℹ️  No SEED_MASTER_ADMIN_PHONE set — sign in with the email above, then add a phone number.');
+  }
   console.log('  ⚠️  Change this password immediately after first login.');
 
   return String(tenant._id);

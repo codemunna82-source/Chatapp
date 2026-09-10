@@ -35,6 +35,8 @@ export interface AuthUser {
   id: string;
   tenantId: string;
   email: string;
+  /** What this person signs in with. Absent on accounts made before phone sign-in existed. */
+  phone?: string;
   role: UserRole;
   permissions: Permission[];
   displayName?: string;
@@ -253,6 +255,8 @@ export interface TeamMember {
   id: string;
   tenantId: string;
   email: string;
+  /** The number this member signs in with. */
+  phone?: string;
   role: UserRole;
   permissions: Permission[];
   status: UserStatus;
