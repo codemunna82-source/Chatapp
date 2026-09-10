@@ -11,6 +11,8 @@ import {
 import { conversationVisibleTo, findConversationByIdAndTenant } from '../../modules/conversations/conversation.repository';
 import { visibleWhatsAppPhoneNumberId } from '../../modules/conversations/conversation.access';
 import { findContactByIdAndTenant } from '../../modules/contacts/contact.repository';
+import { Tenant } from '../../modules/tenants/tenant.model';
+import { pushGuestIncomingCall } from '../../modules/guest/guestPush.service';
 import { pushIncomingCall } from '../../modules/notifications/push.service';
 import {
   isConversationBlockedByGuest,
@@ -248,6 +250,22 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
       conversationId,
       sdp: payload.sdp,
     });
+
+    // And the customer's browser, for the case the socket above cannot
+    // cover: the tab is closed, or backgrounded on a phone where it has
+    // been frozen. A ring nobody is looking at is a missed call, and the
+    // whole reason this window asks for notification permission.
+    //
+    // Not awaited into the ack. The call is already ringing on every open
+    // tab, and a slow FCM round trip would hold the agent's own UI in
+    // "connecting" for it.
+    void pushGuestIncomingCall({
+      tenantId: auth.tenantId,
+      conversationId,
+      businessName: (await Tenant.findById(auth.tenantId).select('name').lean())?.name ?? 'Support',
+      callId: String(call._id),
+    });
+
     ack?.({ success: true, callId: String(call._id) });
   });
 

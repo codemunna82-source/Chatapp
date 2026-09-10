@@ -6,6 +6,7 @@ import { ApiError } from '../../lib/ApiError';
 import { buildIceServers, hasTurnConfigured } from '../calls/webCall.service';
 import { getGuestMediaBytes, storeGuestMedia } from './guestMedia.service';
 import type { GuestReportReason } from './guestReport.model';
+import { deleteGuestPushTokens, registerGuestPushToken } from './guestPushToken.repository';
 import * as guestService from './guest.service';
 
 /* ------------------------------------------------------------------ *
@@ -86,6 +87,33 @@ export const setGuestBlockHandler = asyncHandler(async (req: Request, res: Respo
   const guest = getGuestContext(req);
   const { blocked } = req.body as { blocked: boolean };
   res.status(200).json({ success: true, data: await guestService.setGuestBlock(guest, blocked) });
+});
+
+/**
+ * The browser handing over its push token.
+ *
+ * Called on every load rather than only the first: tokens rotate, and a
+ * browser that has silently been issued a new one is a browser that stops
+ * receiving anything until it says so.
+ */
+export const registerGuestPushHandler = asyncHandler(async (req: Request, res: Response) => {
+  const guest = getGuestContext(req);
+  const { token } = req.body as { token: string };
+  await registerGuestPushToken({
+    tenantId: guest.tenantId,
+    conversationId: guest.conversationId,
+    guestSessionId: guest.sessionId,
+    token,
+  });
+  res.status(204).send();
+});
+
+/** The customer turning notifications off, or the browser revoking. */
+export const deleteGuestPushHandler = asyncHandler(async (req: Request, res: Response) => {
+  getGuestContext(req);
+  const { token } = req.body as { token: string };
+  await deleteGuestPushTokens([token]);
+  res.status(204).send();
 });
 
 export const markGuestReadHandler = asyncHandler(async (req: Request, res: Response) => {

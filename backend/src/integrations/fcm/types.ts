@@ -15,6 +15,22 @@ export interface PushPayload {
   collapseKey?: string;
   /** Android notification channel — must already exist on the device. */
   channelId?: string;
+  /**
+   * Where tapping a WEB notification should land.
+   *
+   * Ignored for the Android app, which routes on the data payload instead.
+   * A browser has no such router: the notification is handled by a service
+   * worker that may be the only thing running, so the destination has to
+   * travel with the message.
+   */
+  link?: string;
+  /**
+   * Keeps a web notification on screen until it is dealt with.
+   *
+   * For a ringing call and nothing else. Everything else should behave
+   * like a message notification and fade.
+   */
+  requireInteraction?: boolean;
 }
 
 export interface SendResult {

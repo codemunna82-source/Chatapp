@@ -117,6 +117,35 @@ export const fcmGateway: PushGateway = {
               token,
               notification: { title: payload.title, body: payload.body },
               data: payload.data,
+              // Both platform blocks travel on every message. FCM applies
+              // only the one matching the token's platform, so this costs
+              // nothing and means a web token and an app token can be sent
+              // through the same call — which they are, because the caller
+              // knows who it is notifying, not what they are holding.
+              webpush: {
+                headers: {
+                  // Web Push's own priority header. Without it a browser
+                  // on a metered connection may sit on the message until
+                  // it next wakes for something else.
+                  Urgency: 'high',
+                  // Seconds FCM keeps trying. A day is right for a
+                  // message and absurd for a ring, so a call sets its own
+                  // via requireInteraction's sibling below.
+                  TTL: payload.requireInteraction ? '60' : '86400',
+                },
+                notification: {
+                  title: payload.title,
+                  body: payload.body,
+                  icon: '/icon-192.png',
+                  badge: '/icon-192.png',
+                  // Same job as the Android tag: ten messages from one
+                  // business replace each other instead of stacking.
+                  tag: payload.collapseKey,
+                  requireInteraction: payload.requireInteraction ?? false,
+                },
+                data: payload.data,
+                fcmOptions: payload.link ? { link: payload.link } : undefined,
+              },
               android: {
                 priority: 'high',
                 collapseKey: payload.collapseKey,

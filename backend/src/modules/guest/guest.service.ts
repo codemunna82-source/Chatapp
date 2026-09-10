@@ -35,6 +35,8 @@ import {
   touchSession,
 } from './guestSession.repository';
 import { countRecentGuestReports, createGuestReport, listGuestReportsForConversation } from './guestReport.repository';
+import { deleteGuestPushTokensForConversation } from './guestPushToken.repository';
+import { pushGuestMessage } from './guestPush.service';
 import type { GuestReportLean, GuestReportReason } from './guestReport.model';
 
 /**
@@ -425,6 +427,8 @@ export async function revokeGuestLinkForConversation(
     throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
   }
   const revoked = await revokeSessionsForConversation(conversationId, auth.tenantId);
+  // The link is gone, so the notifications must go with it.
+  await deleteGuestPushTokensForConversation(auth.tenantId, conversationId);
   return { revoked };
 }
 
@@ -945,6 +949,22 @@ export async function sendGuestReply(
   if (updated) {
     realtime.emitConversationUpdated(auth.tenantId, toRealtimeConversation(updated));
   }
+
+  // The customer's own browser, if it asked to be told. Only on this path:
+  // a reply sent through Meta arrives in the customer's WhatsApp, which
+  // notifies them already, and pushing here too would buzz their phone
+  // twice for one message.
+  //
+  // Last, and never allowed to fail the request — the message is stored
+  // and already on the socket.
+  const tenant = await Tenant.findById(auth.tenantId).select('name').lean();
+  await pushGuestMessage({
+    tenantId: auth.tenantId,
+    conversationId,
+    businessName: tenant?.name ?? 'Support',
+    messageType: 'text',
+    text,
+  });
 
   return toGuestMessage(message as unknown as MessageLean);
 }

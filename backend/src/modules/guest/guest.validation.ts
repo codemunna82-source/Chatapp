@@ -89,6 +89,17 @@ export const guestReportSchema = z
     path: ['reason'],
   });
 
+/**
+ * A browser's Web Push registration token.
+ *
+ * Length-bounded and nothing more. FCM's token format is not documented as
+ * stable and has changed shape before; a regex tight enough to be worth
+ * having would start rejecting valid tokens the next time it does.
+ */
+export const guestPushSchema = z.object({
+  token: z.string().trim().min(20).max(4096),
+});
+
 export const guestBlockSchema = z.object({
   blocked: z.boolean(),
 });

@@ -67,6 +67,12 @@ services:
         sync: false
       - key: TURN_CREDENTIAL
         sync: false
+      # Firebase service account JSON, as one line. Drives every push
+      # notification: the agent app's, and — since the web chat window
+      # asks for permission too — the customer's browser. Without it
+      # notifications are simply off; nothing else stops working.
+      - key: FCM_SERVICE_ACCOUNT_JSON
+        sync: false
       - key: META_PHONE_NUMBER_ID
         sync: false
       - key: META_API_VERSION

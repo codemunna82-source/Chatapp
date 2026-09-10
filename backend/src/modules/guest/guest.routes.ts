@@ -11,6 +11,7 @@ import {
   guestMessageSchema,
   guestMessagesQuerySchema,
   guestReactionSchema,
+  guestPushSchema,
   guestReportSchema,
 } from './guest.validation';
 import {
@@ -22,6 +23,8 @@ import {
   postGuestLocationHandler,
   postGuestReportHandler,
   setGuestBlockHandler,
+  registerGuestPushHandler,
+  deleteGuestPushHandler,
   getGuestIceHandler,
   uploadGuestMediaHandler,
   getGuestMediaHandler,
@@ -68,6 +71,12 @@ guestRouter.post('/location', validate({ body: guestLocationSchema }), postGuest
 // someone in that state has come here to press.
 guestRouter.post('/report', validate({ body: guestReportSchema }), postGuestReportHandler);
 guestRouter.post('/block', validate({ body: guestBlockSchema }), setGuestBlockHandler);
+// Registering a push token is allowed from a blocked window on purpose:
+// the browser refreshes its token on every load whatever the state, and
+// nothing will be sent to it while the block is on. Refusing here would
+// only mean a stale token the moment the customer unblocks.
+guestRouter.post('/push', validate({ body: guestPushSchema }), registerGuestPushHandler);
+guestRouter.delete('/push', validate({ body: guestPushSchema }), deleteGuestPushHandler);
 guestRouter.post('/read', markGuestReadHandler);
 guestRouter.get('/ice', getGuestIceHandler);
 guestRouter.post('/media', guestUpload.array('files', GUEST_MAX_FILES_PER_REQUEST), uploadGuestMediaHandler);
