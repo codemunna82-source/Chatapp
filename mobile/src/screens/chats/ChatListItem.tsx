@@ -5,6 +5,7 @@ import { Avatar } from '../../components/Avatar';
 import { Badge } from '../../components/Badge';
 import { MessageStatusIcon } from './MessageStatusIcon';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useGuestPresenceStore } from '../../store/guestPresenceStore';
 import { formatChatListTime } from '../../utils/formatTime';
 import type { Conversation } from '../../api/types';
 
@@ -33,6 +34,9 @@ function ChatListItemImpl({
   // A manually-unread chat reads as unread without claiming a message count
   // it does not have — see Conversation.manuallyUnread.
   const unread = conversation.unreadCount > 0 || conversation.manuallyUnread;
+  // Live socket presence, not "a link exists": a link stays issued for a
+  // month whether or not anyone ever tapped it.
+  const guestOnline = useGuestPresenceStore((s) => Boolean(s.open[conversation.id]));
 
   return (
     <Pressable
@@ -60,6 +64,14 @@ function ChatListItemImpl({
           <View style={[styles.checkMark, { backgroundColor: colors.primary, borderColor: colors.background }]}>
             <Ionicons name="checkmark" size={12} color={colors.textOnPrimary} />
           </View>
+        ) : guestOnline ? (
+          // On the avatar rather than in the text, so it survives a long
+          // last message and reads at a glance down a list of forty rows.
+          // Hidden while selecting: that corner is the tick's.
+          <View
+            style={[styles.presenceDot, { backgroundColor: '#22C55E', borderColor: colors.background }]}
+            accessibilityLabel="Customer is in the private chat now"
+          />
         ) : null}
       </View>
       <View style={[styles.middle, { marginLeft: spacing.md }]}>
@@ -125,6 +137,15 @@ const styles = StyleSheet.create({
   pinnedMark: { marginLeft: 6 },
   previewTick: { marginRight: 4 },
   unreadDot: { width: 10, height: 10, borderRadius: 5, marginLeft: 6 },
+  presenceDot: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+  },
   checkMark: {
     position: 'absolute',
     right: -2,

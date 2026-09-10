@@ -6,6 +6,7 @@ import { useSocketEvent } from './useSocketEvent';
 import { useSocketConnection } from './useSocketConnected';
 import { useMessageAlert } from './useMessageAlert';
 import { useActiveConversationStore } from '../store/activeConversationStore';
+import { useGuestPresenceStore } from '../store/guestPresenceStore';
 import {
   useCallStore,
   type IncomingCallPayload,
@@ -14,6 +15,7 @@ import {
 } from '../calling/callStore';
 import { upsertMessageInCache, patchMessageStatusInCache } from '../queries/useMessages';
 import { queryKeys } from '../queries/keys';
+import type { NavigationContainerRef } from '@react-navigation/native';
 import type { Message, Conversation, MessageStatus } from '../api/types';
 
 /** Long enough to absorb a burst of webhooks, short enough that the list
@@ -33,7 +35,16 @@ interface MessageStatusPayload {
  * cache updates so every screen showing affected data updates live without
  * each one managing its own socket subscriptions.
  */
-export function RealtimeSync(): null {
+export function RealtimeSync({
+  navigationRef,
+}: {
+  /**
+   * Optional so this stays mountable in a test or a screenshot harness
+   * without a navigator. Without it, a customer opening their window is
+   * still recorded and still shown in the list — only the jump is skipped.
+   */
+  navigationRef?: NavigationContainerRef<ReactNavigation.RootParamList>;
+}): null {
   const queryClient = useQueryClient();
 
   /**
@@ -97,6 +108,11 @@ export function RealtimeSync(): null {
     const isReconnect = lastGeneration.current > 0 && generation > lastGeneration.current;
     lastGeneration.current = generation;
     if (!isReconnect) return;
+    // Presence is only ever true because a socket said so, and a socket
+    // that dropped stopped saying anything. Carrying the old set across a
+    // reconnect would leave a live dot beside a customer who closed the
+    // tab during the outage.
+    useGuestPresenceStore.getState().reset();
     void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
     void queryClient.invalidateQueries({ queryKey: queryKeys.messagesAll });
   }, [generation, queryClient]);
@@ -173,6 +189,45 @@ export function RealtimeSync(): null {
   );
 
   // Calls from the web chat window take the same overlay but a completely
+  /**
+   * The customer opened — or closed — their web chat window.
+   *
+   * Opening it jumps straight to that conversation, because the moment
+   * this fires is almost always the moment an agent is waiting for: they
+   * sent "Open private chat" and are watching for the customer to arrive.
+   *
+   * Two guards, and both exist because being yanked out of something is
+   * worse than a slightly late arrival:
+   *
+   * - Never while another conversation is open. Half-typed replies live in
+   *   that screen, and navigating away loses them.
+   * - Never while the app is in the background. A screen changing under a
+   *   locked phone is not help; the push notification already covers that
+   *   case and lands the agent in the same place when they tap it.
+   *
+   * Announced either way, so the list shows who is there even when the
+   * jump was skipped.
+   */
+  useSocketEvent<{ conversationId: string; online: boolean }>(
+    'guest:presence',
+    ({ conversationId, online }) => {
+      if (!conversationId) return;
+      useGuestPresenceStore.getState().setGuestOpen(conversationId, online);
+      if (!online || !navigationRef?.isReady()) return;
+      if (AppState.currentState !== 'active') return;
+
+      const activeId = useActiveConversationStore.getState().activeConversationId;
+      if (activeId && activeId !== conversationId) return;
+      if (activeId === conversationId) return; // already there
+
+      navigationRef.navigate('ChatsTab', {
+        screen: 'ConversationDetail',
+        params: { conversationId },
+      });
+    },
+    [navigationRef],
+  );
+
   // separate signalling path — see webCallSession.ts for why they cannot
   // share the WhatsApp one.
   useSocketEvent<WebIncomingCallPayload>(

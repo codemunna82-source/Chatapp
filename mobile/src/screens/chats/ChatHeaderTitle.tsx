@@ -10,6 +10,8 @@ interface ChatHeaderTitleProps {
   /** Sample data — the window is not a real constraint there, so none of
    *  it is shown. See the Conversation type's isDemo. */
   isDemo?: boolean;
+  /** The customer has their web chat window open right now. */
+  guestOnline?: boolean;
 }
 
 /** Re-checked once a minute — enough to keep an hours/minutes label honest
@@ -27,7 +29,13 @@ const TICK_MS = 60_000;
  * Only warns near the end. A full green "23h left" badge on every chat is
  * noise; what matters is the last stretch.
  */
-export function ChatHeaderTitle({ name, windowExpiresAt, withinWindow, isDemo = false }: ChatHeaderTitleProps) {
+export function ChatHeaderTitle({
+  name,
+  windowExpiresAt,
+  withinWindow,
+  isDemo = false,
+  guestOnline = false,
+}: ChatHeaderTitleProps) {
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -46,7 +54,17 @@ export function ChatHeaderTitle({ name, windowExpiresAt, withinWindow, isDemo = 
       <Text style={styles.name} numberOfLines={1}>
         {name}
       </Text>
-      {isDemo ? (
+      {/* Ahead of the window countdown, because it outranks it: a customer
+          sitting in the web window can be replied to whatever Meta's
+          24-hour clock says. */}
+      {guestOnline ? (
+        <View style={styles.presenceRow}>
+          <View style={styles.dot} />
+          <Text style={[styles.subtitle, styles.present]} numberOfLines={1}>
+            In the private chat now
+          </Text>
+        </View>
+      ) : isDemo ? (
         <Text style={[styles.subtitle, styles.normal]} numberOfLines={1}>
           Sample chat
         </Text>
@@ -72,4 +90,7 @@ const styles = StyleSheet.create({
   normal: { color: 'rgba(255,255,255,0.65)' },
   urgent: { color: '#F0B84B' },
   closed: { color: '#F0B84B' },
+  presenceRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
+  dot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#4ADE80' },
+  present: { color: '#4ADE80', marginTop: 0 },
 });

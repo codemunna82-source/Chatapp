@@ -8,7 +8,12 @@ import { isRedisConfigured, getRedisConnection } from '../queues/connection';
 import { resolveAuthContextFromToken } from '../modules/auth/authContext.service';
 import { resolveGuestContextFromToken } from '../modules/guest/guest.service';
 import { tenantRoom, userRoom, phoneNumberRoom, conversationRoom, agentsRoom, guestPresenceRoom } from './rooms';
-import { broadcastAgentPresence, countOnlineAgents } from './presence';
+import {
+  broadcastAgentPresence,
+  broadcastGuestPresence,
+  countGuestSockets,
+  countOnlineAgents,
+} from './presence';
 import { visibleWhatsAppPhoneNumberId } from '../modules/conversations/conversation.access';
 import { registerConversationHandlers } from './events/conversation';
 import { registerTypingHandlers } from './events/typing';
@@ -124,6 +129,11 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
         socket.emit('agent:presence', { online: count > 0 });
       });
 
+      // And tell the business the customer has arrived. This is what lets
+      // an agent who has just sent the link know it was opened, instead of
+      // finding out when a message lands.
+      broadcastGuestPresence(io as AppServer, guest, true);
+
       // The same reasoning as the agent re-validation below: a link can be
       // revoked or expire while the page is still open, and a long-lived
       // socket must not outlive what an HTTP request with the same token
@@ -140,7 +150,15 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
         });
       }, REVALIDATE_INTERVAL_MS);
 
-      socket.on('disconnect', () => clearInterval(revalidateGuest));
+      socket.on('disconnect', () => {
+        clearInterval(revalidateGuest);
+        // Counted after this socket has left the room, so the number is
+        // the sockets that remain. One customer with two tabs closing one
+        // of them has not left.
+        void countGuestSockets(io as AppServer, guest.conversationId).then((remaining) => {
+          if (remaining === 0) broadcastGuestPresence(io as AppServer, guest, false);
+        });
+      });
       return;
     }
 

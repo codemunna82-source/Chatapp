@@ -64,7 +64,7 @@ export function RootNavigator() {
     >
       {status === 'signedIn' ? (
         <>
-          <RealtimeSync />
+          <RealtimeSync navigationRef={navigationRef} />
           <OutboxFlusher />
           <PushNotificationSync navigationRef={navigationRef} />
           <PendingCallSync />

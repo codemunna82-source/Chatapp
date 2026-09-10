@@ -20,6 +20,7 @@ import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { MessageActionSheet } from './MessageActionSheet';
 import { TemplatePickerSheet } from './TemplatePickerSheet';
 import { ChatHeaderTitle } from './ChatHeaderTitle';
+import { useGuestPresenceStore } from '../../store/guestPresenceStore';
 import { MessageInfoSheet } from './MessageInfoSheet';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { AttachmentSheet } from './AttachmentSheet';
@@ -301,6 +302,14 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const sendGuestReply = useSendGuestReply(conversationId);
 
   const guestActive = guestLinkQuery.data?.active ?? false;
+  /**
+   * Whether the customer is sitting in the web window right now.
+   *
+   * Live socket presence, not the link's existence: `guestActive` says a
+   * link was issued, which stays true for a month whether or not anyone
+   * ever tapped it.
+   */
+  const guestOnline = useGuestPresenceStore((s) => Boolean(s.open[conversationId]));
   const withinWhatsAppWindow =
     (conversationQuery.data?.isDemo ?? false) ||
     (conversationQuery.data?.withinCustomerServiceWindow ?? false);
@@ -530,6 +539,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           windowExpiresAt={conversationQuery.data?.conversationWindowExpiresAt}
           withinWindow={conversationQuery.data?.withinCustomerServiceWindow ?? true}
           isDemo={conversationQuery.data?.isDemo ?? false}
+          guestOnline={guestOnline}
         />
       ),
       // The header itself stays a fixed navy in both schemes (matches both
@@ -603,6 +613,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     searchOpen,
     closeSearch,
     guestActive,
+    // Without this the header keeps whatever presence it was built with:
+    // setOptions only re-runs when this array changes, so the customer
+    // could arrive and the subtitle would never say so.
+    guestOnline,
     handleGuestLink,
     handleCall,
   ]);

@@ -1,5 +1,5 @@
 import { logger } from '../lib/logger';
-import { agentsRoom, guestPresenceRoom } from './rooms';
+import { agentsRoom, conversationRoom, guestPresenceRoom, phoneNumberRoom, tenantRoom } from './rooms';
 import type { AppServer } from './types';
 
 /**
@@ -32,4 +32,48 @@ export async function countOnlineAgents(io: AppServer, tenantId: string): Promis
 export async function broadcastAgentPresence(io: AppServer, tenantId: string): Promise<void> {
   const online = (await countOnlineAgents(io, tenantId)) > 0;
   io.to(guestPresenceRoom(tenantId)).emit('agent:presence', { online });
+}
+
+/**
+ * Whether the customer has their web chat window open, told to the agents
+ * who may see that conversation.
+ *
+ * The mirror of the presence above, and it was missing: a customer could
+ * tap "Open private chat", land in the window and sit there, and nothing
+ * on the business's side said so. The agent found out when a message
+ * arrived, which is one turn too late to be waiting for someone.
+ *
+ * Addressed to the tenant and number rooms rather than the conversation
+ * room, and that matters: the conversation room only holds agents who
+ * already have that chat open, which is exactly the set who do not need
+ * telling. The people who need to know are the ones looking at the list.
+ */
+export function broadcastGuestPresence(
+  io: AppServer,
+  guest: { tenantId: string; conversationId: string; whatsappPhoneNumberId: string },
+  online: boolean,
+): void {
+  io.to(tenantRoom(guest.tenantId))
+    .to(phoneNumberRoom(guest.whatsappPhoneNumberId))
+    .emit('guest:presence', { conversationId: guest.conversationId, online });
+}
+
+/**
+ * How many customer sockets are still in this conversation.
+ *
+ * Counted before announcing a departure because one customer can have the
+ * window open in two tabs, and closing one of them is not them leaving.
+ * Filtered to guests: an agent with the chat open is in the same room.
+ */
+export async function countGuestSockets(io: AppServer, conversationId: string): Promise<number> {
+  try {
+    const sockets = await io.in(conversationRoom(conversationId)).fetchSockets();
+    return sockets.filter((s) => Boolean((s.data as { guest?: unknown }).guest)).length;
+  } catch (err) {
+    logger.warn({ err, conversationId }, 'Could not count guest sockets');
+    // Zero means "announce them as gone", which is the safer wrong answer:
+    // an agent told nobody is there goes back to the list, where the next
+    // message will still reach them.
+    return 0;
+  }
 }
