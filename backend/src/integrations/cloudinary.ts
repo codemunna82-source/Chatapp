@@ -91,6 +91,25 @@ export async function uploadBufferToCloudinary(
 }
 
 /** Downloads bytes from a Cloudinary URL server-side — the client never sees this URL directly, same "token/URL never reaches Android" boundary the Meta media proxy already enforces. */
+/**
+ * The same asset at a bounded width.
+ *
+ * Cloudinary resizes from the URL, so a thumbnail costs no extra storage
+ * and no work here — the transformation goes in the path after /upload/.
+ * `c_limit` never enlarges, so an image already smaller than the bound
+ * comes back untouched rather than upscaled and blurry, and q_auto lets
+ * Cloudinary pick the compression.
+ *
+ * A URL that is not a Cloudinary delivery URL is returned unchanged: the
+ * caller then simply serves the original, which is correct, just larger.
+ */
+export function cloudinaryVariant(url: string, width: number): string {
+  const marker = '/upload/';
+  const at = url.indexOf(marker);
+  if (at === -1) return url;
+  return `${url.slice(0, at + marker.length)}c_limit,w_${width},q_auto/${url.slice(at + marker.length)}`;
+}
+
 export async function fetchCloudinaryBuffer(url: string): Promise<Buffer> {
   const res = await axios.get<ArrayBuffer>(url, { responseType: 'arraybuffer' });
   return Buffer.from(res.data);

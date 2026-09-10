@@ -5,12 +5,13 @@ import { requireGuest } from '../../middleware/guestAuth.middleware';
 import { guestConsolePageHandler, guestConsoleScriptHandler } from './guestConsole.controller';
 import { guestRateLimiter } from '../../middleware/rateLimit.middleware';
 import { validate } from '../../middleware/validate.middleware';
-import { guestMessageSchema, guestMessagesQuerySchema } from './guest.validation';
+import { guestMessageSchema, guestMessagesQuerySchema, guestReactionSchema } from './guest.validation';
 import {
   getGuestSessionHandler,
   listGuestMessagesHandler,
   postGuestMessageHandler,
   markGuestReadHandler,
+  postGuestReactionHandler,
   getGuestIceHandler,
   uploadGuestMediaHandler,
   getGuestMediaHandler,
@@ -50,6 +51,7 @@ guestRouter.use(guestRateLimiter, requireGuest);
 guestRouter.get('/session', getGuestSessionHandler);
 guestRouter.get('/messages', validate({ query: guestMessagesQuerySchema }), listGuestMessagesHandler);
 guestRouter.post('/messages', validate({ body: guestMessageSchema }), postGuestMessageHandler);
+guestRouter.post('/reactions', validate({ body: guestReactionSchema }), postGuestReactionHandler);
 guestRouter.post('/read', markGuestReadHandler);
 guestRouter.get('/ice', getGuestIceHandler);
 guestRouter.post('/media', guestUpload.array('files', GUEST_MAX_FILES_PER_REQUEST), uploadGuestMediaHandler);

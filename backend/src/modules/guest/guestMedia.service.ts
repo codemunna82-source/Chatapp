@@ -161,6 +161,8 @@ export async function storeGuestMedia(input: StoreGuestMediaInput) {
 export async function getGuestMediaBytes(
   guest: GuestContext,
   mediaId: string,
+  /** Longest edge for a bubble-sized image; omitted for the full file. */
+  maxWidth?: number,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   const referenced = await Message.exists({
     tenantId: guest.tenantId,
@@ -175,5 +177,5 @@ export async function getGuestMediaBytes(
   // Everything past the ownership check is the same problem the agent side
   // already solves — stored bytes, then Cloudinary, then Meta — so it uses
   // the same function rather than a second copy that could drift from it.
-  return getMediaBytesForTenant(guest.tenantId, mediaId);
+  return getMediaBytesForTenant(guest.tenantId, mediaId, maxWidth);
 }

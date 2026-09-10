@@ -8,8 +8,30 @@ import { z } from 'zod';
  */
 export const GUEST_TEXT_MAX = 4096;
 
+/** A Mongo id, which is what every message id in this API is. */
+const messageIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Not a valid message id');
+
 export const guestMessageSchema = z.object({
   text: z.string().trim().min(1, 'Message cannot be empty').max(GUEST_TEXT_MAX),
+  /** The message being answered. Checked against this conversation server-side. */
+  replyToMessageId: messageIdSchema.optional(),
+});
+
+/**
+ * A reaction.
+ *
+ * The emoji is length-bounded rather than pattern-matched: a single
+ * "emoji" can be several code points once skin tones and joiners are
+ * involved, and a regex tight enough to accept only emoji rejects half of
+ * the ones a real keyboard produces. Eight characters is more than any
+ * single glyph needs and far less than a message.
+ *
+ * An empty string is allowed and means "remove my reaction" — the same
+ * shape the WhatsApp API itself uses.
+ */
+export const guestReactionSchema = z.object({
+  messageId: messageIdSchema,
+  emoji: z.string().trim().max(8),
 });
 
 export const guestMessagesQuerySchema = z.object({

@@ -12,7 +12,7 @@ import {
 } from './media.repository';
 import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
 import { getMetaGateway } from '../../integrations/meta';
-import { isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer } from '../../integrations/cloudinary';
+import { cloudinaryVariant, isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer } from '../../integrations/cloudinary';
 import type { MediaDoc } from './media.model';
 
 export interface UploadMediaInput {
@@ -121,12 +121,27 @@ const inFlightFetches = new Map<string, Promise<{ buffer: Buffer; mimeType: stri
 export async function getMediaBytesForTenant(
   tenantId: string,
   mediaId: string,
+  /**
+   * Longest edge to serve, when the file is an image held at Cloudinary.
+   *
+   * A chat bubble is a few hundred pixels wide and was being handed the
+   * full photo out of someone's camera roll — several megabytes, on a
+   * phone, on mobile data, for something displayed at a fraction of its
+   * size. Cloudinary resizes from the URL, so asking for a bound costs
+   * nothing extra.
+   *
+   * Ignored for anything not served from Cloudinary. There is no image
+   * library in this process, and adding one to resize the handful of files
+   * held directly in Mongo would be a large dependency for a small case —
+   * those are served whole, which is correct, just bigger.
+   */
+  maxWidth?: number,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
-  const key = `${tenantId}:${mediaId}`;
+  const key = `${tenantId}:${mediaId}:${maxWidth ?? 'full'}`;
   const inFlight = inFlightFetches.get(key);
   if (inFlight) return inFlight;
 
-  const fetch = fetchMediaBytes(tenantId, mediaId).finally(() => {
+  const fetch = fetchMediaBytes(tenantId, mediaId, maxWidth).finally(() => {
     inFlightFetches.delete(key);
   });
   inFlightFetches.set(key, fetch);
@@ -136,6 +151,7 @@ export async function getMediaBytesForTenant(
 async function fetchMediaBytes(
   tenantId: string,
   mediaId: string,
+  maxWidth?: number,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   const media = await findMediaWithBytesByIdAndTenant(mediaId, tenantId);
   if (!media) {
@@ -153,7 +169,11 @@ async function fetchMediaBytes(
 
   if (media.storageRef.startsWith('https://')) {
     try {
-      const buffer = await fetchCloudinaryBuffer(media.storageRef);
+      const source =
+        maxWidth && media.mimeType.startsWith('image/')
+          ? cloudinaryVariant(media.storageRef, maxWidth)
+          : media.storageRef;
+      const buffer = await fetchCloudinaryBuffer(source);
       return { buffer, mimeType: media.mimeType };
     } catch (err) {
       logger.warn({ err, mediaId }, 'Cloudinary fetch failed for cached media — falling back to Meta');

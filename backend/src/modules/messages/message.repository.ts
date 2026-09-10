@@ -69,6 +69,59 @@ function escapeRegex(input: string): string {
  * requesting the next page with the previous page's oldest `_id` as cursor
  * — the full history is never fetched or held in memory at once.
  */
+/**
+ * Several messages by id, within one conversation.
+ *
+ * Scoped to the conversation as well as the tenant because the only
+ * caller is the guest view, where the ids come from `replyToMessageId` on
+ * rows the customer can see — but a quote pointing anywhere else must
+ * resolve to nothing rather than to a message from a different chat.
+ */
+export async function findMessagesByIds(
+  tenantId: string,
+  conversationId: string,
+  ids: string[],
+): Promise<MessageLean[]> {
+  const valid = ids.filter((id) => Types.ObjectId.isValid(id));
+  if (valid.length === 0) return [];
+  return Message.find({
+    _id: { $in: valid },
+    tenantId,
+    conversationId,
+    deletedAt: { $exists: false },
+  }).lean<MessageLean[]>();
+}
+
+/**
+ * Clears whatever reaction the customer had on one message.
+ *
+ * Soft-deleted rather than removed, matching how every other message in
+ * this collection disappears — `deletedAt` is what the list filter already
+ * excludes, so nothing else has to learn about reactions to stop showing
+ * one.
+ *
+ * Scoped to direction IN: an agent's reaction on the same message is
+ * theirs and is not the customer's to clear.
+ */
+export async function deleteGuestReactions(
+  tenantId: string,
+  conversationId: string,
+  targetMessageId: string,
+): Promise<void> {
+  if (!Types.ObjectId.isValid(targetMessageId)) return;
+  await Message.updateMany(
+    {
+      tenantId,
+      conversationId,
+      type: 'reaction',
+      direction: 'IN',
+      replyToMessageId: targetMessageId,
+      deletedAt: { $exists: false },
+    },
+    { $set: { deletedAt: new Date() } },
+  );
+}
+
 export async function listMessagesByConversation(
   tenantId: string,
   conversationId: string,

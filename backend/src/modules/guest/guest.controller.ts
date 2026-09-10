@@ -25,8 +25,8 @@ export const listGuestMessagesHandler = asyncHandler(async (req: Request, res: R
 
 export const postGuestMessageHandler = asyncHandler(async (req: Request, res: Response) => {
   const guest = getGuestContext(req);
-  const { text } = req.body as { text: string };
-  res.status(201).json({ success: true, data: await guestService.postGuestMessage(guest, text) });
+  const { text, replyToMessageId } = req.body as { text: string; replyToMessageId?: string };
+  res.status(201).json({ success: true, data: await guestService.postGuestMessage(guest, text, replyToMessageId) });
 });
 
 /**
@@ -45,6 +45,12 @@ export const getGuestIceHandler = asyncHandler(async (req: Request, res: Respons
     success: true,
     data: { iceServers: buildIceServers(), hasTurn: hasTurnConfigured() },
   });
+});
+
+export const postGuestReactionHandler = asyncHandler(async (req: Request, res: Response) => {
+  const guest = getGuestContext(req);
+  const { messageId, emoji } = req.body as { messageId: string; emoji: string };
+  res.status(200).json({ success: true, data: await guestService.postGuestReaction(guest, messageId, emoji) });
 });
 
 export const markGuestReadHandler = asyncHandler(async (req: Request, res: Response) => {
@@ -144,13 +150,28 @@ export const uploadGuestMediaHandler = asyncHandler(async (req: Request, res: Re
   res.status(201).json({ success: true, data: sent, meta: { failed } });
 });
 
+/**
+ * Widths the media route will serve.
+ *
+ * A fixed set rather than any number the client asks for: each distinct
+ * width is a separate Cloudinary transformation and a separate cached
+ * object, so an open parameter lets anyone with a link generate unbounded
+ * variants of the same file.
+ */
+const ALLOWED_MEDIA_WIDTHS = new Set([480, 960]);
+
 export const getGuestMediaHandler = asyncHandler(async (req: Request, res: Response) => {
   const guest = getGuestContext(req);
-  const { buffer, mimeType } = await getGuestMediaBytes(guest, req.params.id as string);
+  const requested = Number(req.query.w);
+  const maxWidth = ALLOWED_MEDIA_WIDTHS.has(requested) ? requested : undefined;
+  const { buffer, mimeType } = await getGuestMediaBytes(guest, req.params.id as string, maxWidth);
 
   // A media id names one immutable file, so the browser never needs to ask
   // twice. Private because it is one customer's conversation, not
   // something a shared cache should hold.
   res.setHeader('Cache-Control', 'private, max-age=86400, immutable');
+  // Two URLs for one media id now differ only by the query string, so the
+  // width has to be part of what a cache keys on.
+  res.setHeader('Vary', 'Accept-Encoding');
   res.type(mimeType).send(buffer);
 });

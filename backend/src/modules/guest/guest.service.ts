@@ -14,7 +14,12 @@ import {
 } from '../conversations/conversation.repository';
 import { resolveSendingPhoneNumberId } from '../conversations/conversation.service';
 import { visibleWhatsAppPhoneNumberId } from '../conversations/conversation.access';
-import { createMessage, listMessagesByConversation } from '../messages/message.repository';
+import {
+  createMessage,
+  deleteGuestReactions,
+  findMessagesByIds,
+  listMessagesByConversation,
+} from '../messages/message.repository';
 import { Message, type MessageLean } from '../messages/message.model';
 import { pushIncomingMessage } from '../notifications/push.service';
 import { getRealtimeEmitter } from '../../realtime/events';
@@ -53,6 +58,22 @@ export interface GuestMessageView {
   /** Present when there is an attachment — the id the media route is asked for. */
   mediaId?: string;
   createdAt: string;
+  /**
+   * The message this one answers, as a preview rather than a reference.
+   *
+   * Sent inline because the quoted message is very often older than the
+   * page the customer is looking at — resolving an id client-side would
+   * mean either fetching the whole thread or showing an empty grey box
+   * above every reply to something from last week.
+   */
+  replyTo?: {
+    id: string;
+    from: 'me' | 'business';
+    /** One line: the text, or a bracketed type for a photo or a recording. */
+    preview: string;
+  };
+  /** Emoji reactions on this message, most-used first. */
+  reactions?: { emoji: string; mine: boolean }[];
 }
 
 /**
@@ -72,6 +93,69 @@ function toGuestMessage(doc: MessageLean): GuestMessageView {
     mediaId: doc.mediaId ? String(doc.mediaId) : undefined,
     createdAt: doc.createdAt.toISOString(),
   };
+}
+
+/** One line standing in for a message inside a quote. */
+function previewOf(doc: MessageLean): string {
+  if (doc.text) return doc.text;
+  if (doc.type === 'image') return '[photo]';
+  if (doc.type === 'audio') return '[voice message]';
+  return `[${doc.type}]`;
+}
+
+/**
+ * Turns a page of stored rows into what the customer sees.
+ *
+ * Reactions live in this collection as ordinary messages — type
+ * 'reaction', the emoji in `text`, the target in `replyToMessageId` — so
+ * they have to be folded onto the messages they belong to and removed from
+ * the list, or every thumbs-up would render as its own bubble.
+ *
+ * Quotes are resolved from whatever is on the page first, and only the
+ * targets still missing are fetched. A reply to the message directly above
+ * it — which is most replies — then costs no query at all.
+ */
+async function toGuestMessagePage(
+  tenantId: string,
+  conversationId: string,
+  docs: MessageLean[],
+): Promise<GuestMessageView[]> {
+  const reactions = docs.filter((d) => d.type === 'reaction' && d.replyToMessageId);
+  const visible = docs.filter((d) => d.type !== 'reaction');
+
+  const onPage = new Map(docs.map((d) => [String(d._id), d]));
+  const missing = visible
+    .filter((d) => d.replyToMessageId && !onPage.has(String(d.replyToMessageId)))
+    .map((d) => String(d.replyToMessageId));
+
+  if (missing.length > 0) {
+    const fetched = await findMessagesByIds(tenantId, conversationId, [...new Set(missing)]);
+    for (const doc of fetched) onPage.set(String(doc._id), doc);
+  }
+
+  const byTarget = new Map<string, { emoji: string; mine: boolean }[]>();
+  for (const r of reactions) {
+    if (!r.text) continue;
+    const target = String(r.replyToMessageId);
+    const list = byTarget.get(target) ?? [];
+    list.push({ emoji: r.text, mine: r.direction === 'IN' });
+    byTarget.set(target, list);
+  }
+
+  return visible.map((doc) => {
+    const view = toGuestMessage(doc);
+    const quoted = doc.replyToMessageId ? onPage.get(String(doc.replyToMessageId)) : undefined;
+    if (quoted) {
+      view.replyTo = {
+        id: String(quoted._id),
+        from: quoted.direction === 'IN' ? 'me' : 'business',
+        preview: previewOf(quoted),
+      };
+    }
+    const emoji = byTarget.get(String(doc._id));
+    if (emoji && emoji.length > 0) view.reactions = emoji;
+    return view;
+  });
 }
 
 export async function resolveGuestContextFromToken(token: string): Promise<GuestContext> {
@@ -290,7 +374,10 @@ export async function listGuestMessages(
     cursor: opts.cursor,
     limit: opts.limit,
   });
-  return { items: page.items.map(toGuestMessage), nextCursor: page.nextCursor };
+  return {
+    items: await toGuestMessagePage(guest.tenantId, guest.conversationId, page.items),
+    nextCursor: page.nextCursor,
+  };
 }
 
 /**
@@ -301,7 +388,11 @@ export async function listGuestMessages(
  * so the agent reads one conversation rather than two half-conversations
  * side by side. It does NOT go to Meta: the customer is already here.
  */
-export async function postGuestMessage(guest: GuestContext, text: string): Promise<GuestMessageView> {
+export async function postGuestMessage(
+  guest: GuestContext,
+  text: string,
+  replyToMessageId?: string,
+): Promise<GuestMessageView> {
   const [conversation, phoneNumber, contact] = await Promise.all([
     findConversationByIdAndTenant(guest.conversationId, guest.tenantId),
     findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId),
@@ -310,6 +401,12 @@ export async function postGuestMessage(guest: GuestContext, text: string): Promi
   if (!conversation) {
     throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'This conversation no longer exists');
   }
+
+  // The quoted message must be one from this conversation. The id comes
+  // from a client that is otherwise trusted only for its own token, and a
+  // reply pointing at someone else's message would put a line of their
+  // thread on this customer's screen.
+  const quoted = await resolveQuotedMessage(guest, replyToMessageId);
 
   const message = await createMessage({
     tenantId: guest.tenantId,
@@ -320,6 +417,7 @@ export async function postGuestMessage(guest: GuestContext, text: string): Promi
     direction: 'IN',
     type: 'text',
     text,
+    replyToMessageId: quoted ? String(quoted._id) : undefined,
     status: 'DELIVERED',
   });
 
@@ -342,7 +440,90 @@ export async function postGuestMessage(guest: GuestContext, text: string): Promi
     text,
   });
 
-  return toGuestMessage(message as unknown as MessageLean);
+  const view = toGuestMessage(message as unknown as MessageLean);
+  if (quoted) {
+    view.replyTo = {
+      id: String(quoted._id),
+      from: quoted.direction === 'IN' ? 'me' : 'business',
+      preview: previewOf(quoted),
+    };
+  }
+  return view;
+}
+
+/**
+ * The message a reply or reaction points at, or nothing.
+ *
+ * Absent rather than an error when the id does not resolve: the usual
+ * reason is that the agent deleted the message between the customer
+ * reading it and answering it, and refusing to accept the reply at that
+ * point loses what they typed over something they cannot see or fix. The
+ * reply lands without its quote instead.
+ */
+async function resolveQuotedMessage(
+  guest: GuestContext,
+  messageId?: string,
+): Promise<MessageLean | null> {
+  if (!messageId) return null;
+  const [found] = await findMessagesByIds(guest.tenantId, guest.conversationId, [messageId]);
+  return found ?? null;
+}
+
+/**
+ * The customer reacting to a message.
+ *
+ * Stored the way the agent side already stores reactions — a row of type
+ * 'reaction' whose text is the emoji and whose replyToMessageId is the
+ * target — so one collection holds both, and the agent app renders a
+ * customer's reaction with the code it already has.
+ *
+ * One reaction per customer per message, like the app it is modelled on:
+ * reacting again replaces, and an empty emoji removes. Both are handled by
+ * clearing whatever they had first, so a double tap can never leave two.
+ */
+export async function postGuestReaction(
+  guest: GuestContext,
+  messageId: string,
+  emoji: string,
+): Promise<{ messageId: string; emoji: string | null }> {
+  const target = await resolveQuotedMessage(guest, messageId);
+  if (!target) {
+    throw ApiError.notFound('MESSAGE_NOT_FOUND', 'That message is no longer here.');
+  }
+
+  await deleteGuestReactions(guest.tenantId, guest.conversationId, messageId);
+
+  if (emoji.length === 0) {
+    // Nothing is emitted for a removal. There is no message-deleted event
+    // anywhere in this system — the agent app picks the change up on its
+    // next fetch — and inventing a half-wired one for this single case
+    // would leave a second way for messages to vanish that only reactions
+    // ever use.
+    return { messageId, emoji: null };
+  }
+
+  const phoneNumber = await findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId);
+  const row = await createMessage({
+    tenantId: guest.tenantId,
+    conversationId: guest.conversationId,
+    recipientPhone: phoneNumber?.displayPhoneNumber ?? '',
+    direction: 'IN',
+    type: 'reaction',
+    text: emoji,
+    replyToMessageId: messageId,
+    status: 'DELIVERED',
+  });
+
+  // Not recordGuestInboundActivity: a reaction is not a new message, and
+  // bumping the chat list with "[reaction]" every time someone taps a
+  // thumbs-up would bury the actual conversation.
+  getRealtimeEmitter().emitMessageNew(
+    guest.tenantId,
+    toRealtimeMessage(row),
+    guest.whatsappPhoneNumberId,
+  );
+
+  return { messageId, emoji };
 }
 
 /**
