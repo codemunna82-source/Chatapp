@@ -302,12 +302,27 @@ export async function changePassword(
   user.passwordHash = await hashPassword(newPassword);
   await user.save();
 
-  // Revoke every outstanding refresh token for this user — a password
-  // change should end every other session.
+  // A password change should end every other session.
+  await revokeAllSessionsForUser(userId, tenantId);
+
+  await recordAudit({ tenantId, actorUserId: userId, action: 'auth.change_password' });
+}
+
+/**
+ * Ends every session this user currently holds.
+ *
+ * Pulled out of changePassword so the admin-driven reset in
+ * user.service.ts can call the same thing. A password that changes while
+ * the old refresh tokens keep working is not a password change from the
+ * point of view of whoever still holds one — which is precisely the
+ * person an admin reset is usually aimed at.
+ *
+ * Access tokens already issued still work until they expire; the refresh
+ * chain is what stops the session being renewed past that.
+ */
+export async function revokeAllSessionsForUser(userId: string, tenantId: string): Promise<void> {
   await RefreshToken.updateMany(
     { userId, tenantId, revokedAt: null },
     { $set: { revokedAt: new Date() } },
   );
-
-  await recordAudit({ tenantId, actorUserId: userId, action: 'auth.change_password' });
 }

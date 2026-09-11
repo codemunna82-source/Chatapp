@@ -8,6 +8,7 @@ import {
   updateUserSchema,
   listUsersQuerySchema,
   userIdParamSchema,
+  resetUserPasswordSchema,
 } from './user.validation';
 import { AVATAR_MAX_SIZE_BYTES } from './user.service';
 import {
@@ -18,6 +19,7 @@ import {
   disableUserHandler,
   updateOwnAvatarHandler,
   getUserAvatarHandler,
+  resetUserPasswordHandler,
 } from './user.controller';
 
 export const userRouter = Router();
@@ -45,5 +47,13 @@ userRouter.patch(
   '/:id',
   validate({ params: userIdParamSchema, body: updateUserSchema }),
   updateUserHandler,
+);
+// Its own route rather than a field on the PATCH above: see
+// resetUserPasswordSchema for why a password must not travel through the
+// generic update path.
+userRouter.post(
+  '/:id/password',
+  validate({ params: userIdParamSchema, body: resetUserPasswordSchema }),
+  resetUserPasswordHandler,
 );
 userRouter.delete('/:id', validate({ params: userIdParamSchema }), disableUserHandler);

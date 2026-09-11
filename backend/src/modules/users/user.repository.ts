@@ -83,6 +83,8 @@ export interface UpdateUserPatch {
   phone?: string;
   /** `null` clears the assignment; omitted leaves it untouched. */
   whatsappPhoneNumberId?: string | null;
+  /** Set only by setUserPasswordHash — never reachable from a request body. */
+  passwordHash?: string;
 }
 
 /**
@@ -132,6 +134,24 @@ export async function updateUserByIdAndTenant(
   // failed conditional is a security bug, not a performance one.
   invalidateAuthContext(id, tenantId);
   return updated;
+}
+
+/**
+ * Writes a new password hash, chosen by an admin rather than the account
+ * holder.
+ *
+ * Goes through updateUserByIdAndTenant rather than its own findOneAndUpdate
+ * so the cached auth context is dropped the same way every other write to
+ * this document drops it. passwordHash is `select: false`, so the returned
+ * document does not carry it — which is what we want, since the caller
+ * hands its result to toPublicUser.
+ */
+export async function setUserPasswordHash(
+  id: string,
+  tenantId: string,
+  passwordHash: string,
+): Promise<UserDoc | null> {
+  return updateUserByIdAndTenant(id, tenantId, { passwordHash });
 }
 
 /** Soft-disable — never hard-delete a user, to preserve audit/message history integrity. */

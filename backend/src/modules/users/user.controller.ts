@@ -34,6 +34,17 @@ export const updateUserHandler = asyncHandler(async (req: Request, res: Response
   res.status(200).json({ success: true, data: user });
 });
 
+export const resetUserPasswordHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const user = await userService.resetUserPasswordForTenant(
+    auth.tenantId,
+    auth.userId,
+    req.params.id as string,
+    (req.body as { password: string }).password,
+  );
+  res.status(200).json({ success: true, data: user });
+});
+
 export const disableUserHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const user = await userService.disableUserForTenant(auth.tenantId, auth.userId, req.params.id as string);

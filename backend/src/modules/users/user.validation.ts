@@ -77,3 +77,20 @@ export const listUsersQuerySchema = z.object({
 export const userIdParamSchema = z.object({
   id: z.string().min(1),
 });
+
+/**
+ * An admin setting someone's password for them.
+ *
+ * Deliberately NOT part of updateUserSchema. updateUserForTenant writes
+ * its whole patch into the audit log's `metadata` field, so a password
+ * folded into that patch would be stored in plaintext in a collection
+ * built to be read — the reset therefore gets its own route, its own
+ * service call, and an audit entry that records only that it happened.
+ *
+ * No current-password check here, unlike changePassword: the point of
+ * this route is the person who forgot theirs. The MASTER_ADMIN guard on
+ * the router is what stands in for it.
+ */
+export const resetUserPasswordSchema = z.object({
+  password: z.string().min(8, 'At least 8 characters').max(200),
+});

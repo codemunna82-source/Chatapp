@@ -1,6 +1,7 @@
 import { ApiError } from '../../lib/ApiError';
 import { normalizePhone } from '../../lib/phone';
 import { hashPassword } from '../../lib/password';
+import { revokeAllSessionsForUser } from '../auth/auth.service';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './user.repository';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
@@ -177,6 +178,54 @@ export async function updateUserForTenant(
     targetId: user._id,
     metadata: normalizedPatch,
   });
+  return toPublicUser(user);
+}
+
+/**
+ * An admin setting a new password for someone who cannot sign in.
+ *
+ * Separate from changePassword, which demands the current password: the
+ * whole reason this exists is the person who has lost theirs. Until it did,
+ * a mistyped password at creation time made an account permanently
+ * unreachable — there was no edit, no reset, and no recovery.
+ *
+ * Two things it deliberately does:
+ *
+ * 1. Revokes every outstanding refresh token for that user. A reset that
+ *    left old sessions alive would not actually take access away from
+ *    whoever the admin is resetting it away from, which is half the
+ *    reason an admin reaches for it.
+ * 2. Records the reset in the audit log WITHOUT the password. The generic
+ *    update path stores its whole patch in audit metadata; a password
+ *    routed through there would sit in plaintext in a collection built to
+ *    be read.
+ *
+ * Resetting your own password here is allowed and signs you out too —
+ * that is the honest consequence of step 1, not an oversight.
+ */
+export async function resetUserPasswordForTenant(
+  tenantId: string,
+  actorUserId: string,
+  id: string,
+  password: string,
+): Promise<PublicUser> {
+  const passwordHash = await hashPassword(password);
+  const user = await repo.setUserPasswordHash(id, tenantId, passwordHash);
+  if (!user) {
+    throw ApiError.notFound('USER_NOT_FOUND', 'User not found');
+  }
+
+  await revokeAllSessionsForUser(String(user._id), tenantId);
+
+  await recordAudit({
+    tenantId,
+    actorUserId,
+    action: 'user.reset_password',
+    targetType: 'User',
+    targetId: user._id,
+    metadata: { selfService: String(user._id) === actorUserId },
+  });
+
   return toPublicUser(user);
 }
 
