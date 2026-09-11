@@ -6,6 +6,8 @@ import { createServer } from 'node:http';
 import { createApp } from './app';
 import { connectMongo } from './lib/mongoose';
 import { env } from './config/env';
+import { hasTurnConfigured } from './modules/calls/webCall.service';
+import { getPushGateway } from './integrations/fcm';
 import { logger } from './lib/logger';
 import { isRedisConfigured, closeRedisConnection } from './queues/connection';
 import { startWebhookWorker, stopWebhookWorker } from './queues/webhook.queue';
@@ -16,6 +18,37 @@ import {
 } from './queues/subscriptionExpiry.queue';
 import { startSocketServer, stopSocketServer } from './sockets/socketServer';
 import { migrateWabaIndexAtBoot } from './modules/whatsapp/wabaIndexMigration';
+
+/**
+ * What this deployment can and cannot do, said once at boot.
+ *
+ * A missing integration key does not stop the server starting — that is
+ * deliberate, since a workspace with no Firebase should still serve chats
+ * — but it means the feature is silently off, and the failure surfaces
+ * hours later as "messages never arrive" with nothing in the logs to
+ * explain it. One line at startup turns that into something an operator
+ * can see before they go looking.
+ *
+ * Booleans only. Never a value, never a length, never a prefix: this ends
+ * up in a log aggregator, and a secret in a log is a secret published.
+ */
+function logConfigReadiness(): void {
+  logger.info(
+    {
+      metaLive: !env.META_MOCK_MODE,
+      metaAccessToken: env.META_ACCESS_TOKEN.length > 0,
+      metaAppSecret: env.META_APP_SECRET.length > 0,
+      metaVerifyToken: env.META_VERIFY_TOKEN.length > 0,
+      metaAppId: env.META_APP_ID.length > 0,
+      metaRegisterPin: env.META_REGISTER_PIN.length > 0,
+      guestLinkBaseUrl: env.GUEST_LINK_BASE_URL.length > 0,
+      pushFcm: getPushGateway().isConfigured(),
+      turn: hasTurnConfigured(),
+      cloudinary: Boolean(env.CLOUDINARY_URL),
+    },
+    'Integration readiness — false means that feature is off, not that the server is broken',
+  );
+}
 
 async function main(): Promise<void> {
   await connectMongo();
@@ -60,6 +93,7 @@ async function main(): Promise<void> {
 
   httpServer.listen(env.PORT, () => {
     logger.info({ port: env.PORT, env: env.NODE_ENV }, 'VOXO backend listening (HTTP + Socket.IO)');
+    logConfigReadiness();
   });
 
   const shutdown = (signal: string) => {
