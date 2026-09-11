@@ -24,7 +24,27 @@ import { selectionFeedback } from '../../utils/haptics';
  * field accepts is deliberately wider.
  */
 const loginSchema = z.object({
-  identifier: z.string().trim().min(1, 'Enter your phone number'),
+  identifier: z
+    .string()
+    .trim()
+    .min(1, 'Enter your phone number')
+    /**
+     * Caught here because nothing downstream can catch it.
+     *
+     * A number typed the way people say it — "8210956588" — is turned
+     * into "+8210956588" by the server's normaliser, which prepends a
+     * plus to bare digits. That is a valid E.164 number in another
+     * country, so it is not rejected; it simply matches no account, and
+     * the only honest answer to a failed lookup is "invalid phone number
+     * or password". The person is then told their password is wrong when
+     * their password was fine.
+     *
+     * An email passes through: it is the other thing this field takes.
+     */
+    .refine(
+      (v) => v.includes('@') || v.startsWith('+') || v.replace(/[\s\-().]/g, '').startsWith('00'),
+      'Add your country code, e.g. +91 before the number',
+    ),
   password: z.string().min(1, 'Password is required'),
 });
 type LoginForm = z.infer<typeof loginSchema>;
