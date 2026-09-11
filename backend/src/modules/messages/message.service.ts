@@ -33,7 +33,16 @@ export type SendableMessageType = 'text' | 'template' | 'reaction' | SendableMed
 export interface SendOutboundMessageInput {
   tenantId: string;
   conversationId: string;
-  senderId: string;
+  /**
+   * The agent who sent this, when a person did.
+   *
+   * Optional because not every outbound message has an author: the
+   * automatic private-chat link (see guestAutoReply.service.ts) is sent by
+   * the system, and stamping an agent's id on it would put their name on a
+   * message they never wrote — the agent app reads this field to decide
+   * whose bubble it is.
+   */
+  senderId?: string;
   type: SendableMessageType;
   text?: string;
   mediaId?: string; // our Media._id — must already be uploaded to Meta (has metaMediaId)
