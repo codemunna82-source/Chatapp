@@ -31,10 +31,21 @@ const BAR_HEIGHTS = Array.from({ length: BAR_COUNT }, (_, i) => {
  */
 export function AudioMessageBubble({
   mediaId,
+  localUri: providedUri,
   tint,
   onLongPress,
 }: {
-  mediaId: string;
+  mediaId?: string;
+  /**
+   * A recording that is still uploading, played straight from disk.
+   *
+   * Without this a voice note had nothing to render between tapping send
+   * and the upload finishing — the bubble's own branch in MessageBubble
+   * required a mediaId — so on a slow connection the note either sat in
+   * the composer or vanished for a minute. Same treatment photos already
+   * had via MediaImage's localUri.
+   */
+  localUri?: string;
   tint: string;
   /** Forwarded to the row's Pressable so long-press reaches the bubble's
    *  action sheet instead of being swallowed here. */
@@ -51,7 +62,10 @@ export function AudioMessageBubble({
   // wide enough for the 22 bars plus the play button, capped so it can't
   // overflow the bubble's own 80% ceiling on a small screen.
   const rowMinWidth = Math.min(Math.max(width * 0.5, 180), 240);
-  const [localUri, setLocalUri] = useState<string | null>(null);
+  const [downloadedUri, setDownloadedUri] = useState<string | null>(null);
+  // The local file wins: a just-recorded note is already on disk, so there
+  // is nothing to fetch and nothing to wait for.
+  const localUri = providedUri ?? downloadedUri;
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(false);
   const [speedIndex, setSpeedIndex] = useState(0);
@@ -90,6 +104,9 @@ export function AudioMessageBubble({
     if (downloading) return;
     setError(false);
     if (!localUri) {
+      // Only reachable for a note that has a server id; a still-uploading
+      // one always has providedUri and never lands here.
+      if (!mediaId) return;
       setDownloading(true);
       try {
         const destination = new File(Paths.cache, `voxo-voice-${mediaId}.m4a`);
@@ -98,7 +115,7 @@ export function AudioMessageBubble({
           idempotent: true,
         });
         autoPlayRef.current = true;
-        setLocalUri(result.uri);
+        setDownloadedUri(result.uri);
       } catch {
         setError(true);
       } finally {

@@ -300,7 +300,6 @@ export function Composer({
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
-  const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [recordedMs, setRecordedMs] = useState(0);
 
@@ -436,31 +435,61 @@ export function Composer({
     if (uri) await deleteFile(uri);
   };
 
+  /**
+   * Sends the take the same way photos are sent: the bubble appears in the
+   * chat immediately and the upload runs behind it.
+   *
+   * It used to hold the recording inside the composer for the whole upload,
+   * with a spinner on the send button — which on a slow connection is the
+   * better part of a minute of a voice note that looks like it has not been
+   * sent, sitting on top of the conversation it belongs in. Photos already
+   * behaved this way; audio was the one that did not.
+   *
+   * The preview is cleared BEFORE the upload rather than after, because
+   * that is what "it has left the composer" means. The local file is kept
+   * until the upload succeeds — it is what the pending bubble plays from,
+   * and it is the only copy if the send fails.
+   */
   const sendRecording = async () => {
     if (!previewUri || sendingRef.current) return;
-    sendingRef.current = true;
     if (!whatsappPhoneNumberId) {
       setVoiceError('This conversation has no connected WhatsApp number yet.');
       return;
     }
-    setVoiceBusy(true);
+    sendingRef.current = true;
     const uri = previewUri;
+    const tempId = `local-voice-${Date.now()}`;
+
+    // Straight into the chat, before the upload even starts.
+    insertPendingMediaMessage(queryClient, conversationId, {
+      tempId,
+      type: 'audio',
+      localUri: uri,
+      replyToMessageId,
+    });
+    setPreviewUri(null);
+    setRecordedMs(0);
+    setVoiceError(null);
+    onSent();
+
     try {
       const uploaded = await uploadMedia.mutateAsync({
         whatsappPhoneNumberId,
         file: { uri, name: `voice-${Date.now()}.m4a`, mimeType: 'audio/mp4' },
       });
+      // The real send brings its own optimistic entry, so drop ours first
+      // rather than leaving two bubbles for one voice note.
+      removeMessageFromCache(queryClient, conversationId, tempId);
       sendMessage.mutate({ type: 'audio', mediaId: uploaded.id, replyToMessageId });
-      setPreviewUri(null);
-      setRecordedMs(0);
-      onSent();
       await deleteFile(uri);
     } catch (err) {
-      // Keep the take on failure so the recording isn't lost — the user can
-      // retry the send or discard it deliberately.
+      // The take is not lost: the bubble goes, and the recording comes back
+      // into the composer so it can be played, retried or discarded. Losing
+      // someone's voice note to a failed upload is not a recoverable error.
+      removeMessageFromCache(queryClient, conversationId, tempId);
+      setPreviewUri(uri);
       setVoiceError(getApiErrorMessage(err, 'Could not send that voice message.'));
     } finally {
-      setVoiceBusy(false);
       sendingRef.current = false;
     }
   };
@@ -568,7 +597,6 @@ export function Composer({
         <View style={styles.row}>
           <Pressable
             onPress={discardRecording}
-            disabled={voiceBusy}
             style={styles.iconButton}
             accessibilityRole="button"
             accessibilityLabel="Delete recording"
@@ -578,7 +606,7 @@ export function Composer({
                 name="trash-outline"
                 size={22}
                 color={colors.danger}
-                style={{ opacity: voiceBusy ? 0.4 : pressed ? 0.5 : 1 }}
+                style={{ opacity: pressed ? 0.5 : 1 }}
               />
             )}
           </Pressable>
@@ -611,17 +639,15 @@ export function Composer({
 
           <Pressable
             onPress={sendRecording}
-            disabled={voiceBusy}
             style={styles.actionTouch}
             accessibilityRole="button"
-            accessibilityState={{ disabled: voiceBusy }}
             accessibilityLabel="Send voice message"
           >
             {({ pressed }) => (
               <View
                 style={[
                   styles.actionCircle,
-                  { backgroundColor: colors.primary, opacity: voiceBusy ? 0.5 : pressed ? 0.6 : 1 },
+                  { backgroundColor: colors.primary, opacity: pressed ? 0.6 : 1 },
                 ]}
               >
                 <Ionicons name="send" size={17} color={colors.textOnPrimary} style={styles.sendGlyph} />

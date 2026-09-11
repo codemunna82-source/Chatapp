@@ -101,8 +101,15 @@ function MessageContent({
   if (message.type === 'video' && (message.mediaId || message.localUri)) {
     return <VideoMessageBubble mediaId={message.mediaId} localUri={message.localUri} onLongPress={onLongPress} />;
   }
-  if (message.type === 'audio' && message.mediaId) {
-    return <AudioMessageBubble mediaId={message.mediaId} tint={textColor} onLongPress={onLongPress} />;
+  if (message.type === 'audio' && (message.mediaId || message.localUri)) {
+    return (
+      <AudioMessageBubble
+        mediaId={message.mediaId}
+        localUri={message.localUri}
+        tint={textColor}
+        onLongPress={onLongPress}
+      />
+    );
   }
   if (message.type === 'document' && message.mediaId) {
     return <MediaFileChip mediaId={message.mediaId} type={message.type} onLongPress={onLongPress} />;
