@@ -7,7 +7,7 @@ import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { ApiError } from '../../lib/ApiError';
 import { env } from '../../config/env';
-import { Tenant, DEFAULT_AUTO_GUEST_LINK_MESSAGE } from './tenant.model';
+import { Tenant } from './tenant.model';
 
 /**
  * Workspace-wide settings. MASTER_ADMIN only — these change what every
@@ -17,13 +17,32 @@ export const tenantRouter = Router();
 
 tenantRouter.use(requireAuth, requireRole('MASTER_ADMIN'));
 
-const autoGuestLinkSchema = z.object({
-  enabled: z.boolean(),
-  // Bounded to leave room under WhatsApp's own text limit once the URL is
-  // substituted in — a message that Meta rejects at send time would fail
-  // silently inside the webhook handler, where nobody is watching.
-  message: z.string().trim().min(1).max(900).optional(),
-});
+const autoGuestLinkSchema = z
+  .object({
+    enabled: z.boolean(),
+    templateName: z.string().trim().min(1).max(512).optional(),
+    templateLanguage: z.string().trim().min(2).max(16).optional(),
+    bodyVariable: z.enum(['none', 'customer_name']).optional(),
+  })
+  // Refused here rather than at send time, where the failure happens inside
+  // the webhook handler with nobody watching: an enabled auto-reply with no
+  // template named would look switched on and send nothing forever.
+  .refine((body) => !body.enabled || (body.templateName && body.templateLanguage), {
+    message: 'Name the approved template and its language before turning this on',
+    path: ['templateName'],
+  });
+
+/**
+ * The address a template's URL button must be built on.
+ *
+ * Returned so the admin screen can print the exact string to paste into
+ * WhatsApp Manager. Meta lets a template URL vary only in a suffix, so the
+ * base has to be right before the template is submitted for review — and
+ * getting it wrong is discovered days later, after approval.
+ */
+function guestLinkUrlPattern(): string | null {
+  return env.GUEST_LINK_BASE_URL ? `${env.GUEST_LINK_BASE_URL}/c/{{1}}` : null;
+}
 
 tenantRouter.get(
   '/settings',
@@ -38,12 +57,15 @@ tenantRouter.get(
         name: tenant.name,
         autoGuestLink: {
           enabled: tenant.autoGuestLink?.enabled ?? false,
-          message: tenant.autoGuestLink?.message ?? DEFAULT_AUTO_GUEST_LINK_MESSAGE,
+          templateName: tenant.autoGuestLink?.templateName ?? '',
+          templateLanguage: tenant.autoGuestLink?.templateLanguage ?? '',
+          bodyVariable: tenant.autoGuestLink?.bodyVariable ?? 'none',
         },
         // Without this the feature cannot work at all, and the admin has no
         // way to find that out short of turning it on and waiting for a
         // customer to receive nothing.
         guestLinkConfigured: env.GUEST_LINK_BASE_URL.length > 0,
+        guestLinkUrlPattern: guestLinkUrlPattern(),
       },
     });
   }),
@@ -68,7 +90,11 @@ tenantRouter.patch(
       {
         $set: {
           'autoGuestLink.enabled': body.enabled,
-          ...(body.message ? { 'autoGuestLink.message': body.message } : {}),
+          ...(body.templateName ? { 'autoGuestLink.templateName': body.templateName } : {}),
+          ...(body.templateLanguage
+            ? { 'autoGuestLink.templateLanguage': body.templateLanguage }
+            : {}),
+          ...(body.bodyVariable ? { 'autoGuestLink.bodyVariable': body.bodyVariable } : {}),
         },
       },
       { new: true },
@@ -81,7 +107,9 @@ tenantRouter.patch(
       success: true,
       data: {
         enabled: tenant.autoGuestLink?.enabled ?? false,
-        message: tenant.autoGuestLink?.message ?? DEFAULT_AUTO_GUEST_LINK_MESSAGE,
+        templateName: tenant.autoGuestLink?.templateName ?? '',
+        templateLanguage: tenant.autoGuestLink?.templateLanguage ?? '',
+        bodyVariable: tenant.autoGuestLink?.bodyVariable ?? 'none',
       },
     });
   }),

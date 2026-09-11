@@ -18,20 +18,44 @@ const tenantSchema = new Schema(
      * phone. That is an owner's decision, not a default someone discovers
      * after it has already gone out a hundred times.
      *
-     * `message` is the text sent, with {{link}} standing in for the URL.
-     * Stored per tenant rather than hard-coded because the wording is the
-     * business's voice, and because a customer who is asked to tap an
-     * unfamiliar link deserves to be told why in that business's own words.
+     * Sent as an APPROVED WHATSAPP TEMPLATE, not as text this server
+     * composes. Meta renders a template's URL button as a real tappable
+     * control with the address hidden behind a label, which is what makes
+     * a stranger willing to tap it — free-form text can only carry a bare
+     * link. It also means the wording lives in WhatsApp Manager, where it
+     * has been reviewed, rather than in a field here that could send
+     * anything.
+     *
+     * The template's button URL must be configured in WhatsApp Manager
+     * with a dynamic suffix — `https://your-app/c/{{1}}` — because that is
+     * the only part of a template URL Meta lets a send vary. The session
+     * token goes into that one variable; see guestAutoReply.service.ts.
      */
     autoGuestLink: {
       type: new Schema(
         {
           enabled: { type: Boolean, default: false, required: true },
-          message: { type: String, trim: true, maxlength: 900 },
+          /** The approved template's name, exactly as it appears in WhatsApp Manager. */
+          templateName: { type: String, trim: true, maxlength: 512 },
+          /** Meta's language code for the approved copy, e.g. "en" or "en_US". */
+          templateLanguage: { type: String, trim: true, maxlength: 16 },
+          /**
+           * What fills the template body's {{1}}, when it has one.
+           *
+           * 'none' for a body with no variables. Sending a parameter to a
+           * template that takes none makes Meta reject the whole send, and
+           * omitting one it needs does the same — so this has to be stated
+           * rather than guessed.
+           */
+          bodyVariable: {
+            type: String,
+            enum: ['none', 'customer_name'],
+            default: 'none',
+          },
         },
         { _id: false },
       ),
-      default: () => ({ enabled: false }),
+      default: () => ({ enabled: false, bodyVariable: 'none' }),
     },
   },
   { timestamps: true },
@@ -40,23 +64,14 @@ const tenantSchema = new Schema(
 tenantSchema.index({ slug: 1 }, { unique: true });
 
 /**
- * What a customer is sent when nobody has written their own wording.
+ * The index of a template's URL button, as a string, for the send payload.
  *
- * {{link}} is substituted at send time. Kept beside the schema so the
- * default is one string rather than one per caller — the API, the admin
- * form and the sender all need to agree on it.
+ * Always "0": Meta numbers button components by their position among the
+ * template's buttons, and the invitation template has exactly one. Named
+ * rather than inlined so the assumption is visible at the call site, where
+ * a template with a second button would need it changed.
  */
-export const DEFAULT_AUTO_GUEST_LINK_MESSAGE =
-  'Continue this conversation privately in our secure chat window:\n{{link}}';
-
-/** Substitutes {{link}}, appending the URL if the wording left it out. */
-export function renderAutoGuestLinkMessage(template: string | undefined, url: string): string {
-  const text = (template ?? DEFAULT_AUTO_GUEST_LINK_MESSAGE).trim();
-  if (text.includes('{{link}}')) return text.replaceAll('{{link}}', url);
-  // A message without the placeholder would otherwise be sent with no link
-  // in it at all — the one outcome that makes the whole feature pointless.
-  return `${text}\n${url}`;
-}
+export const AUTO_GUEST_LINK_BUTTON_INDEX = '0';
 
 export type TenantDoc = HydratedDocument<InferSchemaType<typeof tenantSchema>>;
 export const Tenant = model('Tenant', tenantSchema);
