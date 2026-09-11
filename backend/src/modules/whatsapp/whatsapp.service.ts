@@ -9,7 +9,7 @@ import { logger } from '../../lib/logger';
 import { getMetaGateway } from '../../integrations/meta';
 import type { MetaCredentials } from '../../integrations/meta';
 import { describeNumberHealth, type NumberHealth } from './numberHealth';
-import { registerPhoneNumber } from '../../integrations/meta/oauth';
+import { registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta/oauth';
 
 /**
  * Turns a stored `accessTokenRef` into the token to actually call Meta with.
@@ -263,6 +263,35 @@ export async function registerNumberForCloudApi(
 
   const credentials = await resolveMetaCredentialsForPhoneNumber(tenantId, numberId);
 
+  // The step the manual path always skipped, and the reason a
+  // hand-registered number could look perfectly configured and still
+  // receive nothing.
+  //
+  // There are two subscriptions and only one of them is in the app
+  // dashboard. Ticking `messages` under Webhook fields says "this app
+  // wants message events"; this says "THIS WhatsApp Business Account
+  // sends its events to that app". Without both, Meta has an app
+  // listening for messages from no accounts at all — a verified callback
+  // URL that is never called.
+  //
+  // Embedded Signup has always done this (see embeddedSignup.service.ts).
+  // Doing it here too means the two paths end in the same state instead
+  // of one of them ending in silence.
+  const account = await WhatsAppAccount.findById(number.whatsappAccountId).select('wabaId').lean();
+  let subscribed = false;
+  if (account?.wabaId) {
+    try {
+      await subscribeAppToWaba(credentials.accessToken, account.wabaId);
+      subscribed = true;
+    } catch (err) {
+      // Not fatal: the number may already be subscribed, or the token may
+      // lack whatsapp_business_management while still being able to send.
+      // Registration below is the more important half, and saying so in
+      // the result beats failing the whole call.
+      logger.warn({ err, wabaId: account.wabaId }, 'subscribed_apps failed during manual registration');
+    }
+  }
+
   try {
     await registerPhoneNumber(credentials.accessToken, number.phoneNumberId);
   } catch (err) {
@@ -270,7 +299,12 @@ export async function registerNumberForCloudApi(
     // Meta says this when the number is already usable. Reporting it as a
     // failure would send an admin looking for a problem they do not have.
     if (/already registered/i.test(message)) {
-      return { registered: true, message: 'This number was already registered for the Cloud API.' };
+      return {
+        registered: true,
+        message: `This number was already registered for the Cloud API.${
+          subscribed ? ' Its WhatsApp account is now subscribed to your app.' : ''
+        }`,
+      };
     }
     throw ApiError.badRequest('WHATSAPP_REGISTER_FAILED', `Meta refused the registration: ${message}`);
   }
@@ -279,7 +313,12 @@ export async function registerNumberForCloudApi(
   // assumed — the point of the screen is to show what Meta thinks, not
   // what we hoped.
   await refreshNumberHealth(number);
-  return { registered: true, message: 'Registered for the Cloud API. It may take a minute to leave "Pending".' };
+  return {
+    registered: true,
+    message: subscribed
+      ? 'Registered, and this WhatsApp account now sends its messages to your app. It may take a minute to leave "Pending".'
+      : 'Registered for the Cloud API. It may take a minute to leave "Pending".',
+  };
 }
 
 export async function registerPhoneNumberForTenant(
