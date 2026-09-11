@@ -14,6 +14,7 @@
  * behind in the first. Nothing here ever creates a tenant.
  *
  *   node dist/scripts/adminAccount.js list
+ *   node dist/scripts/adminAccount.js numbers
  *   node dist/scripts/adminAccount.js set-password <identifier> <password>
  *   node dist/scripts/adminAccount.js set-phone    <identifier> <phone>
  *
@@ -22,6 +23,7 @@
 import mongoose from 'mongoose';
 import { env } from '../config/env';
 import { User } from '../modules/users/user.model';
+import { WhatsAppPhoneNumber } from '../modules/whatsapp/whatsappPhoneNumber.model';
 import { hashPassword } from '../lib/password';
 import { normalizePhone, phoneVariants } from '../lib/phone';
 
@@ -49,6 +51,32 @@ async function list(): Promise<void> {
     console.log(`          tenant   ${String(u.tenantId)}\n`);
   }
   console.log('Sign in with the phone above, or the email if there is no phone.\n');
+}
+
+/**
+ * The WhatsApp numbers this workspace actually holds.
+ *
+ * Worth its own command because the id is what an inbound webhook is
+ * routed by, and a number that looks right in the UI can still be a
+ * leftover demo row — those are created with a phoneNumberId of
+ * "test-phone-…", which Meta will never send. A real one is all digits.
+ */
+async function numbers(): Promise<void> {
+  const rows = await WhatsAppPhoneNumber.find().select('phoneNumberId displayPhoneNumber status tenantId').lean();
+  if (rows.length === 0) {
+    console.log('\nNo WhatsApp numbers. Add one from the admin screen.\n');
+    return;
+  }
+
+  console.log(`\n${rows.length} number(s):\n`);
+  for (const n of rows) {
+    const fake = !/^\d+$/.test(n.phoneNumberId);
+    console.log(`  ${n.displayPhoneNumber}   ${n.status}`);
+    console.log(`          phone_number_id  ${n.phoneNumberId}${fake ? '   ← NOT A REAL META ID (demo row)' : ''}`);
+    console.log(`          tenant           ${String(n.tenantId)}\n`);
+  }
+  console.log('An inbound webhook is matched on phone_number_id. If the id above does');
+  console.log('not match the one in WhatsApp Manager, every message is dropped.\n');
 }
 
 async function setPassword(identifier: string, password: string): Promise<void> {
@@ -93,10 +121,12 @@ async function main(): Promise<void> {
   await mongoose.connect(env.MONGODB_URI);
   try {
     if (command === 'list') await list();
+    else if (command === 'numbers') await numbers();
     else if (command === 'set-password' && a && b) await setPassword(a, b);
     else if (command === 'set-phone' && a && b) await setPhone(a, b);
     else {
       console.log('\n  node dist/scripts/adminAccount.js list');
+      console.log('  node dist/scripts/adminAccount.js numbers');
       console.log('  node dist/scripts/adminAccount.js set-password <email-or-phone> <new-password>');
       console.log('  node dist/scripts/adminAccount.js set-phone    <email-or-phone> <+919876543210>\n');
     }
