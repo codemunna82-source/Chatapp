@@ -124,7 +124,16 @@ export function RealtimeSync({
     (message) => {
       upsertMessageInCache(queryClient, message.conversationId, message);
       invalidateConversations();
-      void queryClient.invalidateQueries({ queryKey: queryKeys.conversation(message.conversationId) });
+      // No invalidate for the conversation itself. The server emits
+      // conversation:updated immediately after every message:new (see
+      // webhook.service.ts and message.service.ts), and the handler below
+      // merges that payload straight into the cache — so refetching here
+      // asked the network for something already on its way over the socket.
+      //
+      // It was the single most expensive redundant call in the app: the
+      // conversation endpoint takes three database round trips, and this
+      // fired once per message, uncoalesced, while the user sat in the very
+      // chat it was refetching.
 
       // Only for messages FROM the customer, and only when the user is not
       // already looking at that conversation. An echo of your own send, or
