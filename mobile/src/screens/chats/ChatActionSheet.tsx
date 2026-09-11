@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { selectionFeedback } from '../../utils/haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
@@ -107,7 +108,15 @@ export function ChatActionSheet({
           {actions.map((action) => (
             <Pressable
               key={action.key}
-              onPress={action.onPress}
+              // A tick under the finger before anything else happens. Every
+              // action here closes the sheet and then changes a row behind
+              // it, so without this the only confirmation a tap registered
+              // is the result — and a result is the one thing that cannot
+              // be instant.
+              onPress={() => {
+                selectionFeedback();
+                action.onPress();
+              }}
               style={[styles.row, { borderTopColor: colors.border, paddingHorizontal: spacing.md }]}
               accessibilityRole="button"
               accessibilityLabel={action.label}

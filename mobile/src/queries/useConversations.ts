@@ -1,4 +1,11 @@
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from '@tanstack/react-query';
 import * as conversationsApi from '../api/endpoints/conversations';
 import type { ListConversationsParams } from '../api/endpoints/conversations';
 import type { Conversation, ConversationStatus } from '../api/types';
@@ -60,13 +67,77 @@ export function useDeleteConversation() {
   });
 }
 
+
+/**
+ * Applies a change to a conversation everywhere it is cached, right now.
+ *
+ * Pin, archive and mark-unread used to wait for the server and then
+ * invalidate the whole list — two round trips before anything moved on
+ * screen, which on this deployment is most of a second of a button that
+ * looks broken. They are all small, reversible, single-field changes on a
+ * row the user is looking at, which is exactly the shape an optimistic
+ * update is for.
+ *
+ * Returns a snapshot so the caller can put it back if the server refuses.
+ * Rolling back by refetching would be simpler and wrong: it would leave
+ * the failed state on screen for the length of the refetch.
+ */
+type ConversationsSnapshot = [readonly unknown[], unknown][];
+
+function patchConversationEverywhere(
+  queryClient: ReturnType<typeof useQueryClient>,
+  id: string,
+  patch: Partial<Conversation>,
+): ConversationsSnapshot {
+  // Every list query, whatever its filters — the same chat appears in the
+  // all/pinned/archived views at once, and patching only the visible one
+  // leaves the others to contradict it on the next tab switch.
+  const snapshot: ConversationsSnapshot = queryClient.getQueriesData({
+    queryKey: queryKeys.conversationsAll,
+  });
+
+  queryClient.setQueriesData<InfiniteData<{ items: Conversation[]; nextCursor: string | null }>>(
+    { queryKey: queryKeys.conversationsAll },
+    (old) =>
+      old
+        ? {
+            ...old,
+            pages: old.pages.map((page) => ({
+              ...page,
+              items: page.items.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+            })),
+          }
+        : old,
+  );
+
+  const single = queryKeys.conversation(id);
+  snapshot.push([single, queryClient.getQueryData(single)]);
+  queryClient.setQueryData<Conversation>(single, (old) => (old ? { ...old, ...patch } : old));
+
+  return snapshot;
+}
+
+function restoreConversations(
+  queryClient: ReturnType<typeof useQueryClient>,
+  snapshot: ConversationsSnapshot | undefined,
+): void {
+  if (!snapshot) return;
+  for (const [key, data] of snapshot) queryClient.setQueryData(key, data);
+}
+
 export function usePinConversation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (vars: { id: string; pinned: boolean }) =>
       conversationsApi.setConversationPinned(vars.id, vars.pinned),
+    onMutate: (vars) => ({ snapshot: patchConversationEverywhere(queryClient, vars.id, { pinned: vars.pinned }) }),
+    onError: (_err, _vars, context) => restoreConversations(queryClient, context?.snapshot),
     onSuccess: (conversation) => {
       queryClient.setQueryData(queryKeys.conversation(conversation.id), conversation);
+      // Still invalidated, because pinning REORDERS the list — the patch
+      // above gets the row's state right, but only the server knows where
+      // it now belongs. The reorder arrives a moment later; the state does
+      // not have to wait for it.
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
     },
   });
@@ -77,8 +148,12 @@ export function useArchiveConversation() {
   return useMutation({
     mutationFn: (vars: { id: string; status: ConversationStatus }) =>
       conversationsApi.setConversationStatus(vars.id, vars.status),
+    onMutate: (vars) => ({ snapshot: patchConversationEverywhere(queryClient, vars.id, { status: vars.status }) }),
+    onError: (_err, _vars, context) => restoreConversations(queryClient, context?.snapshot),
     onSuccess: (conversation) => {
       queryClient.setQueryData(queryKeys.conversation(conversation.id), conversation);
+      // Archiving moves the row out of this view entirely, which the patch
+      // cannot do on its own — the filter lives server-side.
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
     },
   });
@@ -89,6 +164,12 @@ export function useMarkConversationUnread() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => conversationsApi.markConversationUnread(id),
+    // manuallyUnread, not unreadCount: the two are deliberately separate on
+    // the model so the badge can keep showing the real number of unread
+    // messages while the row reads as unread. Writing a fake count here
+    // would put a wrong number on screen for the length of the round trip.
+    onMutate: (id) => ({ snapshot: patchConversationEverywhere(queryClient, id, { manuallyUnread: true }) }),
+    onError: (_err, _vars, context) => restoreConversations(queryClient, context?.snapshot),
     onSuccess: (conversation) => {
       queryClient.setQueryData(queryKeys.conversation(conversation.id), conversation);
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
