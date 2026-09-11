@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
-import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
+import Animated, {
+  KeyboardState,
+  useAnimatedKeyboard,
+  useAnimatedStyle,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -154,11 +158,22 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // its height, and while it is down the pad falls back to the navigation
   // bar inset. That also removes the stacked-inset problem - the two can
   // never add together into a dead gap above the keyboard.
+  //
+  // `state` is read alongside `height`, and that is the fix for the dead
+  // gap: leaving this screen with the keyboard up closes the IME, but the
+  // shared height value is left holding its last measurement, so coming
+  // back padded the composer up by a keyboard that is no longer there —
+  // blank space where the keyboard used to be. The height is only honoured
+  // while the keyboard is actually opening or open; in every other state
+  // the pad falls back to the navigation bar inset.
   const keyboard = useAnimatedKeyboard();
   const insets = useSafeAreaInsets();
-  const keyboardPadStyle = useAnimatedStyle(() => ({
-    paddingBottom: Math.max(keyboard.height.value, insets.bottom),
-  }));
+  const keyboardPadStyle = useAnimatedStyle(() => {
+    const up =
+      keyboard.state.value === KeyboardState.OPEN ||
+      keyboard.state.value === KeyboardState.OPENING;
+    return { paddingBottom: up ? Math.max(keyboard.height.value, insets.bottom) : insets.bottom };
+  });
 
 
 
@@ -540,6 +555,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           withinWindow={conversationQuery.data?.withinCustomerServiceWindow ?? true}
           isDemo={conversationQuery.data?.isDemo ?? false}
           guestOnline={guestOnline}
+          guestActive={guestActive}
         />
       ),
       // The header itself stays a fixed navy in both schemes (matches both
@@ -714,12 +730,15 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
                 <InlineBanner message={callError} />
               </View>
             ) : null}
+            {/* Deliberately not a warning any more. Routing a reply through
+                the customer's own chat window is normal operation, not a
+                degraded state — and a yellow banner on top of every
+                conversation taught users to read a working system as a
+                broken one. Where the reply is going is worth saying once,
+                quietly; that it is not going to WhatsApp is not a problem. */}
             {replyingViaWeb ? (
               <View style={styles.callErrorWrap}>
-                <InlineBanner
-                  tone="warning"
-                  message="WhatsApp's 24-hour window has closed. Replies go to the customer's web chat window, not to WhatsApp."
-                />
+                <InlineBanner message="Replies go to the customer's private chat window." />
               </View>
             ) : null}
             <FlashList

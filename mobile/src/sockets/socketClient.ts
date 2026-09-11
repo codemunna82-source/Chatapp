@@ -1,3 +1,4 @@
+import { AppState } from 'react-native';
 import { io, Socket } from 'socket.io-client';
 import { socketUrl } from '../utils/env';
 import { useAuthStore } from '../store/authStore';
@@ -42,16 +43,60 @@ export function getSocket(): Socket {
   return socket;
 }
 
-// Connects/disconnects automatically as the session changes — nothing
-// elsewhere in the app needs to remember to call this. A disabled account
-// or expired subscription mid-session gets the socket disconnected
-// server-side (backend's periodic re-validation); this listener only
-// covers the client-initiated sign-in/sign-out transitions.
-useAuthStore.subscribe((state, prevState) => {
-  if (state.status === prevState.status) return;
-  if (state.status === 'signedIn') {
-    getSocket().connect();
-  } else if (state.status === 'signedOut') {
-    getSocket().disconnect();
+/**
+ * Brings the socket in line with whether there is a session, from whatever
+ * just happened.
+ *
+ * Written as "make it match" rather than "react to the change" on purpose.
+ * The old version only acted on a status TRANSITION, which left a real hole:
+ * on a cold start the store hydrates a saved session, and if that hydration
+ * finished before this module was first imported, the transition had already
+ * happened and nothing ever called connect(). The app then sat on a socket
+ * that was not connecting and not retrying — socket.io does not reconnect a
+ * connection that was never opened — showing "Reconnecting" indefinitely
+ * while REST polling quietly carried the messages.
+ *
+ * Idempotent, so calling it on every store change, at import, and on every
+ * foreground costs nothing when things are already right.
+ */
+export function syncSocketConnection(): void {
+  const { status } = useAuthStore.getState();
+  const s = getSocket();
+  if (status === 'signedIn') {
+    // `active` covers "connected or trying to"; connect() on an already
+    // connecting socket is a no-op, but checking keeps the intent legible.
+    if (!s.connected && !s.active) s.connect();
+  } else if (status === 'signedOut') {
+    if (s.connected || s.active) s.disconnect();
   }
+}
+
+// Every change, not only a status change: a token refresh writes new
+// credentials without touching status, and the socket's auth callback reads
+// the current token on its next attempt.
+useAuthStore.subscribe(() => syncSocketConnection());
+
+// And once now, for the session that was already hydrated before this
+// module was imported — the case the transition-only listener missed.
+syncSocketConnection();
+
+/**
+ * Android kills or silently wedges sockets while the app is backgrounded,
+ * and doze can leave socket.io believing it is still connected long after
+ * the TCP connection is gone. Reconnecting on foreground is what makes the
+ * app work again after switching away and back — which users discovered on
+ * their own, by leaving the chat and coming back until it started working.
+ */
+AppState.addEventListener('change', (next) => {
+  if (next !== 'active') return;
+  const s = getSocket();
+  if (useAuthStore.getState().status !== 'signedIn') return;
+  if (s.connected) {
+    // Connected by socket.io's reckoning, but that can be a corpse after a
+    // doze. One cheap round trip settles it; a dead link fails the ping and
+    // socket.io tears down and reconnects on its own.
+    s.emit('ping:check');
+    return;
+  }
+  if (!s.active) s.connect();
 });

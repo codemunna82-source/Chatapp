@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { File, Paths } from 'expo-file-system';
@@ -17,7 +17,8 @@ import {
   type WallpaperStyle,
 } from '../../store/chatWallpaperStore';
 import { useAlertPreferenceStore } from '../../store/alertPreferenceStore';
-import { useLogout } from '../../queries/useAuthMutations';
+import { useLogout, useUploadOwnAvatar } from '../../queries/useAuthMutations';
+import { getApiErrorMessage } from '../../api/client';
 import { useSubscription } from '../../queries/useSubscription';
 import { useNotifications, flattenNotifications } from '../../queries/useNotifications';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -75,22 +76,61 @@ function SettingsRow({
   );
 }
 
-/** Tap to replace the photo — square crop, uploaded to PATCH /api/users/me/avatar. */
 /**
- * The account's avatar, display-only.
+ * The account's avatar. Tap to replace it — square crop, uploaded to
+ * PATCH /api/users/me/avatar.
  *
- * Uploading a new one was removed on request. The backend endpoint and the
- * useUploadOwnAvatar hook are deliberately left in place — nothing else
- * depends on them and deleting a working, tested upload path to hide one
- * button would be the harder thing to undo. Re-adding the control is a
- * Pressable around this Avatar calling that hook.
+ * The control was removed once on request and is back because without it
+ * there was no way to set a photo at all, so every profile showed initials
+ * forever and looked like a broken avatar rather than an empty one.
+ *
+ * Square crop because the frame is a circle: letting someone pick a
+ * landscape photo and then centre-cropping it for them is how a face ends
+ * up half out of the ring.
  */
 function ProfileAvatar({ userId, label, version }: { userId: string; label: string; version?: string }) {
-  const { spacing } = useTheme();
+  const { spacing, colors, typography } = useTheme();
+  const upload = useUploadOwnAvatar();
+
+  const pick = async () => {
+    if (upload.isPending) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset) return;
+
+    upload.mutate(
+      {
+        uri: asset.uri,
+        // The picker can hand back a uri with no filename at all (a camera
+        // roll asset id), and the server needs one to infer nothing — the
+        // mime type does that job — but multipart still requires a name.
+        name: asset.fileName ?? 'avatar.jpg',
+        mimeType: asset.mimeType ?? 'image/jpeg',
+      },
+      {
+        onError: (err) => Alert.alert('Could not update your photo', getApiErrorMessage(err)),
+      },
+    );
+  };
 
   return (
     <View style={{ alignItems: 'center', marginBottom: spacing.sm }}>
-      <Avatar userId={userId} version={version} label={label} size={72} />
+      <Pressable
+        onPress={() => void pick()}
+        accessibilityRole="button"
+        accessibilityLabel="Change your profile photo"
+        style={({ pressed }) => ({ opacity: pressed || upload.isPending ? 0.6 : 1 })}
+      >
+        <Avatar userId={userId} version={version} label={label} size={72} />
+      </Pressable>
+      <Text style={[typography.caption, { color: colors.textSecondary, marginTop: spacing.xs }]}>
+        {upload.isPending ? 'Uploading…' : 'Tap to change photo'}
+      </Text>
     </View>
   );
 }

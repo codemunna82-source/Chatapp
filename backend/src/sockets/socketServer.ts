@@ -206,6 +206,24 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
       });
     }, REVALIDATE_INTERVAL_MS);
 
+    /**
+     * A liveness probe the client sends when the app returns to the
+     * foreground.
+     *
+     * Android can leave a socket that both sides still believe in after a
+     * long doze, with the TCP connection long gone. Socket.IO's own
+     * heartbeat notices eventually, but "eventually" is up to a ping
+     * timeout of dead chat right when the user is looking at it. An
+     * immediate round trip either acks — proving the link — or fails and
+     * lets the client tear down and reconnect now.
+     *
+     * Deliberately does nothing else: no state, no broadcast. It exists to
+     * put one packet on the wire in each direction.
+     */
+    socket.on('ping:check', (ack?: () => void) => {
+      if (typeof ack === 'function') ack();
+    });
+
     socket.on('disconnect', (reason) => {
       clearInterval(revalidate);
       // After the socket has left its rooms, so the count reflects who is

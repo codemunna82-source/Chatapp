@@ -132,7 +132,21 @@ export const receiveWebhookHandler = asyncHandler(async (req: Request, res: Resp
   // BullMQ when Redis is available, otherwise process inline so the system
   // still functions (at the cost of a slower ack) in a Redis-less setup.
   if (isRedisConfigured()) {
-    await enqueueWebhookDelivery(req.body);
+    try {
+      await enqueueWebhookDelivery(req.body);
+    } catch (err) {
+      // A configured-but-unreachable Redis used to fail the whole delivery,
+      // which means Meta retries it and — while the outage lasts — every
+      // inbound message fails. That is strictly worse than the inline path
+      // this deployment ran on before Redis existed, so fall back to it
+      // rather than dropping the customer's message on the floor.
+      //
+      // Logged at error, not warn: the queue silently not being used is the
+      // kind of thing that goes unnoticed for weeks and then shows up as
+      // "why is the server slow".
+      logger.error({ err }, 'Could not enqueue the Meta webhook — processing it inline instead');
+      await processWebhookDelivery(req.body);
+    }
   } else {
     logger.warn('REDIS_URL not configured — processing Meta webhook inline instead of via queue');
     await processWebhookDelivery(req.body);
