@@ -166,6 +166,20 @@ export async function updateUserForTenant(
     normalizedPatch = { ...patch, phone };
   }
 
+  // Same shape of check as the phone number above, and for the same
+  // reason: both are global sign-in identifiers, so a collision has to be
+  // reported as a conflict with wording, not left to surface as a raw
+  // duplicate-key error from the unique index. Compared against the
+  // holder's id so that saving a form without touching the email — which
+  // sends the value back unchanged — is not read as a collision with the
+  // account's own address.
+  if (normalizedPatch.email !== undefined) {
+    const holder = await repo.findUserByEmail(normalizedPatch.email);
+    if (holder && String(holder._id) !== id) {
+      throw ApiError.conflict('EMAIL_ALREADY_EXISTS', 'A user with this email already exists');
+    }
+  }
+
   const user = await repo.updateUserByIdAndTenant(id, tenantId, normalizedPatch);
   if (!user) {
     throw ApiError.notFound('USER_NOT_FOUND', 'User not found');

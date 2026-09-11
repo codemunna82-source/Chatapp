@@ -81,6 +81,8 @@ export interface UpdateUserPatch {
   displayName?: string;
   /** Canonical E.164, normalised by the caller. */
   phone?: string;
+  /** Lower-cased by the schema; uniqueness checked by the caller. */
+  email?: string;
   /** `null` clears the assignment; omitted leaves it untouched. */
   whatsappPhoneNumberId?: string | null;
   /** Set only by setUserPasswordHash — never reachable from a request body. */
@@ -177,6 +179,17 @@ export async function countUsersByPhone(phone: string): Promise<number> {
   const variants = phoneVariants(phone);
   if (variants.length === 0) return 0;
   return User.countDocuments({ phone: { $in: variants } });
+}
+
+/**
+ * The account holding an email, if any.
+ *
+ * Returns the document rather than a count because the edit path has to
+ * tell "this email belongs to somebody else" apart from "this email is
+ * already this user's own, unchanged" — a count cannot.
+ */
+export async function findUserByEmail(email: string): Promise<UserDoc | null> {
+  return User.findOne({ email: email.toLowerCase() });
 }
 
 export async function countUsersByTenantAndEmail(email: string): Promise<number> {

@@ -62,6 +62,13 @@ export const updateUserSchema = z
     displayName: z.string().trim().min(1).optional(),
     /** Changing what someone signs in with. Optional here — an edit is not a re-registration. */
     phone: loginPhoneSchema.optional(),
+    /**
+     * Also editable, for the same reason the phone number is: a typo in
+     * either one at creation time used to be permanent, and email is the
+     * fallback identifier that login accepts when an account predates
+     * phone sign-in.
+     */
+    email: z.string().email().toLowerCase().optional(),
     // `null` clears the assignment. `undefined` cannot: it is
     // indistinguishable from a patch that simply doesn't touch this field.
     whatsappPhoneNumberId: whatsappPhoneNumberIdSchema.nullable().optional(),
