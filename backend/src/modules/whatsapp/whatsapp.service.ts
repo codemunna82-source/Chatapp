@@ -306,6 +306,27 @@ export async function registerNumberForCloudApi(
         }`,
       };
     }
+
+    // A PIN mismatch on a number that is already CONNECTED is not a
+    // failure worth alarming anyone with. Meta's #133005 means the PIN we
+    // sent is not the number's two-step verification PIN — but this call
+    // only exists to move a number from Pending to Connected, and one
+    // that is already Connected does not need it. Reporting it in red
+    // sends an admin looking for a problem that is not blocking anything.
+    //
+    // Said plainly rather than swallowed, because it WILL block the next
+    // number added to this workspace, and the fix is a two-minute change
+    // in WhatsApp Manager rather than a mystery in six weeks.
+    if (/133005/.test(message) && number.status === 'CONNECTED') {
+      return {
+        registered: true,
+        message:
+          'Already connected, so no registration was needed. Meta did reject the PIN — this number ' +
+          'has a different two-step verification PIN than META_REGISTER_PIN. Nothing is broken now, ' +
+          'but align them before adding another number.' +
+          (subscribed ? ' Its WhatsApp account is now subscribed to your app.' : ''),
+      };
+    }
     throw ApiError.badRequest('WHATSAPP_REGISTER_FAILED', `Meta refused the registration: ${message}`);
   }
 
