@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { verifyChallenge, verifySignature } from './webhookVerifier';
+import { verifyChallenge, verifySignature, checkSignature } from './webhookVerifier';
 import { env } from '../../config/env';
 
 describe('verifyChallenge', () => {
@@ -86,5 +86,55 @@ describe('verifySignature', () => {
 
   it('rejects a malformed signature header (no sha256= prefix)', () => {
     expect(verifySignature(payload, 'not-a-real-signature')).toBe(false);
+  });
+});
+
+/**
+ * The reasons exist so a 401 in the production log says which of five
+ * things went wrong. Pinned individually because they are only useful if
+ * they are actually distinct — a version that collapsed two of them into
+ * one would still pass every pass/fail test above.
+ */
+describe('checkSignature reasons', () => {
+  const body = Buffer.from(JSON.stringify({ object: 'whatsapp_business_account' }));
+  const sign = (secret: string) =>
+    `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+
+  it('reports ok for a correctly signed body', () => {
+    expect(checkSignature(body, sign(env.META_APP_SECRET))).toEqual({ ok: true });
+  });
+
+  it('separates "wrong secret" from every other failure', () => {
+    // This is the one that matters in production: the delivery is real,
+    // well-formed and correctly signed — by an app whose secret we do not
+    // have. Nothing about the request is fixable; the environment is.
+    expect(checkSignature(body, sign('a'.repeat(32)))).toEqual({
+      ok: false,
+      reason: 'DIGEST_MISMATCH',
+    });
+  });
+
+  it('separates a missing header from a malformed one', () => {
+    expect(checkSignature(body, undefined)).toEqual({ ok: false, reason: 'HEADER_MISSING' });
+    expect(checkSignature(body, 'sha1=abc')).toEqual({ ok: false, reason: 'HEADER_MALFORMED' });
+  });
+
+  it('reports a short digest as a length mismatch, not a comparison failure', () => {
+    // Buffer.from(hex) drops what it cannot decode instead of throwing, so
+    // a truncated or garbage digest has to be caught on length — otherwise
+    // timingSafeEqual throws on mismatched buffers and this becomes a 500.
+    expect(checkSignature(body, 'sha256=abcd')).toEqual({
+      ok: false,
+      reason: 'DIGEST_LENGTH_MISMATCH',
+    });
+    expect(checkSignature(body, 'sha256=zzzz')).toEqual({
+      ok: false,
+      reason: 'DIGEST_LENGTH_MISMATCH',
+    });
+  });
+
+  it('keeps verifySignature agreeing with it', () => {
+    expect(verifySignature(body, sign(env.META_APP_SECRET))).toBe(true);
+    expect(verifySignature(body, sign('a'.repeat(32)))).toBe(false);
   });
 });

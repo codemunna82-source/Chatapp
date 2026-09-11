@@ -3,7 +3,11 @@ import { asyncHandler } from '../../lib/asyncHandler';
 import { ApiError } from '../../lib/ApiError';
 import { logger } from '../../lib/logger';
 import { env } from '../../config/env';
-import { verifyChallenge, verifySignature } from '../../integrations/meta/webhookVerifier';
+import {
+  verifyChallenge,
+  checkSignature,
+  appSecretHasExpectedShape,
+} from '../../integrations/meta/webhookVerifier';
 import { enqueueWebhookDelivery } from '../../queues/webhook.queue';
 import { isRedisConfigured } from '../../queues/connection';
 import { getPushGateway } from '../../integrations/fcm';
@@ -66,6 +70,11 @@ export function webhookConfigHealthHandler(req: Request, res: Response): void {
       verifyTokenLength: env.META_VERIFY_TOKEN.length,
       appSecretConfigured: env.META_APP_SECRET.length > 0,
       appSecretLength: env.META_APP_SECRET.length,
+      // false here is the single most common cause of a webhook that
+      // arrives and 401s: some other Meta credential — usually an access
+      // token, sometimes the App ID — pasted into the app-secret box.
+      // A shape check, not a value; see appSecretHasExpectedShape.
+      appSecretLooksLikeAnAppSecret: appSecretHasExpectedShape(),
       accessTokenConfigured: env.META_ACCESS_TOKEN.length > 0,
       // The two Embedded Signup needs. Reported here because the only
       // other way to find out one is missing is to install the app, open
@@ -96,7 +105,26 @@ export const receiveWebhookHandler = asyncHandler(async (req: Request, res: Resp
   // post JSON without going through the raw-capturing middleware.
   const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
 
-  if (!verifySignature(rawBody, signatureHeader)) {
+  const signature = checkSignature(rawBody, signatureHeader);
+  if (!signature.ok) {
+    // Logged rather than only returned, because this is the one failure
+    // nobody can see from either side: Meta's dashboard reports a failed
+    // delivery without a cause, and a 401 in the access log says nothing
+    // about which of the five reasons it was. Every field here is a
+    // boolean, a length, or a fixed enum — no secret, and no part of one.
+    logger.warn(
+      {
+        reason: signature.reason,
+        appSecretConfigured: Boolean(env.META_APP_SECRET),
+        // A DIGEST_MISMATCH with a well-shaped secret means the wrong app's
+        // secret; with a badly-shaped one it means a different Meta
+        // credential was pasted into the box. See appSecretHasExpectedShape.
+        appSecretLooksLikeAnAppSecret: appSecretHasExpectedShape(),
+        rawBodyCaptured: req.rawBody !== undefined,
+        bodyBytes: rawBody.length,
+      },
+      'Rejected a Meta webhook delivery: its signature did not verify',
+    );
     throw ApiError.unauthorized('WEBHOOK_SIGNATURE_INVALID', 'Invalid webhook signature');
   }
 
