@@ -1,4 +1,4 @@
-import { apiClient } from '../client';
+import { apiClient, UPLOAD_TIMEOUT_MS } from '../client';
 import { apiBaseUrl } from '../../utils/env';
 import type { ApiSuccess, UploadedMedia } from '../types';
 
@@ -17,6 +17,7 @@ export async function uploadMedia(whatsappPhoneNumberId: string, file: PickedFil
 
   const res = await apiClient.post<ApiSuccess<UploadedMedia>>('/media/upload', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: UPLOAD_TIMEOUT_MS,
   });
   return res.data.data;
 }

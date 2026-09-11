@@ -55,8 +55,11 @@ async function handleIncomingMessage(
       whatsappPhoneNumberId: String(phoneNumberDoc._id),
       metaMediaId: item.mediaRef.metaMediaId,
       mimeType: item.mediaRef.mimeType ?? 'application/octet-stream',
+      // Both unknown until the proxy actually fetches the bytes. Left
+      // absent rather than zero-and-empty-string: '' is indistinguishable
+      // from "not set" to Mongoose anyway, and pretending to know a hash we
+      // have not computed is worse than admitting we do not have one.
       sizeBytes: 0,
-      sha256: '',
       storageRef: `meta:${item.mediaRef.metaMediaId}`,
       status: 'READY',
     });

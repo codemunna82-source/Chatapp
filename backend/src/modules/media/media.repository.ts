@@ -6,7 +6,8 @@ export interface CreateMediaInput {
   whatsappPhoneNumberId: string;
   mimeType: string;
   sizeBytes: number;
-  sha256: string;
+  /** Absent for inbound WhatsApp media — the bytes are not fetched at ingest, so there is no hash yet. */
+  sha256?: string;
   storageRef: string;
   status?: MediaStatus;
   /** Known up-front for inbound (webhook-delivered) media; absent for a fresh outbound upload. */

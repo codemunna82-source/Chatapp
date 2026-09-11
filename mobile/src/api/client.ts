@@ -35,6 +35,21 @@ export const apiClient: AxiosInstance = axios.create({
   timeout: 15_000,
 });
 
+/**
+ * How long an upload is given, instead of the 15s every other call gets.
+ *
+ * The default applied to uploads too, which is where it did real damage: a
+ * couple of megabytes of photo on mobile data does not finish in fifteen
+ * seconds, so axios aborted the request mid-body. The server logged
+ * "Request aborted" from multer and the user was told the upload failed —
+ * for a photo that was uploading perfectly well and would have arrived.
+ *
+ * Two minutes is not a guess at how long an upload takes; it is long
+ * enough that hitting it means something is genuinely wrong rather than
+ * merely slow.
+ */
+export const UPLOAD_TIMEOUT_MS = 120_000;
+
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = authHandlers?.getAccessToken();
   if (token) {

@@ -12,8 +12,22 @@ const mediaSchema = new Schema(
     whatsappPhoneNumberId: { type: Schema.Types.ObjectId, ref: 'WhatsAppPhoneNumber', required: true },
     metaMediaId: { type: String }, // Meta's media id, once uploaded to Graph API
     mimeType: { type: String, required: true },
-    sizeBytes: { type: Number, required: true },
-    sha256: { type: String, required: true },
+    sizeBytes: { type: Number, required: true, default: 0 },
+    /**
+     * The file's hash — present for media WE uploaded, absent for media a
+     * customer sent.
+     *
+     * NOT required, and that is the whole point. Inbound WhatsApp media is
+     * recorded at webhook time without ever downloading the bytes (see
+     * webhook.service.ts — retrieval is deferred to the media proxy), so
+     * there is nothing to hash yet. Requiring it made Mongoose reject every
+     * inbound photo, video and voice note with "Path `sha256` is required",
+     * which threw out of the webhook handler: the message was never stored,
+     * Meta retried the delivery forever, and to the agent the customer's
+     * image simply never arrived. An empty string does not satisfy
+     * `required` on a String, so passing '' was the same as passing nothing.
+     */
+    sha256: { type: String },
     // Our own object-storage cache of this file's bytes: `pending:<sha256>`
     // until cached, `meta:<metaMediaId>` for inbound media not yet cached,
     // or a real https:// Cloudinary URL once cached (see integrations/cloudinary.ts

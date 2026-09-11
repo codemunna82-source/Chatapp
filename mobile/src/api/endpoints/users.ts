@@ -1,4 +1,4 @@
-import { apiClient } from '../client';
+import { apiClient, UPLOAD_TIMEOUT_MS } from '../client';
 import { apiBaseUrl } from '../../utils/env';
 import type { ApiSuccess, TeamMember } from '../types';
 
@@ -16,6 +16,7 @@ export async function uploadOwnAvatar(file: PickedAvatarFile): Promise<TeamMembe
 
   const res = await apiClient.patch<ApiSuccess<TeamMember>>('/users/me/avatar', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: UPLOAD_TIMEOUT_MS,
   });
   return res.data.data;
 }
