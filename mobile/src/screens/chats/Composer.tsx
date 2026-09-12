@@ -26,7 +26,12 @@ import { touchTarget } from '../../theme/spacing';
 import { emitTypingStart, emitTypingStop } from '../../sockets/actions';
 import { useQueryClient } from '@tanstack/react-query';
 import { useUploadMedia } from '../../queries/useUploadMedia';
-import { useSendMessage, insertPendingMediaMessage, removeMessageFromCache } from '../../queries/useMessages';
+import {
+  useSendMessage,
+  insertPendingMediaMessage,
+  removeMessageFromCache,
+  patchUploadProgressInCache,
+} from '../../queries/useMessages';
 import { getApiErrorMessage } from '../../api/client';
 import { formatDuration } from '../../utils/formatTime';
 import { useMessageDraft } from '../../utils/useMessageDraft';
@@ -225,6 +230,11 @@ export function Composer({
               name: asset.fileName ?? `image-${Date.now()}-${i}.jpg`,
               mimeType: asset.mimeType ?? 'image/jpeg',
             },
+            // Onto the bubble already on screen, so a big photo on a slow
+            // connection shows movement rather than a spinner that cannot
+            // be told apart from a stall.
+            onProgress: (fraction) =>
+              patchUploadProgressInCache(queryClient, conversationId, tempId, fraction),
           });
           // The real send replaces the placeholder with its own optimistic
           // entry, so drop ours first to avoid a duplicate bubble.
@@ -476,6 +486,8 @@ export function Composer({
       const uploaded = await uploadMedia.mutateAsync({
         whatsappPhoneNumberId,
         file: { uri, name: `voice-${Date.now()}.m4a`, mimeType: 'audio/mp4' },
+        onProgress: (fraction) =>
+          patchUploadProgressInCache(queryClient, conversationId, tempId, fraction),
       });
       // The real send brings its own optimistic entry, so drop ours first
       // rather than leaving two bubbles for one voice note.

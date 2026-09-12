@@ -17,6 +17,11 @@ export function MessageStatusIcon({ status, size = 14 }: { status: MessageStatus
   if (status === 'FAILED') return <Ionicons name="alert-circle" size={size} color={colors.danger} />;
   if (status === 'SENT') return <Ionicons name="checkmark" size={size} color={colors.textSecondary} />;
   if (status === 'DELIVERED') return <Ionicons name="checkmark-done" size={size} color={colors.textSecondary} />;
-  // READ
-  return <Ionicons name="checkmark-done" size={size} color={colors.primary} />;
+  // READ. Green rather than the app's accent: the read tick is the one
+  // status anybody actually looks for, and every messenger the user has
+  // ever used marks it with a colour change on that exact glyph. Drawn in
+  // the accent it read as decoration on an accent-heavy screen — and in
+  // the chat theme the accent is a muted slate that barely differs from
+  // the grey it is supposed to contrast with.
+  return <Ionicons name="checkmark-done" size={size} color={colors.success} />;
 }

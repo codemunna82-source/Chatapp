@@ -5,8 +5,12 @@ import { captureHandledError } from '../lib/sentry';
 
 export function useUploadMedia() {
   return useMutation({
-    mutationFn: (vars: { whatsappPhoneNumberId: string; file: PickedFile }) =>
-      mediaApi.uploadMedia(vars.whatsappPhoneNumberId, vars.file),
+    mutationFn: (vars: {
+      whatsappPhoneNumberId: string;
+      file: PickedFile;
+      /** Forwarded straight through so the caller can paint the bubble. */
+      onProgress?: (fraction: number) => void;
+    }) => mediaApi.uploadMedia(vars.whatsappPhoneNumberId, vars.file, vars.onProgress),
     onError: (err, vars) => {
       // The mime type and size are what distinguish "our upload path is
       // broken" from "someone sent a 90MB video Meta refuses". The file's

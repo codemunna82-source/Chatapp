@@ -6,6 +6,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { mediaUrl } from '../../api/endpoints/media';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeProvider';
+import { UploadProgress } from './UploadProgress';
 import { impactLight } from '../../utils/haptics';
 
 /**
@@ -26,9 +27,12 @@ import { impactLight } from '../../utils/haptics';
 export function VideoMessageBubble({
   mediaId,
   localUri: providedUri,
+  uploadProgress,
   onLongPress,
 }: {
   mediaId?: string;
+  /** 0-1 while this video's bytes are still going up; absent once sent. */
+  uploadProgress?: number;
   /** A just-picked local file, still uploading. */
   localUri?: string;
   onLongPress?: () => void;
@@ -46,6 +50,8 @@ export function VideoMessageBubble({
   const box = { width: boxWidth, height: Math.round((boxWidth * 9) / 16) };
 
   const displayUri = providedUri ?? downloadedUri;
+  // Being sent: rendered from a local file, with no server id yet.
+  const uploading = Boolean(providedUri) && !mediaId;
 
   // A null source is valid for expo-video and simply leaves the player
   // empty, which is what should show while the download is still running.
@@ -124,7 +130,10 @@ export function VideoMessageBubble({
           accessibilityRole="button"
           accessibilityLabel="Play video"
         >
-          {displayUri ? (
+          {/* A video still uploading is not playable yet, so the play
+              badge would be a lie. The progress cover takes its place
+              until the bytes are up. */}
+          {uploading ? null : displayUri ? (
             <View style={styles.playBadge}>
               <Ionicons name="play" size={26} color="#FFFFFF" />
             </View>
@@ -133,6 +142,7 @@ export function VideoMessageBubble({
           )}
         </Pressable>
       ) : null}
+      {uploading && <UploadProgress progress={uploadProgress} />}
     </View>
   );
 }

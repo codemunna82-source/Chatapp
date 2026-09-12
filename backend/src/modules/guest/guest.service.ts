@@ -92,6 +92,21 @@ export interface GuestMessageView {
   reactions?: { emoji: string; mine: boolean }[];
   /** Present on `type: 'location'` — what the map pin should be drawn at. */
   location?: { latitude: number; longitude: number; name?: string; address?: string };
+  /**
+   * How far the customer's OWN message has got: sent, delivered to the
+   * workspace, or read by an agent.
+   *
+   * Only meaningful on `from: 'me'`, and deliberately absent on the
+   * business's messages — the customer has no business knowing whether
+   * the workspace's own outbound message reached WhatsApp, and a tick on
+   * a bubble they did not send would mean nothing to them.
+   *
+   * Reported in the customer's terms rather than the storage enum:
+   * QUEUED/SENT/FAILED are the workspace's delivery machinery, and a
+   * customer who typed into a web window does not have a "queued" state
+   * they could act on.
+   */
+  status?: 'sent' | 'delivered' | 'read';
 }
 
 /**
@@ -101,6 +116,22 @@ export interface GuestMessageView {
  * a field added to Message later then has to be opted in, instead of
  * leaking the moment it lands.
  */
+/**
+ * The storage status, said in terms that mean something to a customer.
+ *
+ * READ is the only one worth a distinct mark: it is the answer to "did
+ * anyone actually see this?". DELIVERED means it reached the workspace.
+ * Everything else — QUEUED, SENT, FAILED — is the workspace's own
+ * delivery machinery, and collapses to "sent", because a customer has no
+ * queue to act on and a message they are looking at in their own thread
+ * did not fail to be sent.
+ */
+export function toGuestStatus(status: string | undefined): 'sent' | 'delivered' | 'read' {
+  if (status === 'READ') return 'read';
+  if (status === 'DELIVERED') return 'delivered';
+  return 'sent';
+}
+
 function toGuestMessage(doc: MessageLean): GuestMessageView {
   const view: GuestMessageView = {
     id: String(doc._id),
@@ -111,6 +142,7 @@ function toGuestMessage(doc: MessageLean): GuestMessageView {
     mediaId: doc.mediaId ? String(doc.mediaId) : undefined,
     createdAt: doc.createdAt.toISOString(),
   };
+  if (doc.direction === 'IN') view.status = toGuestStatus(doc.status);
   // Only when the coordinates are actually there. A location that arrived
   // before this field existed, or through a path that never filled it, has
   // its text line and nothing else — which renders as an ordinary message

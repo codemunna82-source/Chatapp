@@ -6,7 +6,13 @@ import * as DocumentPicker from 'expo-document-picker';
 import { AppBottomSheet, type AppBottomSheetRef } from '../../components/AppBottomSheet';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useUploadMedia } from '../../queries/useUploadMedia';
-import { useSendMessage } from '../../queries/useMessages';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useSendMessage,
+  insertPendingMediaMessage,
+  removeMessageFromCache,
+  patchUploadProgressInCache,
+} from '../../queries/useMessages';
 import { getApiErrorMessage } from '../../api/client';
 import type { PickedFile } from '../../api/endpoints/media';
 
@@ -17,6 +23,9 @@ interface AttachmentSheetProps {
   conversationId: string;
   onClose: () => void;
   onSent: () => void;
+  /** Reported by the screen, since the sheet has closed by the time an
+   *  optimistic upload can fail. */
+  onUploadFailed?: (message: string) => void;
 }
 
 type SendableMediaType = 'image' | 'video' | 'document' | 'audio';
@@ -38,11 +47,13 @@ export function AttachmentSheet({
   conversationId,
   onClose,
   onSent,
+  onUploadFailed,
 }: AttachmentSheetProps) {
   const { colors, spacing, radius, typography } = useTheme();
   const sheetRef = useRef<AppBottomSheetRef>(null);
   const uploadMedia = useUploadMedia();
   const sendMessage = useSendMessage(conversationId);
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,20 +72,69 @@ export function AttachmentSheet({
     if (index >= 0) setError(null);
   };
 
+  /**
+   * Pick, then get out of the way.
+   *
+   * This used to hold the sheet open with a spinner across the whole
+   * upload — so sending a video meant staring at a covered chat for as
+   * long as the bytes took, with no way to tell progress from a stall and
+   * nothing else usable in the meantime. Every messenger does the
+   * opposite: the sheet closes, the bubble appears at once, and the
+   * upload draws its progress on that bubble.
+   *
+   * A document has no thumbnail to draw on, so it keeps the blocking
+   * spinner — a bubble for a file that may fail to upload, with nothing
+   * in it to look at, would be worse than the wait.
+   */
   const submit = async (file: PickedFile, type: SendableMediaType) => {
     if (!whatsappPhoneNumberId) {
       setError('This conversation has no connected WhatsApp number yet.');
       return;
     }
-    setBusy(true);
     setError(null);
-    try {
-      const uploaded = await uploadMedia.mutateAsync({ whatsappPhoneNumberId, file });
-      sendMessage.mutate({ type, mediaId: uploaded.id, replyToMessageId });
+
+    const optimistic = type === 'image' || type === 'video';
+    const tempId = `local-attach-${Date.now()}`;
+
+    if (optimistic) {
+      insertPendingMediaMessage(queryClient, conversationId, {
+        tempId,
+        type,
+        localUri: file.uri,
+        replyToMessageId,
+      });
       onSent();
       sheetRef.current?.dismiss();
+    } else {
+      setBusy(true);
+    }
+
+    try {
+      const uploaded = await uploadMedia.mutateAsync({
+        whatsappPhoneNumberId,
+        file,
+        onProgress: optimistic
+          ? (fraction) => patchUploadProgressInCache(queryClient, conversationId, tempId, fraction)
+          : undefined,
+      });
+      // The real send brings its own optimistic entry, so ours goes first
+      // rather than leaving two bubbles for one attachment.
+      if (optimistic) removeMessageFromCache(queryClient, conversationId, tempId);
+      sendMessage.mutate({ type, mediaId: uploaded.id, replyToMessageId });
+      if (!optimistic) {
+        onSent();
+        sheetRef.current?.dismiss();
+      }
     } catch (err) {
-      setError(getApiErrorMessage(err, 'Could not upload that file.'));
+      // With the sheet already gone there is nowhere to show an error
+      // inside it, so the bubble is removed and the screen's own media
+      // error surface carries the message.
+      if (optimistic) {
+        removeMessageFromCache(queryClient, conversationId, tempId);
+        onUploadFailed?.(getApiErrorMessage(err, 'Could not send that.'));
+      } else {
+        setError(getApiErrorMessage(err, 'Could not upload that file.'));
+      }
     } finally {
       setBusy(false);
     }

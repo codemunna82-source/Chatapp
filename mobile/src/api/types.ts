@@ -144,6 +144,15 @@ export interface Message {
    * by the API, and gone once the server's real message replaces this one.
    */
   localUri?: string;
+  /**
+   * How far the upload of this attachment has got, 0-1.
+   *
+   * Client-only, like localUri, and present only while the bytes are
+   * still going up. An indeterminate spinner on a 40MB video over a poor
+   * connection is indistinguishable from a frozen one — which is what
+   * people see just before they force-quit the app and send it again.
+   */
+  uploadProgress?: number;
   replyToMessageId?: string;
   status: MessageStatus;
   senderId?: string;

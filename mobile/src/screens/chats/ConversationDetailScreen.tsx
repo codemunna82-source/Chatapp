@@ -866,6 +866,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           replyToMessageId={replyingTo?.id}
           onClose={() => setAttachSheetOpen(false)}
           onSent={() => setReplyingTo(null)}
+          onUploadFailed={(message) => Alert.alert('Message not sent', message)}
           conversationId={conversationId}
         />
 

@@ -118,6 +118,29 @@ export function insertPendingMediaMessage(
   });
 }
 
+/**
+ * Moves a pending attachment's progress bar.
+ *
+ * Its own helper rather than a full upsert: this fires many times a
+ * second during an upload, and rebuilding the whole message would make
+ * every other field race with whatever else is writing to this row.
+ * Missing rows are ignored — an upload whose bubble was already removed
+ * (cancelled, or failed and cleaned up) has nothing to paint.
+ */
+export function patchUploadProgressInCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string,
+  tempId: string,
+  progress: number,
+): void {
+  patchMessages(queryClient, conversationId, (pages) =>
+    pages.map((page) => ({
+      ...page,
+      items: page.items.map((m) => (m.id === tempId ? { ...m, uploadProgress: progress } : m)),
+    })),
+  );
+}
+
 export function upsertMessageInCache(
   queryClient: ReturnType<typeof useQueryClient>,
   conversationId: string,

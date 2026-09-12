@@ -93,13 +93,21 @@ function MessageContent({
       <MediaImage
         mediaId={message.mediaId}
         localUri={message.localUri}
+        uploadProgress={message.uploadProgress}
         onOpen={onOpenImage}
         onLongPress={onLongPress}
       />
     );
   }
   if (message.type === 'video' && (message.mediaId || message.localUri)) {
-    return <VideoMessageBubble mediaId={message.mediaId} localUri={message.localUri} onLongPress={onLongPress} />;
+    return (
+      <VideoMessageBubble
+        mediaId={message.mediaId}
+        localUri={message.localUri}
+        uploadProgress={message.uploadProgress}
+        onLongPress={onLongPress}
+      />
+    );
   }
   if (message.type === 'audio' && (message.mediaId || message.localUri)) {
     return (

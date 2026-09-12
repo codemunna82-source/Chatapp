@@ -1,6 +1,7 @@
 import { logger } from '../../lib/logger';
 import { tenantRoom, conversationRoom, phoneNumberRoom } from '../rooms';
 import { findConversationByIdAndTenant, markConversationRead } from '../../modules/conversations/conversation.repository';
+import { markInboundReadAndNotify } from '../../modules/messages/readReceipts.service';
 import { visibleWhatsAppPhoneNumberId } from '../../modules/conversations/conversation.access';
 import { toRealtimeConversation } from '../../realtime/serializers';
 import type { AppServer, AppSocket } from '../types';
@@ -66,6 +67,20 @@ export function registerConversationHandlers(io: AppServer, socket: AppSocket, a
       ack?.({ success: false, error: 'Conversation not found' });
       return;
     }
+
+    // The customer's half of the same fact. Opening the chat used to zero
+    // the unread badge and tell nobody else, so a message an agent had
+    // just read still showed one tick on the customer's screen — in the
+    // private window and in WhatsApp alike.
+    //
+    // Awaited, not fired and forgotten: the socket emits inside it are
+    // what turn the customer's ticks, and they should land before this
+    // ack does. The Meta call inside is the part that is not awaited.
+    await markInboundReadAndNotify({
+      tenantId: auth.tenantId,
+      conversationId,
+      whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
+    });
 
     const numberRoom = phoneNumberRoom(String(conversation.whatsappPhoneNumberId));
     io.to(tenantRoom(auth.tenantId)).to(numberRoom).emit('conversation:read', { conversationId, byUserId: auth.userId });

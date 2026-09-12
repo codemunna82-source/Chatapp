@@ -321,3 +321,46 @@ export async function setMessageStarred(
   }
   return Message.findOneAndUpdate({ _id: id, tenantId }, { $unset: { starredAt: 1 } }, { new: true });
 }
+
+/**
+ * Marks the customer's messages in one conversation as read.
+ *
+ * Returns what was changed rather than a count, because both things the
+ * caller does next need the detail: the ids go out as message:status so
+ * every open window ticks immediately, and the newest metaMessageId goes
+ * to Meta so the customer's WhatsApp shows read ticks too.
+ *
+ * Bounded to a page. A thread with thousands of unread inbound messages
+ * is a data problem, and rewriting all of them in one blocking update on
+ * the socket's hot path would be a worse one.
+ */
+export async function markInboundMessagesRead(
+  tenantId: string,
+  conversationId: string,
+): Promise<{ ids: string[]; latestMetaMessageId?: string }> {
+  if (!Types.ObjectId.isValid(conversationId)) return { ids: [] };
+
+  const unread = await Message.find({
+    tenantId,
+    conversationId,
+    direction: 'IN',
+    status: { $ne: 'READ' },
+    deletedAt: { $exists: false },
+  })
+    .select('_id metaMessageId')
+    .sort({ _id: -1 })
+    .limit(200)
+    .lean();
+
+  if (unread.length === 0) return { ids: [] };
+
+  const ids = unread.map((m) => m._id);
+  await Message.updateMany({ _id: { $in: ids } }, { $set: { status: 'READ', readAt: new Date() } });
+
+  // Sorted newest first, so the first metaMessageId present is the latest.
+  // Meta marks that message AND every earlier one in the thread as read,
+  // which is why this is one call rather than one per message.
+  const latestMetaMessageId = unread.find((m) => m.metaMessageId)?.metaMessageId ?? undefined;
+
+  return { ids: ids.map(String), latestMetaMessageId };
+}
