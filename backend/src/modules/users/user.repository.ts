@@ -264,3 +264,35 @@ export async function findUserIdsWhoCanSeePhoneNumber(
     .lean();
   return users.map((u) => String(u._id));
 }
+
+/**
+ * The name to put in front of a customer for one WhatsApp number.
+ *
+ * The member assigned to that number if there is one, and otherwise the
+ * workspace's MASTER_ADMIN — who, on a workspace where nobody has been
+ * assigned yet, is the person actually answering.
+ *
+ * Only the display name is selected. This value is rendered to a
+ * stranger, so there is no reason for the email, the phone or anything
+ * else on the document to travel with it.
+ */
+export async function findCustomerFacingNameForPhoneNumber(
+  tenantId: string,
+  whatsappPhoneNumberId: string,
+): Promise<string | null> {
+  if (!Types.ObjectId.isValid(whatsappPhoneNumberId)) return null;
+
+  const assigned = await User.findOne({
+    tenantId,
+    whatsappPhoneNumberId,
+    status: 'ACTIVE',
+  })
+    .select('displayName')
+    .lean();
+  if (assigned?.displayName) return assigned.displayName;
+
+  const owner = await User.findOne({ tenantId, role: 'MASTER_ADMIN', status: 'ACTIVE' })
+    .select('displayName')
+    .lean();
+  return owner?.displayName ?? null;
+}

@@ -5,13 +5,27 @@ describe('resolveBusinessName', () => {
     expect(
       resolveBusinessName({
         displayName: 'RK Enterprises',
+        memberName: 'Rajput Abhi',
         verifiedName: 'RK Ent Pvt Ltd',
         tenantName: 'Head office',
       }),
     ).toEqual({ name: 'RK Enterprises', source: 'settings' });
   });
 
-  it("falls back to Meta's approved name for the number the customer messaged", () => {
+  // What the admin typed when creating the member's account. The customer
+  // is talking to a person, and this is that person's name.
+  it('uses the member answering the number when settings are empty', () => {
+    expect(
+      resolveBusinessName({
+        displayName: '',
+        memberName: 'Rajput Abhi',
+        verifiedName: 'RK Ent Pvt Ltd',
+        tenantName: 'Head office',
+      }),
+    ).toEqual({ name: 'Rajput Abhi', source: 'member' });
+  });
+
+  it("falls back to Meta's approved name when no member name exists", () => {
     expect(
       resolveBusinessName({ displayName: '', verifiedName: 'RK Ent Pvt Ltd', tenantName: 'Head office' }),
     ).toEqual({ name: 'RK Ent Pvt Ltd', source: 'whatsapp' });

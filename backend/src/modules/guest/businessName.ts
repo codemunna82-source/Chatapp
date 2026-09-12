@@ -1,5 +1,6 @@
 import { Tenant } from '../tenants/tenant.model';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
+import { findCustomerFacingNameForPhoneNumber } from '../users/user.repository';
 
 /**
  * The name the customer sees in the web chat window.
@@ -35,11 +36,20 @@ function usable(value: string | null | undefined): string | null {
 }
 
 /** Where the name shown to the customer came from, for the admin screen. */
-export type BusinessNameSource = 'settings' | 'whatsapp' | 'workspace' | 'fallback';
+export type BusinessNameSource = 'settings' | 'member' | 'whatsapp' | 'workspace' | 'fallback';
 
 export interface BusinessNameCandidates {
   /** What the admin typed in settings. Wins outright — it is an explicit instruction. */
   displayName?: string | null;
+  /**
+   * The name of the person answering this number — the member the admin
+   * created, or the workspace owner if nobody is assigned.
+   *
+   * Above Meta's name because it is the more specific answer: a customer
+   * writing to one number is talking to one person, and that person's
+   * name is what a conversation is usually headed by.
+   */
+  memberName?: string | null;
   /** Meta's approved display name for the number the customer messaged. */
   verifiedName?: string | null;
   /** The workspace's internal label, used only if nothing better exists. */
@@ -52,11 +62,13 @@ export interface BusinessNameCandidates {
  *
  * 1. What the admin set in settings. An explicit answer beats a derived
  *    one, always — that field exists precisely to override the rest.
- * 2. The display name Meta holds for the number they messaged. This is
- *    the name they saw above the chat in WhatsApp seconds earlier, which
- *    makes it the strongest possible continuity signal.
- * 3. The workspace's own name, if it is not a seeded placeholder.
- * 4. "Support" — honest and neutral. Better than a placeholder that names
+ * 2. The member answering this number, by the name the admin gave them
+ *    when creating their account. The customer is talking to a person,
+ *    and this is that person.
+ * 3. The display name Meta holds for the number they messaged — the name
+ *    they saw above the chat in WhatsApp seconds earlier.
+ * 4. The workspace's own name, if it is not a seeded placeholder.
+ * 5. "Support" — honest and neutral. Better than a placeholder that names
  *    a business the customer has never heard of.
  */
 export function resolveBusinessName(candidates: BusinessNameCandidates): {
@@ -65,6 +77,9 @@ export function resolveBusinessName(candidates: BusinessNameCandidates): {
 } {
   const fromSettings = usable(candidates.displayName);
   if (fromSettings) return { name: fromSettings, source: 'settings' };
+
+  const fromMember = usable(candidates.memberName);
+  if (fromMember) return { name: fromMember, source: 'member' };
 
   const fromMeta = usable(candidates.verifiedName);
   if (fromMeta) return { name: fromMeta, source: 'whatsapp' };
@@ -87,15 +102,19 @@ export async function resolveBusinessNameForConversation(
   tenantId: string,
   whatsappPhoneNumberId?: string | null,
 ): Promise<{ name: string; source: BusinessNameSource }> {
-  const [tenant, phoneNumber] = await Promise.all([
+  const [tenant, phoneNumber, memberName] = await Promise.all([
     Tenant.findById(tenantId).select('name displayName').lean(),
     whatsappPhoneNumberId
       ? findPhoneNumberByIdAndTenant(String(whatsappPhoneNumberId), tenantId)
+      : Promise.resolve(null),
+    whatsappPhoneNumberId
+      ? findCustomerFacingNameForPhoneNumber(tenantId, String(whatsappPhoneNumberId))
       : Promise.resolve(null),
   ]);
 
   return resolveBusinessName({
     displayName: tenant?.displayName,
+    memberName,
     verifiedName: phoneNumber?.verifiedName,
     tenantName: tenant?.name,
   });

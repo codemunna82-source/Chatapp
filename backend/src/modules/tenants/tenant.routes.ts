@@ -8,7 +8,7 @@ import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { ApiError } from '../../lib/ApiError';
 import { env } from '../../config/env';
 import { Tenant, DEFAULT_AUTO_GUEST_LINK_TEXT, DEFAULT_AUTO_GUEST_WELCOME } from './tenant.model';
-import { resolveBusinessName } from '../guest/businessName';
+import { resolveBusinessName, resolveBusinessNameForConversation } from '../guest/businessName';
 import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
 
 /**
@@ -75,11 +75,9 @@ tenantRouter.get(
     // carry one business name, and a preview that needs a conversation
     // picked first is a preview nobody looks at.
     const firstNumber = await findFirstPhoneNumberForTenant(auth.tenantId);
-    const resolved = resolveBusinessName({
-      displayName: tenant.displayName,
-      verifiedName: firstNumber?.verifiedName,
-      tenantName: tenant.name,
-    });
+    const resolved = firstNumber
+      ? await resolveBusinessNameForConversation(auth.tenantId, String(firstNumber._id))
+      : resolveBusinessName({ displayName: tenant.displayName, tenantName: tenant.name });
 
     res.status(200).json({
       success: true,
@@ -219,11 +217,9 @@ tenantRouter.patch(
     if (!tenant) throw ApiError.notFound('TENANT_NOT_FOUND', 'Workspace not found');
 
     const firstNumber = await findFirstPhoneNumberForTenant(auth.tenantId);
-    const resolved = resolveBusinessName({
-      displayName: tenant.displayName,
-      verifiedName: firstNumber?.verifiedName,
-      tenantName: tenant.name,
-    });
+    const resolved = firstNumber
+      ? await resolveBusinessNameForConversation(auth.tenantId, String(firstNumber._id))
+      : resolveBusinessName({ displayName: tenant.displayName, tenantName: tenant.name });
 
     res.status(200).json({
       success: true,

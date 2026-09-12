@@ -7,6 +7,7 @@ import { findContactByIdAndTenant, findOrCreateContactByPhone } from '../contact
 import { normalizePhone } from '../../lib/phone';
 import type { GuestMediaKind } from './guestMedia.service';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
+import { refreshNumberHealthIfStale } from '../whatsapp/whatsapp.service';
 import {
   findConversationByIdAndTenant,
   findOrCreateConversation,
@@ -41,8 +42,9 @@ import { countRecentGuestReports, createGuestReport, listGuestReportsForConversa
 import { deleteGuestPushTokensForConversation } from './guestPushToken.repository';
 import { pushGuestMessage } from './guestPush.service';
 import type { GuestReportLean, GuestReportReason } from './guestReport.model';
-import { resolveBusinessName } from './businessName';
+import { resolveBusinessName, resolveBusinessNameForConversation } from './businessName';
 import { hasMovedToWebChat } from './webChatRouting';
+import { findCustomerFacingNameForPhoneNumber } from '../users/user.repository';
 
 /**
  * What a resolved web-chat token stands for. Deliberately narrower than
@@ -484,10 +486,11 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
    */
   blocked: boolean;
 }> {
-  const [tenant, contact, phoneNumber] = await Promise.all([
+  const [tenant, contact, phoneNumber, memberName] = await Promise.all([
     Tenant.findById(guest.tenantId).select('name displayName').lean(),
     findContactByIdAndTenant(guest.contactId, guest.tenantId),
     findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId),
+    findCustomerFacingNameForPhoneNumber(guest.tenantId, guest.whatsappPhoneNumberId),
   ]);
 
   // APPROVED is the only value that means "Meta reviewed this and accepted
@@ -496,10 +499,23 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
   // window in which Meta has not decided.
   const verifiedByWhatsApp = phoneNumber?.nameStatus === 'APPROVED';
 
+  // nameStatus used to be refreshed only when an admin opened the numbers
+  // screen, so a workspace where nobody had opened it showed no badge for
+  // a name Meta had approved months earlier — the badge was wired to a
+  // field nothing was keeping current.
+  //
+  // Never awaited: the customer's window must not wait on a Graph round
+  // trip, and the value it renders this time is the stored one either
+  // way. The next load shows the fresh reading. Rate-limited by
+  // healthCheckedAt inside refreshNumberHealth, so a busy conversation
+  // costs one call per number per staleness window, not one per page view.
+  if (phoneNumber) void refreshNumberHealthIfStale(phoneNumber);
+
   return {
     conversationId: guest.conversationId,
     businessName: resolveBusinessName({
       displayName: tenant?.displayName,
+      memberName,
       verifiedName: phoneNumber?.verifiedName,
       tenantName: tenant?.name,
     }).name,
@@ -1047,15 +1063,15 @@ export async function sendGuestReply(
   //
   // The title has to be resolved the same way the window header is, or the
   // notification and the page it opens would name two different businesses.
-  const tenant = await Tenant.findById(auth.tenantId).select('name displayName').lean();
   await pushGuestMessage({
     tenantId: auth.tenantId,
     conversationId,
-    businessName: resolveBusinessName({
-      displayName: tenant?.displayName,
-      verifiedName: phoneNumber?.verifiedName,
-      tenantName: tenant?.name,
-    }).name,
+    businessName: (
+      await resolveBusinessNameForConversation(
+        auth.tenantId,
+        String(conversation.whatsappPhoneNumberId),
+      )
+    ).name,
     messageType: 'text',
     text,
   });

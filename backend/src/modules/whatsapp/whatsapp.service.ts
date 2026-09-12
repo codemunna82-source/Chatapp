@@ -243,6 +243,24 @@ export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promi
 }
 
 /**
+ * Refreshes one number's health only if the stored reading has aged out.
+ *
+ * The staleness test used to live inside listPhoneNumbersForTenant, which
+ * meant every other caller that wanted a current reading had to remember
+ * to repeat it — or, as the guest window did, silently render a field
+ * nothing was keeping current. Named here so "refresh if it is old" is
+ * one call rather than a rule each caller reimplements.
+ *
+ * Never throws, and never awaited by the paths that use it: the stored
+ * values are what gets rendered this time round either way.
+ */
+export async function refreshNumberHealthIfStale(number: WhatsAppPhoneNumberDoc): Promise<void> {
+  const checkedAt = number.healthCheckedAt?.getTime() ?? 0;
+  if (checkedAt >= Date.now() - HEALTH_STALE_AFTER_MS) return;
+  await refreshNumberHealth(number);
+}
+
+/**
  * The tenant's WhatsApp numbers, for the admin's "sends from" picker and
  * the health screen.
  *
@@ -255,11 +273,7 @@ export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promi
 export async function listPhoneNumbersForTenant(tenantId: string): Promise<PublicWhatsAppNumber[]> {
   const numbers = await findPhoneNumbersByTenant(tenantId);
 
-  const cutoff = Date.now() - HEALTH_STALE_AFTER_MS;
-  for (const number of numbers) {
-    const checkedAt = number.healthCheckedAt?.getTime() ?? 0;
-    if (checkedAt < cutoff) void refreshNumberHealth(number);
-  }
+  for (const number of numbers) void refreshNumberHealthIfStale(number);
 
   return numbers.map(toPublicWhatsAppNumber);
 }
