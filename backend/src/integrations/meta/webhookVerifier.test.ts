@@ -212,3 +212,54 @@ describe('per-app webhook secrets', () => {
     expect(appSecretHasExpectedShape('EAAUydPo2YYkBS' + 'x'.repeat(200))).toBe(false);
   });
 });
+
+/**
+ * The existing single-Business-Manager deployment, unchanged.
+ *
+ * Multi-BM support was added by giving these two functions an optional
+ * parameter. That is only safe if omitting it behaves exactly as before —
+ * the live deployment's Meta dashboard still points at the bare
+ * /api/webhooks/meta, verified against the global META_* values, and a
+ * regression here takes a working system down to serve one that is not
+ * in use yet.
+ *
+ * So these test the OLD call shape on purpose, with no extra argument.
+ */
+describe('the global META_* configuration still works untouched', () => {
+  const body = Buffer.from(JSON.stringify({ object: 'whatsapp_business_account' }));
+
+  it('verifies a signature against the environment when no app is named', () => {
+    const sig = `sha256=${createHmac('sha256', env.META_APP_SECRET).update(body).digest('hex')}`;
+    expect(checkSignature(body, sig)).toEqual({ ok: true });
+    expect(verifySignature(body, sig)).toBe(true);
+  });
+
+  it('still rejects a wrong secret when no app is named', () => {
+    const sig = `sha256=${createHmac('sha256', 'f'.repeat(32)).update(body).digest('hex')}`;
+    expect(checkSignature(body, sig)).toEqual({ ok: false, reason: 'DIGEST_MISMATCH' });
+  });
+
+  it('answers the challenge against the environment token when no app is named', () => {
+    expect(
+      verifyChallenge({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': env.META_VERIFY_TOKEN,
+        'hub.challenge': 'abc',
+      }),
+    ).toEqual({ ok: true, challenge: 'abc' });
+  });
+
+  it('still rejects a wrong challenge token when no app is named', () => {
+    expect(
+      verifyChallenge({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': 'not-the-token',
+        'hub.challenge': 'abc',
+      }),
+    ).toEqual({ ok: false, reason: 'TOKEN_MISMATCH' });
+  });
+
+  it('reports the environment secret’s shape when no app is named', () => {
+    expect(appSecretHasExpectedShape()).toBe(/^[0-9a-f]{32}$/.test(env.META_APP_SECRET));
+  });
+});

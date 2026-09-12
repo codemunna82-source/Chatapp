@@ -461,6 +461,28 @@ export async function registerPhoneNumberForTenant(
 }
 
 /**
+ * Which accounts belong to a given Business Manager.
+ *
+ * Two cases, and the second is the one that had to be got right. With a
+ * BM named, match only its accounts. WITHOUT one — the existing single-BM
+ * deployment — match only accounts that have no BM at all, because an
+ * unfiltered query would hand back whichever account happened to be
+ * oldest, including one belonging to a Business Manager whose token
+ * cannot send from this number.
+ *
+ * `$exists: false` rather than `null`: the field was added after these
+ * documents were written, so it is absent from every one of them, and
+ * `{ metaAppId: null }` would match those too but also anything later
+ * written with an explicit null. Absent is the honest description.
+ *
+ * Exported for its test: a mistake here does not throw, it attaches a
+ * number to the wrong credentials and fails at Meta days later.
+ */
+export function accountScopeFilter(metaAppId?: string): Record<string, unknown> {
+  return metaAppId ? { metaAppId } : { metaAppId: { $exists: false } };
+}
+
+/**
  * The WhatsAppAccount to hang a newly registered number off.
  *
  * Scoped to the Business Manager, which is the part that changed when a
@@ -480,11 +502,10 @@ async function findOrCreateRealAccount(
   wabaId?: string,
   metaAppId?: string,
 ): Promise<WhatsAppAccountDoc> {
-  // `metaAppId: null` for the no-BM case, not `undefined`: an unfiltered
-  // query would hand back some other Business Manager's account, which is
-  // exactly the mix-up this scoping exists to prevent.
-  const scope = metaAppId ? { metaAppId } : { metaAppId: { $exists: false } };
-  const existing = await WhatsAppAccount.findOne({ tenantId, ...scope }).sort({ createdAt: 1 });
+  const existing = await WhatsAppAccount.findOne({
+    tenantId,
+    ...accountScopeFilter(metaAppId),
+  }).sort({ createdAt: 1 });
   if (existing) {
     if (wabaId && existing.wabaId !== wabaId) {
       existing.wabaId = wabaId;
