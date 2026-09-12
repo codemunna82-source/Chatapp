@@ -6,6 +6,25 @@ export type TenantStatus = (typeof TENANT_STATUSES)[number];
 const tenantSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
+    /**
+     * The name customers see — in the web chat window's header and in its
+     * push notifications.
+     *
+     * Separate from `name` on purpose. `name` is the workspace's internal
+     * label: it is set once by the seed (default "Demo Tenant"), shown
+     * only to staff, and renaming it is an admin action with its own
+     * consequences. This is the public-facing one, and the only name a
+     * stranger who taps the invitation link will ever read.
+     *
+     * Optional, and normally left unset: the best answer is the display
+     * name Meta already holds for the number the customer messaged, which
+     * is the name they saw in WhatsApp a moment earlier. This exists for
+     * the workspace that wants to override that — a trading name, a
+     * department — and for the gap before Meta has approved a name at
+     * all. See resolveGuestBusinessName() in guest.service.ts for the
+     * order the two are tried in.
+     */
+    displayName: { type: String, trim: true, maxlength: 120 },
     slug: { type: String, required: true, trim: true, lowercase: true },
     status: { type: String, enum: TENANT_STATUSES, default: 'ACTIVE', required: true },
     masterAdminId: { type: Schema.Types.ObjectId, ref: 'User' },

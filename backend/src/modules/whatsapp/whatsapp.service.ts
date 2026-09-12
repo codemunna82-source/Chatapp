@@ -229,6 +229,11 @@ export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promi
     number.qualityRating = profile.qualityRating;
     number.messagingLimitTier = profile.messagingLimitTier;
     number.nameStatus = profile.nameStatus;
+    // The name the customer already sees above this number in WhatsApp.
+    // Only overwritten when Meta actually returns one: a blank reply must
+    // not erase a name we already have, or the web window would fall back
+    // to the workspace's internal label on a single bad Graph response.
+    if (profile.verifiedName) number.verifiedName = profile.verifiedName;
     number.codeVerificationStatus = profile.codeVerificationStatus;
     number.healthCheckedAt = new Date();
     await number.save();
@@ -443,6 +448,7 @@ export async function registerPhoneNumberForTenant(
   if (existingAnywhere) {
     existingAnywhere.displayPhoneNumber = profile.displayPhoneNumber;
     existingAnywhere.qualityRating = profile.qualityRating;
+    if (profile.verifiedName) existingAnywhere.verifiedName = profile.verifiedName;
     existingAnywhere.status = 'CONNECTED';
     existingAnywhere.whatsappAccountId = account._id;
     await existingAnywhere.save();
@@ -455,6 +461,7 @@ export async function registerPhoneNumberForTenant(
     phoneNumberId: profile.phoneNumberId,
     displayPhoneNumber: profile.displayPhoneNumber,
     qualityRating: profile.qualityRating,
+    verifiedName: profile.verifiedName,
     status: 'CONNECTED',
   });
   return toPublicWhatsAppNumber(created);

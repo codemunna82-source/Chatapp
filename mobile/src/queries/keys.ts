@@ -24,6 +24,8 @@ export const queryKeys = {
   calls: ['calls'] as const,
   whatsappNumbers: ['whatsappNumbers'] as const,
   whatsappConnection: ['whatsappConnection'] as const,
+  /** Workspace-wide settings, including the name customers see. */
+  tenantSettings: ['tenantSettings'] as const,
   /** Whether a conversation has a live web chat window. */
   guestLink: (conversationId: string) => ['guestLink', conversationId] as const,
 };

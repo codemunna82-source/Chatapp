@@ -8,6 +8,8 @@ import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { ApiError } from '../../lib/ApiError';
 import { env } from '../../config/env';
 import { Tenant, DEFAULT_AUTO_GUEST_LINK_TEXT, DEFAULT_AUTO_GUEST_WELCOME } from './tenant.model';
+import { resolveBusinessName } from '../guest/businessName';
+import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
 
 /**
  * Workspace-wide settings. MASTER_ADMIN only — these change what every
@@ -61,13 +63,34 @@ tenantRouter.get(
   '/settings',
   asyncHandler(async (req, res) => {
     const auth = getTenantContext(req);
-    const tenant = await Tenant.findById(auth.tenantId).select('name autoGuestLink').lean();
+    const tenant = await Tenant.findById(auth.tenantId).select('name displayName autoGuestLink').lean();
     if (!tenant) throw ApiError.notFound('TENANT_NOT_FOUND', 'Workspace not found');
+
+    // What a customer would actually see, resolved through the same rule
+    // the web window uses. Reported alongside the raw field because the
+    // two differ whenever the field is blank, and an admin looking at an
+    // empty box has no other way to find out what is being shown in their
+    // name. The first connected number stands in for "any number": the
+    // header is per-conversation, but a workspace's numbers almost always
+    // carry one business name, and a preview that needs a conversation
+    // picked first is a preview nobody looks at.
+    const firstNumber = await findFirstPhoneNumberForTenant(auth.tenantId);
+    const resolved = resolveBusinessName({
+      displayName: tenant.displayName,
+      verifiedName: firstNumber?.verifiedName,
+      tenantName: tenant.name,
+    });
 
     res.status(200).json({
       success: true,
       data: {
         name: tenant.name,
+        displayName: tenant.displayName ?? '',
+        /** The name customers see right now, and where it came from. */
+        customerFacingName: resolved.name,
+        customerFacingNameSource: resolved.source,
+        /** Meta's approved name for the workspace's first number, if it has one. */
+        whatsappVerifiedName: firstNumber?.verifiedName ?? '',
         autoGuestLink: {
           enabled: tenant.autoGuestLink?.enabled ?? false,
           /**
@@ -158,6 +181,57 @@ tenantRouter.patch(
         maxSends: tenant.autoGuestLink?.maxSends ?? 1,
         holdWhatsAppUntilOpened: tenant.autoGuestLink?.holdWhatsAppUntilOpened ?? false,
         welcomeMessage: tenant.autoGuestLink?.welcomeMessage ?? DEFAULT_AUTO_GUEST_WELCOME,
+      },
+    });
+  }),
+);
+
+/**
+ * The name customers see.
+ *
+ * Its own route rather than a field on the auto-reply one: this changes
+ * what a stranger reads at the top of the chat window, which is a
+ * different kind of decision from how the invitation is worded, and
+ * bundling them would mean saving one to change the other.
+ *
+ * An empty string is a real instruction — "stop overriding, go back to
+ * the name WhatsApp holds for the number" — so it is written rather than
+ * skipped as "unchanged".
+ */
+const businessProfileSchema = z.object({
+  displayName: z.string().trim().max(120),
+});
+
+tenantRouter.patch(
+  '/settings/profile',
+  validate({ body: businessProfileSchema }),
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const { displayName } = req.body as z.infer<typeof businessProfileSchema>;
+
+    const tenant = await Tenant.findByIdAndUpdate(
+      auth.tenantId,
+      { $set: { displayName } },
+      { new: true },
+    )
+      .select('name displayName')
+      .lean();
+    if (!tenant) throw ApiError.notFound('TENANT_NOT_FOUND', 'Workspace not found');
+
+    const firstNumber = await findFirstPhoneNumberForTenant(auth.tenantId);
+    const resolved = resolveBusinessName({
+      displayName: tenant.displayName,
+      verifiedName: firstNumber?.verifiedName,
+      tenantName: tenant.name,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        displayName: tenant.displayName ?? '',
+        customerFacingName: resolved.name,
+        customerFacingNameSource: resolved.source,
+        whatsappVerifiedName: firstNumber?.verifiedName ?? '',
       },
     });
   }),

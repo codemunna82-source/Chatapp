@@ -11,8 +11,8 @@ import {
 import { conversationVisibleTo, findConversationByIdAndTenant } from '../../modules/conversations/conversation.repository';
 import { visibleWhatsAppPhoneNumberId } from '../../modules/conversations/conversation.access';
 import { findContactByIdAndTenant } from '../../modules/contacts/contact.repository';
-import { Tenant } from '../../modules/tenants/tenant.model';
 import { pushGuestIncomingCall } from '../../modules/guest/guestPush.service';
+import { resolveBusinessNameForConversation } from '../../modules/guest/businessName';
 import { pushIncomingCall } from '../../modules/notifications/push.service';
 import {
   isConversationBlockedByGuest,
@@ -262,7 +262,14 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
     void pushGuestIncomingCall({
       tenantId: auth.tenantId,
       conversationId,
-      businessName: (await Tenant.findById(auth.tenantId).select('name').lean())?.name ?? 'Support',
+      // Resolved exactly as the window header is, so the ring and the page
+      // it opens name the same business (see guest/businessName.ts).
+      businessName: (
+        await resolveBusinessNameForConversation(
+          auth.tenantId,
+          String(conversation.whatsappPhoneNumberId),
+        )
+      ).name,
       callId: String(call._id),
     });
 

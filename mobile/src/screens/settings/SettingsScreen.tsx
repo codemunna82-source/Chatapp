@@ -463,6 +463,16 @@ export function SettingsScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('WhatsAppNumbers')}
           />
         ) : null}
+        {/* The name a customer reads at the top of the private chat
+            window. Admin-only, because it is the workspace's public face:
+            one member changing it changes what every customer sees. */}
+        {isMasterAdmin ? (
+          <SettingsRow
+            icon="storefront-outline"
+            label="Business profile"
+            onPress={() => navigation.navigate('BusinessProfile')}
+          />
+        ) : null}
       </View>
 
       <Button label="Sign out" variant="danger" onPress={() => logout.mutate()} loading={logout.isPending} testID="settings-logout" />

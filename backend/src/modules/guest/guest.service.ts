@@ -41,6 +41,7 @@ import { countRecentGuestReports, createGuestReport, listGuestReportsForConversa
 import { deleteGuestPushTokensForConversation } from './guestPushToken.repository';
 import { pushGuestMessage } from './guestPush.service';
 import type { GuestReportLean, GuestReportReason } from './guestReport.model';
+import { resolveBusinessName } from './businessName';
 
 /**
  * What a resolved web-chat token stands for. Deliberately narrower than
@@ -468,7 +469,7 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
   blocked: boolean;
 }> {
   const [tenant, contact, phoneNumber] = await Promise.all([
-    Tenant.findById(guest.tenantId).select('name').lean(),
+    Tenant.findById(guest.tenantId).select('name displayName').lean(),
     findContactByIdAndTenant(guest.contactId, guest.tenantId),
     findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId),
   ]);
@@ -481,7 +482,11 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
 
   return {
     conversationId: guest.conversationId,
-    businessName: tenant?.name ?? 'Support',
+    businessName: resolveBusinessName({
+      displayName: tenant?.displayName,
+      verifiedName: phoneNumber?.verifiedName,
+      tenantName: tenant?.name,
+    }).name,
     contactName: contact?.name ?? undefined,
     verifiedByWhatsApp,
     businessPhone: phoneNumber?.displayPhoneNumber ?? undefined,
@@ -1023,11 +1028,18 @@ export async function sendGuestReply(
   //
   // Last, and never allowed to fail the request — the message is stored
   // and already on the socket.
-  const tenant = await Tenant.findById(auth.tenantId).select('name').lean();
+  //
+  // The title has to be resolved the same way the window header is, or the
+  // notification and the page it opens would name two different businesses.
+  const tenant = await Tenant.findById(auth.tenantId).select('name displayName').lean();
   await pushGuestMessage({
     tenantId: auth.tenantId,
     conversationId,
-    businessName: tenant?.name ?? 'Support',
+    businessName: resolveBusinessName({
+      displayName: tenant?.displayName,
+      verifiedName: phoneNumber?.verifiedName,
+      tenantName: tenant?.name,
+    }).name,
     messageType: 'text',
     text,
   });

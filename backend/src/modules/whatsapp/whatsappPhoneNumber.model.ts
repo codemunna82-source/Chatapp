@@ -19,6 +19,22 @@ const whatsappPhoneNumberSchema = new Schema(
     /** Meta-reported conversation cap: TIER_250 | TIER_1K | TIER_10K | TIER_100K | TIER_UNLIMITED. */
     messagingLimitTier: { type: String },
     /**
+     * The business display name Meta holds for this number — the name a
+     * customer sees above the chat in WhatsApp itself.
+     *
+     * Stored because it is the only name in the system the customer has
+     * already seen. The workspace's own `Tenant.name` is an internal
+     * label (a fresh install's is literally "Demo Tenant"), and showing
+     * that to a customer in the web window makes the window look like it
+     * belongs to someone else — which, for a page asking them to keep
+     * talking, is the one impression it cannot afford.
+     *
+     * Read back from Meta on every health refresh, never set by hand, for
+     * the same reason `nameStatus` is not: it is Meta's record of what
+     * this number is called, not ours.
+     */
+    verifiedName: { type: String },
+    /**
      * Meta's verdict on the business display name — APPROVED, PENDING_REVIEW,
      * DECLINED — and on the number itself.
      *
