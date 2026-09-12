@@ -42,6 +42,7 @@ import { deleteGuestPushTokensForConversation } from './guestPushToken.repositor
 import { pushGuestMessage } from './guestPush.service';
 import type { GuestReportLean, GuestReportReason } from './guestReport.model';
 import { resolveBusinessName } from './businessName';
+import { hasMovedToWebChat } from './webChatRouting';
 
 /**
  * What a resolved web-chat token stands for. Deliberately narrower than
@@ -387,7 +388,7 @@ export async function getGuestLinkStatus(
      * an agent typing into a chat deserves to know which of the two
      * places the customer will read it.
      */
-    openedByCustomer: Boolean(session.activatedAt) && !session.blockedAt,
+    openedByCustomer: hasMovedToWebChat(session),
     // So the composer can say why it is disabled instead of failing on
     // send. The agent finding out at the moment they press the button is
     // the worst time to learn this.
