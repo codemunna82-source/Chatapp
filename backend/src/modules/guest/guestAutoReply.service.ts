@@ -56,7 +56,29 @@ export async function maybeSendGuestLinkAutoReply(input: {
 
     const tenant = await Tenant.findById(input.tenantId).select('autoGuestLink').lean();
     const config = tenant?.autoGuestLink;
-    if (!config?.enabled || !config.templateName || !config.templateLanguage) return;
+    if (!config?.enabled) return;
+
+    // Enabled but unusable. This state is reachable — a workspace that
+    // switched the feature on before it took a template still has
+    // `enabled: true` with nothing to send — and it used to be SILENT,
+    // which made "the setting says On" and "the code is not deployed"
+    // look identical from the logs. They are hours apart to diagnose.
+    //
+    // Logged at warn, not debug: an admin believing this is on when it is
+    // not is exactly the kind of thing nobody notices until a customer
+    // complains that nobody answered.
+    if (!config.templateName || !config.templateLanguage) {
+      logger.warn(
+        {
+          tenantId: input.tenantId,
+          conversationId: input.conversationId,
+          hasTemplateName: Boolean(config.templateName),
+          hasTemplateLanguage: Boolean(config.templateLanguage),
+        },
+        'Automatic chat invitation is switched on but names no approved template, so nothing was sent',
+      );
+      return;
+    }
 
     // Checked immediately before minting, not cached from earlier in the
     // request: two messages arriving together would otherwise both pass a

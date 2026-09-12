@@ -61,6 +61,20 @@ tenantRouter.get(
         name: tenant.name,
         autoGuestLink: {
           enabled: tenant.autoGuestLink?.enabled ?? false,
+          /**
+           * Whether anything will actually be sent.
+           *
+           * Distinct from `enabled`, and the difference is not pedantry: a
+           * workspace that switched this on before it took a template has
+           * `enabled: true` and no template, so the panel reads "On" while
+           * the sender skips every message. Reporting only `enabled` is how
+           * that goes unnoticed until a customer says nobody answered.
+           */
+          active: Boolean(
+            tenant.autoGuestLink?.enabled &&
+              tenant.autoGuestLink?.templateName &&
+              tenant.autoGuestLink?.templateLanguage,
+          ),
           templateName: tenant.autoGuestLink?.templateName ?? '',
           templateLanguage: tenant.autoGuestLink?.templateLanguage ?? '',
           bodyVariable: tenant.autoGuestLink?.bodyVariable ?? 'none',
