@@ -7,7 +7,7 @@ import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { ApiError } from '../../lib/ApiError';
 import { env } from '../../config/env';
-import { Tenant } from './tenant.model';
+import { Tenant, DEFAULT_AUTO_GUEST_LINK_TEXT, DEFAULT_AUTO_GUEST_WELCOME } from './tenant.model';
 
 /**
  * Workspace-wide settings. MASTER_ADMIN only — these change what every
@@ -20,6 +20,8 @@ tenantRouter.use(requireAuth, requireRole('MASTER_ADMIN'));
 const autoGuestLinkSchema = z
   .object({
     enabled: z.boolean(),
+    mode: z.enum(['text', 'template']).optional(),
+    message: z.string().trim().min(1).max(900).optional(),
     templateName: z.string().trim().min(1).max(512).optional(),
     templateLanguage: z.string().trim().min(2).max(16).optional(),
     bodyVariable: z.enum(['none', 'customer_name']).optional(),
@@ -28,13 +30,20 @@ const autoGuestLinkSchema = z
     holdWhatsAppUntilOpened: z.boolean().optional(),
     welcomeMessage: z.string().trim().max(900).optional(),
   })
-  // Refused here rather than at send time, where the failure happens inside
-  // the webhook handler with nobody watching: an enabled auto-reply with no
-  // template named would look switched on and send nothing forever.
-  .refine((body) => !body.enabled || (body.templateName && body.templateLanguage), {
-    message: 'Name the approved template and its language before turning this on',
-    path: ['templateName'],
-  });
+  // Only template mode needs anything named. Refused here rather than at
+  // send time, where the failure happens inside the webhook handler with
+  // nobody watching: switched on with nothing to send looks on and sends
+  // nothing forever. Text mode needs nothing, which is the point of it.
+  .refine(
+    (body) =>
+      !body.enabled ||
+      (body.mode ?? 'text') !== 'template' ||
+      (body.templateName && body.templateLanguage),
+    {
+      message: 'Name the approved template and its language, or switch to plain text',
+      path: ['templateName'],
+    },
+  );
 
 /**
  * The address a template's URL button must be built on.
@@ -72,15 +81,17 @@ tenantRouter.get(
            */
           active: Boolean(
             tenant.autoGuestLink?.enabled &&
-              tenant.autoGuestLink?.templateName &&
-              tenant.autoGuestLink?.templateLanguage,
+              ((tenant.autoGuestLink?.mode ?? 'text') !== 'template' ||
+                (tenant.autoGuestLink?.templateName && tenant.autoGuestLink?.templateLanguage)),
           ),
+          mode: tenant.autoGuestLink?.mode ?? 'text',
+          message: tenant.autoGuestLink?.message ?? DEFAULT_AUTO_GUEST_LINK_TEXT,
           templateName: tenant.autoGuestLink?.templateName ?? '',
           templateLanguage: tenant.autoGuestLink?.templateLanguage ?? '',
           bodyVariable: tenant.autoGuestLink?.bodyVariable ?? 'none',
           maxSends: tenant.autoGuestLink?.maxSends ?? 1,
           holdWhatsAppUntilOpened: tenant.autoGuestLink?.holdWhatsAppUntilOpened ?? false,
-          welcomeMessage: tenant.autoGuestLink?.welcomeMessage ?? '',
+          welcomeMessage: tenant.autoGuestLink?.welcomeMessage ?? DEFAULT_AUTO_GUEST_WELCOME,
         },
         // Without this the feature cannot work at all, and the admin has no
         // way to find that out short of turning it on and waiting for a
@@ -111,6 +122,8 @@ tenantRouter.patch(
       {
         $set: {
           'autoGuestLink.enabled': body.enabled,
+          ...(body.mode ? { 'autoGuestLink.mode': body.mode } : {}),
+          ...(body.message ? { 'autoGuestLink.message': body.message } : {}),
           ...(body.templateName ? { 'autoGuestLink.templateName': body.templateName } : {}),
           ...(body.templateLanguage
             ? { 'autoGuestLink.templateLanguage': body.templateLanguage }
@@ -137,12 +150,14 @@ tenantRouter.patch(
       success: true,
       data: {
         enabled: tenant.autoGuestLink?.enabled ?? false,
+        mode: tenant.autoGuestLink?.mode ?? 'text',
+        message: tenant.autoGuestLink?.message ?? DEFAULT_AUTO_GUEST_LINK_TEXT,
         templateName: tenant.autoGuestLink?.templateName ?? '',
         templateLanguage: tenant.autoGuestLink?.templateLanguage ?? '',
         bodyVariable: tenant.autoGuestLink?.bodyVariable ?? 'none',
         maxSends: tenant.autoGuestLink?.maxSends ?? 1,
         holdWhatsAppUntilOpened: tenant.autoGuestLink?.holdWhatsAppUntilOpened ?? false,
-        welcomeMessage: tenant.autoGuestLink?.welcomeMessage ?? '',
+        welcomeMessage: tenant.autoGuestLink?.welcomeMessage ?? DEFAULT_AUTO_GUEST_WELCOME,
       },
     });
   }),

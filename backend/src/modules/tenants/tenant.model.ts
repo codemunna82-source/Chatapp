@@ -35,6 +35,24 @@ const tenantSchema = new Schema(
       type: new Schema(
         {
           enabled: { type: Boolean, default: false, required: true },
+          /**
+           * How the invitation is sent.
+           *
+           * 'text' is the default and needs nothing from Meta: the reply
+           * goes out as an ordinary message with the link in it. That
+           * works because this only ever fires in direct response to a
+           * customer's own message, so Meta's 24-hour window is open by
+           * definition — the one moment free-form text is allowed.
+           *
+           * 'template' sends an approved template instead, which is the
+           * upgrade: Meta renders its URL button as a real tappable
+           * control rather than a bare link. Worth having, but it costs a
+           * review cycle, and a workspace should not have to wait on Meta
+           * to get its first customer into the chat window.
+           */
+          mode: { type: String, enum: ['text', 'template'], default: 'text', required: true },
+          /** The text sent in 'text' mode. {{link}} becomes the customer's own URL. */
+          message: { type: String, trim: true, maxlength: 900 },
           /** The approved template's name, exactly as it appears in WhatsApp Manager. */
           templateName: { type: String, trim: true, maxlength: 512 },
           /** Meta's language code for the approved copy, e.g. "en" or "en_US". */
@@ -102,6 +120,35 @@ tenantSchema.index({ slug: 1 }, { unique: true });
  * a template with a second button would need it changed.
  */
 export const AUTO_GUEST_LINK_BUTTON_INDEX = '0';
+
+/**
+ * What a customer is sent when nobody has written their own wording.
+ *
+ * Two short lines and the link on its own. WhatsApp renders a URL on its
+ * own line as a tappable preview, which a link buried mid-sentence does
+ * not get — and the emoji are load-bearing rather than decoration: this
+ * arrives unprompted from a business, and a wall of plain text from an
+ * unknown number is what people scroll past.
+ */
+export const DEFAULT_AUTO_GUEST_LINK_TEXT =
+  '\u{1F4AC} Continue our conversation privately.\n\n\u{1F512} Open the private chat here:\n{{link}}';
+
+/** The greeting shown when the customer first writes from the window. */
+export const DEFAULT_AUTO_GUEST_WELCOME = 'Hello, welcome! How can we help you today?';
+
+/**
+ * The invitation text with the customer's own link in it.
+ *
+ * A template without {{link}} gets the URL appended on its own line
+ * rather than sent as-is. An invitation with no link in it is the one
+ * outcome that makes the whole feature pointless, and it would send
+ * perfectly — nothing downstream would ever flag it.
+ */
+export function renderAutoGuestLinkText(template: string | undefined, url: string): string {
+  const text = (template ?? DEFAULT_AUTO_GUEST_LINK_TEXT).trim();
+  if (text.includes('{{link}}')) return text.replaceAll('{{link}}', url);
+  return `${text}\n${url}`;
+}
 
 export type TenantDoc = HydratedDocument<InferSchemaType<typeof tenantSchema>>;
 export const Tenant = model('Tenant', tenantSchema);

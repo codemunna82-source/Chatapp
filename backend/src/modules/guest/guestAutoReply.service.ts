@@ -1,6 +1,10 @@
 import { logger } from '../../lib/logger';
 import { env } from '../../config/env';
-import { Tenant, AUTO_GUEST_LINK_BUTTON_INDEX } from '../tenants/tenant.model';
+import {
+  Tenant,
+  AUTO_GUEST_LINK_BUTTON_INDEX,
+  renderAutoGuestLinkText,
+} from '../tenants/tenant.model';
 import { sendOutboundMessage } from '../messages/message.service';
 import { setAwaitingWebChat } from '../conversations/conversation.repository';
 import { findContactByIdAndTenant } from '../contacts/contact.repository';
@@ -58,16 +62,17 @@ export async function maybeSendGuestLinkAutoReply(input: {
     const config = tenant?.autoGuestLink;
     if (!config?.enabled) return;
 
-    // Enabled but unusable. This state is reachable — a workspace that
-    // switched the feature on before it took a template still has
-    // `enabled: true` with nothing to send — and it used to be SILENT,
-    // which made "the setting says On" and "the code is not deployed"
-    // look identical from the logs. They are hours apart to diagnose.
+    const mode = config.mode ?? 'text';
+
+    // Template mode with no template is enabled-but-unusable, and it used
+    // to be SILENT — which made "the admin has not finished configuring
+    // it" and "the new code is not deployed" look identical in the logs.
+    // They are hours apart to diagnose.
     //
-    // Logged at warn, not debug: an admin believing this is on when it is
-    // not is exactly the kind of thing nobody notices until a customer
-    // complains that nobody answered.
-    if (!config.templateName || !config.templateLanguage) {
+    // At warn, not debug: an admin believing this is on when it is not is
+    // the kind of thing nobody notices until a customer says nobody
+    // answered. Text mode needs nothing, so it never reaches here.
+    if (mode === 'template' && (!config.templateName || !config.templateLanguage)) {
       logger.warn(
         {
           tenantId: input.tenantId,
@@ -75,7 +80,7 @@ export async function maybeSendGuestLinkAutoReply(input: {
           hasTemplateName: Boolean(config.templateName),
           hasTemplateLanguage: Boolean(config.templateLanguage),
         },
-        'Automatic chat invitation is switched on but names no approved template, so nothing was sent',
+        'Automatic chat invitation is set to template mode but names no approved template, so nothing was sent',
       );
       return;
     }
@@ -109,26 +114,45 @@ export async function maybeSendGuestLinkAutoReply(input: {
       token = created.token;
     }
 
-    // Resolved before building so the builder itself stays pure and
-    // testable — the component shape is what Meta rejects a send on.
-    let customerName: string | null = null;
-    if (config.bodyVariable === 'customer_name') {
-      const contact = await findContactByIdAndTenant(input.contactId, input.tenantId);
-      customerName = contact?.name?.trim() || null;
-    }
-    const components = buildAutoGuestLinkComponents(customerName, token, config.bodyVariable);
+    const url = `${env.GUEST_LINK_BASE_URL}/c/${token}`;
 
-    // No senderId: nobody sent this. Recording a human's id would put an
-    // agent's name on a message they did not write, and the agent app
-    // reads that field to decide whose bubble it is.
-    await sendOutboundMessage({
-      tenantId: input.tenantId,
-      conversationId: input.conversationId,
-      type: 'template',
-      templateName: config.templateName,
-      languageCode: config.templateLanguage,
-      templateComponents: components,
-    });
+    // No senderId on either path: nobody sent this. Recording a human's id
+    // would put an agent's name on a message they did not write, and the
+    // agent app reads that field to decide whose bubble it is.
+    if (mode === 'text') {
+      // Free-form, which Meta allows because this fires in direct response
+      // to the customer's own message — the 24-hour window is open by
+      // definition at this exact moment. That is what lets the default
+      // work with no approved template and no waiting on a review.
+      //
+      // If the window somehow is not open, the send throws
+      // MESSAGE_TEMPLATE_REQUIRED and the catch below records it rather
+      // than failing the webhook delivery.
+      await sendOutboundMessage({
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
+        type: 'text',
+        text: renderAutoGuestLinkText(config.message ?? undefined, url),
+      });
+    } else {
+      // Resolved before building so the builder itself stays pure and
+      // testable — the component shape is what Meta rejects a send on.
+      let customerName: string | null = null;
+      if (config.bodyVariable === 'customer_name') {
+        const contact = await findContactByIdAndTenant(input.contactId, input.tenantId);
+        customerName = contact?.name?.trim() || null;
+      }
+      const components = buildAutoGuestLinkComponents(customerName, token, config.bodyVariable);
+
+      await sendOutboundMessage({
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
+        type: 'template',
+        templateName: config.templateName ?? undefined,
+        languageCode: config.templateLanguage ?? undefined,
+        templateComponents: components,
+      });
+    }
 
     await recordInviteSent(input.conversationId, input.tenantId);
 
@@ -144,6 +168,7 @@ export async function maybeSendGuestLinkAutoReply(input: {
       {
         tenantId: input.tenantId,
         conversationId: input.conversationId,
+        mode,
         template: config.templateName,
         attempt: (existing?.invitesSent ?? 0) + 1,
         maxSends,
