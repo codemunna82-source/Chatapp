@@ -9,7 +9,10 @@ import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { ApiError } from '../../lib/ApiError';
 import { encryptSecret } from '../../lib/crypto';
 import { recordAudit } from '../audit/auditLog.service';
+import { env } from '../../config/env';
 import { MetaApp, type MetaAppDoc } from './metaApp.model';
+import { WhatsAppAccount } from './whatsappAccount.model';
+import { WhatsAppPhoneNumber } from './whatsappPhoneNumber.model';
 import { listMetaAppsForTenant, findMetaAppByIdAndTenant } from './metaApp.repository';
 
 /**
@@ -51,18 +54,85 @@ const updateSchema = z.object({
 /**
  * What a client is allowed to see.
  *
- * No secret, no token, not even a masked one. The only honest thing to
- * report is whether each is set, and the webhook URL to paste into Meta.
+ * No secret, no token, not even a masked one — and that is not caution
+ * for its own sake. These credentials can send as the business to any of
+ * its customers, and an admin page is one shoulder-surf, one screenshot
+ * in a support chat and one browser extension away from public. Whether
+ * each is SET is the useful fact and the whole of it; a masked value adds
+ * nothing but an invitation to try reading it.
+ *
+ * The App ID is shown in full. It is an identifier, not a credential —
+ * Meta puts it in URLs and client-side config — and hiding it would only
+ * make the page harder to match against Meta's dashboard.
  */
-function toPublic(app: MetaAppDoc, baseUrl: string) {
+function toPublic(app: MetaAppDoc, baseUrl: string, numberCount = 0) {
   return {
     id: String(app._id),
     name: app.name,
     appId: app.appId,
     status: app.status,
     webhookUrl: `${baseUrl}/api/webhooks/meta/app/${app.webhookRef}`,
+    hasAppSecret: Boolean(app.appSecretEnc),
     hasAccessToken: Boolean(app.accessTokenEnc),
+    numberCount,
+    isDefault: false,
     createdAt: app.get('createdAt'),
+  };
+}
+
+/**
+ * How many WhatsApp numbers sit under each Business Manager.
+ *
+ * Numbers point at accounts and accounts point at an app, so this is two
+ * hops rather than a field on the number — denormalising it would mean a
+ * count that drifts the first time an account is reassigned.
+ *
+ * Keyed by app id, with the empty string standing for "no Business
+ * Manager", which is where every number added before any of this existed
+ * still lives.
+ */
+async function countNumbersByApp(tenantId: string): Promise<Map<string, number>> {
+  const [accounts, numbers] = await Promise.all([
+    WhatsAppAccount.find({ tenantId }).select('metaAppId').lean(),
+    WhatsAppPhoneNumber.find({ tenantId }).select('whatsappAccountId').lean(),
+  ]);
+
+  const appOfAccount = new Map<string, string>();
+  for (const a of accounts) {
+    appOfAccount.set(String(a._id), a.metaAppId ? String(a.metaAppId) : '');
+  }
+
+  const counts = new Map<string, number>();
+  for (const n of numbers) {
+    const key = appOfAccount.get(String(n.whatsappAccountId)) ?? '';
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * The configuration this deployment has been running on all along.
+ *
+ * Presented as a row beside the added Business Managers rather than left
+ * invisible, because it IS one — it holds an app id, a secret, a token and
+ * a set of numbers exactly like the others, and an admin who cannot see it
+ * has no way to tell whether a number belongs to it or to something they
+ * added. It carries no `id`, which is what marks it read-only: it lives in
+ * the server's environment, and a form that appeared to edit it would be
+ * lying.
+ */
+function defaultAppRow(baseUrl: string, numberCount: number) {
+  return {
+    id: null,
+    name: 'Server default',
+    appId: env.META_APP_ID || null,
+    status: 'ACTIVE' as const,
+    webhookUrl: `${baseUrl}/api/webhooks/meta`,
+    hasAppSecret: env.META_APP_SECRET.length > 0,
+    hasAccessToken: env.META_ACCESS_TOKEN.length > 0,
+    numberCount,
+    isDefault: true,
+    createdAt: null,
   };
 }
 
@@ -87,8 +157,21 @@ metaAppRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const auth = getTenantContext(req);
-    const apps = await listMetaAppsForTenant(auth.tenantId);
-    res.status(200).json({ success: true, data: apps.map((a) => toPublic(a, baseUrlFor(req))) });
+    const baseUrl = baseUrlFor(req);
+    const [apps, counts] = await Promise.all([
+      listMetaAppsForTenant(auth.tenantId),
+      countNumbersByApp(auth.tenantId),
+    ]);
+
+    // The environment's own configuration first: it is the oldest and, on
+    // most deployments, the only one holding any numbers.
+    res.status(200).json({
+      success: true,
+      data: [
+        defaultAppRow(baseUrl, counts.get('') ?? 0),
+        ...apps.map((a) => toPublic(a, baseUrl, counts.get(String(a._id)) ?? 0)),
+      ],
+    });
   }),
 );
 
