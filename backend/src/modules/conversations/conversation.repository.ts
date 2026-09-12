@@ -271,23 +271,42 @@ export async function recordInboundActivity(
   preview: string,
   at: Date = new Date(),
 ): Promise<ConversationDoc | null> {
+  // An aggregation pipeline rather than $set + $inc, because the unread
+  // badge has to depend on a field of the document being updated. Reading
+  // awaitingWebChat first and then deciding would let a second message
+  // land in between and bump a count the first one had just held back.
   return Conversation.findOneAndUpdate(
     { _id: id, tenantId },
-    {
-      $set: {
-        lastMessageAt: at,
-        lastMessagePreview: preview,
-        lastMessageDirection: 'IN',
-        // An inbound message has no delivery status of ours to show — the
-        // row renders no tick for it, rather than a stale one from the
-        // outbound message it replaced.
-        lastMessageStatus: null,
-        lastMessageId: null,
-        lastCustomerMessageAt: at,
-        conversationWindowExpiresAt: new Date(at.getTime() + CUSTOMER_SERVICE_WINDOW_MS),
+    [
+      {
+        $set: {
+          lastMessageAt: at,
+          lastMessagePreview: preview,
+          lastMessageDirection: 'IN',
+          // An inbound message has no delivery status of ours to show — the
+          // row renders no tick for it, rather than a stale one from the
+          // outbound message it replaced.
+          lastMessageStatus: null,
+          lastMessageId: null,
+          // NOT conditional, deliberately. These two are Meta's 24-hour
+          // clock and it runs whether or not anyone is looking; freezing
+          // them while a conversation is held would refuse the very
+          // template the invitation is sent as.
+          lastCustomerMessageAt: at,
+          conversationWindowExpiresAt: new Date(at.getTime() + CUSTOMER_SERVICE_WINDOW_MS),
+          // Held out of the inbox means held out of the badge too: an
+          // unread count on a row nobody can see is a number an agent has
+          // no way to clear.
+          unreadCount: {
+            $cond: [
+              { $eq: ['$awaitingWebChat', true] },
+              { $ifNull: ['$unreadCount', 0] },
+              { $add: [{ $ifNull: ['$unreadCount', 0] }, 1] },
+            ],
+          },
+        },
       },
-      $inc: { unreadCount: 1 },
-    },
+    ],
     { new: true },
   );
 }
@@ -404,4 +423,25 @@ export async function filterConversationIdsByPhoneNumber(
     .select('_id')
     .lean();
   return docs.map((d) => String(d._id));
+}
+
+/**
+ * Holds a conversation out of the inbox, or releases it.
+ *
+ * Set when the customer is invited to the web window and cleared the
+ * moment they use it. Releasing does not replay anything — every message
+ * was stored as it arrived, so the agent's app finds the whole thread
+ * already there the first time it loads the conversation.
+ */
+export async function setAwaitingWebChat(
+  id: string,
+  tenantId: string,
+  awaiting: boolean,
+): Promise<ConversationDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Conversation.findOneAndUpdate(
+    { _id: id, tenantId },
+    { $set: { awaitingWebChat: awaiting } },
+    { new: true },
+  );
 }

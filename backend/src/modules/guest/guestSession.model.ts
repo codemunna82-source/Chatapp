@@ -50,6 +50,26 @@ const guestSessionSchema = new Schema(
      * flag changes is that neither side may write while it is set.
      */
     blockedAt: { type: Date },
+    /**
+     * How many times the invitation has been sent into the WhatsApp thread.
+     *
+     * Counted rather than inferred from "does a session exist", because
+     * the invitation is deliberately sent more than once: a customer who
+     * writes again without having tapped the link has almost certainly not
+     * seen it, and one more is worth sending. Bounded by the workspace's
+     * maxSends so "more than once" never becomes "every time", which is
+     * what a customer experiences as spam.
+     */
+    invitesSent: { type: Number, default: 0, required: true },
+    /**
+     * When the customer first USED the window — not merely opened it.
+     *
+     * The moment this is set, two things stop: the invitation is no longer
+     * re-sent, and held WhatsApp messages are released to the agents. It
+     * is the one signal that the customer has actually moved over, which
+     * is what every rule here is waiting for.
+     */
+    activatedAt: { type: Date },
   },
   { timestamps: true },
 );

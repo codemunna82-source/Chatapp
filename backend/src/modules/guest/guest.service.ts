@@ -1,5 +1,6 @@
 import { env } from '../../config/env';
 import { ApiError } from '../../lib/ApiError';
+import { logger } from '../../lib/logger';
 import type { AuthContext } from '../../types/express';
 import { Tenant } from '../tenants/tenant.model';
 import { findContactByIdAndTenant, findOrCreateContactByPhone } from '../contacts/contact.repository';
@@ -14,6 +15,7 @@ import {
 } from '../conversations/conversation.repository';
 import { resolveSendingPhoneNumberId } from '../conversations/conversation.service';
 import { visibleWhatsAppPhoneNumberId } from '../conversations/conversation.access';
+import { setAwaitingWebChat } from '../conversations/conversation.repository';
 import {
   createMessage,
   deleteGuestReactions,
@@ -33,6 +35,7 @@ import {
   revokeSessionsForConversation,
   setSessionBlocked,
   touchSession,
+  activateGuestSession,
 } from './guestSession.repository';
 import { countRecentGuestReports, createGuestReport, listGuestReportsForConversation } from './guestReport.repository';
 import { deleteGuestPushTokensForConversation } from './guestPushToken.repository';
@@ -546,6 +549,19 @@ export async function postGuestMessage(
     status: 'DELIVERED',
   });
 
+  // The customer has moved over. This is the moment three things stop or
+  // start, and all three must happen exactly once — which is what
+  // activateGuestSession's filter guarantees when two messages are sent
+  // in the same breath.
+  const justActivated = await activateGuestSession(guest.sessionId);
+  if (justActivated) {
+    // Release: everything they wrote on WhatsApp is already stored, so
+    // clearing the flag is the whole of it. The agent's app finds the full
+    // thread the first time it opens the conversation.
+    await setAwaitingWebChat(guest.conversationId, guest.tenantId, false);
+    await postWelcomeMessage(guest);
+  }
+
   const updated = await recordGuestInboundActivity(guest.conversationId, guest.tenantId, text);
 
   const realtime = getRealtimeEmitter();
@@ -574,6 +590,56 @@ export async function postGuestMessage(
     };
   }
   return view;
+}
+
+/**
+ * The greeting the business shows a customer who has just arrived.
+ *
+ * Written into the conversation as a real outbound message rather than
+ * rendered as a banner in the window, so the agent sees exactly what the
+ * customer was told. A greeting only one side can see is a greeting the
+ * agent then repeats.
+ *
+ * Stored directly rather than going through sendOutboundMessage: this is
+ * a message in the WEB window, and sending it would push it to WhatsApp
+ * as well — the customer would get welcomed twice, once in each place,
+ * for having moved to one of them.
+ *
+ * Never throws. It runs on the customer's first message, and losing that
+ * message because a greeting failed would be a poor trade.
+ */
+async function postWelcomeMessage(guest: GuestContext): Promise<void> {
+  try {
+    const tenant = await Tenant.findById(guest.tenantId).select('autoGuestLink').lean();
+    const text = tenant?.autoGuestLink?.welcomeMessage?.trim();
+    if (!text) return;
+
+    const message = await createMessage({
+      tenantId: guest.tenantId,
+      conversationId: guest.conversationId,
+      // No senderId: nobody wrote this. Stamping an agent's id would put
+      // their name on a greeting they never typed.
+      recipientPhone: '',
+      direction: 'OUT',
+      type: 'text',
+      text,
+      status: 'DELIVERED',
+    });
+
+    // One emit covers both sides: the guest socket and the agents' sockets
+    // are all in this conversation's room, which is how every other
+    // business message reaches the window too.
+    getRealtimeEmitter().emitMessageNew(
+      guest.tenantId,
+      toRealtimeMessage(message),
+      guest.whatsappPhoneNumberId,
+    );
+  } catch (err) {
+    logger.warn(
+      { err, conversationId: guest.conversationId },
+      'Could not post the welcome message — the customer\'s own message is unaffected',
+    );
+  }
 }
 
 /**

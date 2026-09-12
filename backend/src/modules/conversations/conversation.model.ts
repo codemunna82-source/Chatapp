@@ -34,6 +34,22 @@ const conversationSchema = new Schema(
     conversationWindowExpiresAt: { type: Date },
     unreadCount: { type: Number, default: 0, min: 0 },
     /**
+     * The customer has been invited to the web window and has not moved
+     * over yet, so their WhatsApp messages are held back from the inbox.
+     *
+     * Held, never dropped. Every message is stored exactly as it always
+     * was — this only suppresses the realtime emit, the push and the
+     * unread badge, so the conversation does not surface until the
+     * customer is somewhere an agent can actually answer them. The moment
+     * they use the window this clears and everything they wrote is already
+     * there waiting.
+     *
+     * That distinction is the whole design. Dropping the messages would
+     * mean a customer who never taps the link is silently unanswered, and
+     * the business would never know they wrote at all.
+     */
+    awaitingWebChat: { type: Boolean, default: false },
+    /**
      * "Mark as unread", kept separate from unreadCount rather than faking a
      * count of 1.
      *

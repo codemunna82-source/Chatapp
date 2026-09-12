@@ -52,6 +52,36 @@ const tenantSchema = new Schema(
             enum: ['none', 'customer_name'],
             default: 'none',
           },
+          /**
+           * How many times the invitation may be sent to one customer.
+           *
+           * Default 1. Two is the useful setting and the reason this is a
+           * number at all: a customer who writes again without tapping the
+           * link almost certainly did not see it. Capped at 3, because
+           * past that the customer is not missing the message — they are
+           * declining it, and a fourth is just noise from a business that
+           * will not take an answer.
+           */
+          maxSends: { type: Number, default: 1, min: 1, max: 3 },
+          /**
+           * Hold WhatsApp messages out of the inbox until the customer
+           * moves to the web window.
+           *
+           * Off by default, and it should be turned on deliberately: it
+           * means a customer who never taps the link is never seen. They
+           * are not LOST — every message is stored and appears the moment
+           * they arrive — but nobody is looking at them in the meantime.
+           */
+          holdWhatsAppUntilOpened: { type: Boolean, default: false, required: true },
+          /**
+           * Greeting posted into the conversation the first time the
+           * customer opens the window.
+           *
+           * A real message in the thread, not a UI banner: the agent sees
+           * it too, so what the customer was told is part of the history
+           * rather than something only one side knows.
+           */
+          welcomeMessage: { type: String, trim: true, maxlength: 900 },
         },
         { _id: false },
       ),

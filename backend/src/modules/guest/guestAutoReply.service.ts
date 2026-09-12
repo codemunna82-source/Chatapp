@@ -2,8 +2,14 @@ import { logger } from '../../lib/logger';
 import { env } from '../../config/env';
 import { Tenant, AUTO_GUEST_LINK_BUTTON_INDEX } from '../tenants/tenant.model';
 import { sendOutboundMessage } from '../messages/message.service';
+import { setAwaitingWebChat } from '../conversations/conversation.repository';
 import { findContactByIdAndTenant } from '../contacts/contact.repository';
-import { createGuestSession, findActiveSessionForConversation } from './guestSession.repository';
+import {
+  createGuestSession,
+  findActiveSessionForConversation,
+  reissueGuestSessionToken,
+  recordInviteSent,
+} from './guestSession.repository';
 
 /**
  * Hands a customer the private-chat link the moment they message in.
@@ -56,16 +62,30 @@ export async function maybeSendGuestLinkAutoReply(input: {
     // request: two messages arriving together would otherwise both pass a
     // stale check and send two invitations.
     const existing = await findActiveSessionForConversation(input.conversationId, input.tenantId);
-    if (existing) return;
 
-    const expiresAt = new Date(Date.now() + env.GUEST_SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
-    const { token } = await createGuestSession({
-      tenantId: input.tenantId,
-      conversationId: input.conversationId,
-      contactId: input.contactId,
-      whatsappPhoneNumberId: input.whatsappPhoneNumberId,
-      expiresAt,
-    });
+    const maxSends = config.maxSends ?? 1;
+    if (!shouldSendInvite(existing, maxSends)) return;
+
+    // Re-send on the SAME link rather than minting a new one. Their
+    // WhatsApp thread keeps every copy ever sent, and a fresh token would
+    // turn the earlier ones into dead links they are just as likely to
+    // tap — which is worse than not re-sending at all.
+    let token: string;
+    if (existing) {
+      const reissued = await reissueGuestSessionToken(String(existing._id), input.tenantId);
+      if (!reissued) return;
+      token = reissued;
+    } else {
+      const expiresAt = new Date(Date.now() + env.GUEST_SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
+      const created = await createGuestSession({
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        whatsappPhoneNumberId: input.whatsappPhoneNumberId,
+        expiresAt,
+      });
+      token = created.token;
+    }
 
     // Resolved before building so the builder itself stays pure and
     // testable — the component shape is what Meta rejects a send on.
@@ -88,8 +108,24 @@ export async function maybeSendGuestLinkAutoReply(input: {
       templateComponents: components,
     });
 
+    await recordInviteSent(input.conversationId, input.tenantId);
+
+    // Held from here, not from the customer's first message: the hold only
+    // makes sense once they have actually been given somewhere else to go.
+    // Setting it before the invitation is out would silence a customer who
+    // has not been told anything yet.
+    if (config.holdWhatsAppUntilOpened) {
+      await setAwaitingWebChat(input.conversationId, input.tenantId, true);
+    }
+
     logger.info(
-      { tenantId: input.tenantId, conversationId: input.conversationId, template: config.templateName },
+      {
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
+        template: config.templateName,
+        attempt: (existing?.invitesSent ?? 0) + 1,
+        maxSends,
+      },
       'Sent the private-chat invitation template in reply to an inbound message',
     );
   } catch (err) {
@@ -98,6 +134,33 @@ export async function maybeSendGuestLinkAutoReply(input: {
       'Could not send the automatic private-chat invitation — the inbound message itself is unaffected',
     );
   }
+}
+
+/**
+ * Whether this customer should be sent the invitation now.
+ *
+ * Two rules, and each exists against a specific failure:
+ *
+ * - Already in the window → never. An invitation arriving on WhatsApp
+ *   while they are mid-sentence in the chat reads as a business that is
+ *   not paying attention.
+ * - At the cap → never. "More than once" is useful; "every time" is spam
+ *   from a business they were trying to talk to.
+ *
+ * A missing invitesSent counts as zero rather than as "already sent":
+ * sessions created before the field existed have no value for it, and
+ * reading that as sent would silence every one of them.
+ *
+ * Exported for its test — neither mistake throws, and both are invisible
+ * from the agent's side.
+ */
+export function shouldSendInvite(
+  session: { invitesSent?: number | null; activatedAt?: Date | null } | null,
+  maxSends: number,
+): boolean {
+  if (!session) return true;
+  if (session.activatedAt) return false;
+  return (session.invitesSent ?? 0) < maxSends;
 }
 
 /**

@@ -23,6 +23,10 @@ const autoGuestLinkSchema = z
     templateName: z.string().trim().min(1).max(512).optional(),
     templateLanguage: z.string().trim().min(2).max(16).optional(),
     bodyVariable: z.enum(['none', 'customer_name']).optional(),
+    /** How many times one customer may be sent the invitation. 1-3; see tenant.model.ts. */
+    maxSends: z.coerce.number().int().min(1).max(3).optional(),
+    holdWhatsAppUntilOpened: z.boolean().optional(),
+    welcomeMessage: z.string().trim().max(900).optional(),
   })
   // Refused here rather than at send time, where the failure happens inside
   // the webhook handler with nobody watching: an enabled auto-reply with no
@@ -60,6 +64,9 @@ tenantRouter.get(
           templateName: tenant.autoGuestLink?.templateName ?? '',
           templateLanguage: tenant.autoGuestLink?.templateLanguage ?? '',
           bodyVariable: tenant.autoGuestLink?.bodyVariable ?? 'none',
+          maxSends: tenant.autoGuestLink?.maxSends ?? 1,
+          holdWhatsAppUntilOpened: tenant.autoGuestLink?.holdWhatsAppUntilOpened ?? false,
+          welcomeMessage: tenant.autoGuestLink?.welcomeMessage ?? '',
         },
         // Without this the feature cannot work at all, and the admin has no
         // way to find that out short of turning it on and waiting for a
@@ -95,6 +102,15 @@ tenantRouter.patch(
             ? { 'autoGuestLink.templateLanguage': body.templateLanguage }
             : {}),
           ...(body.bodyVariable ? { 'autoGuestLink.bodyVariable': body.bodyVariable } : {}),
+          ...(body.maxSends !== undefined ? { 'autoGuestLink.maxSends': body.maxSends } : {}),
+          ...(body.holdWhatsAppUntilOpened !== undefined
+            ? { 'autoGuestLink.holdWhatsAppUntilOpened': body.holdWhatsAppUntilOpened }
+            : {}),
+          // An empty string is a real instruction here — "stop greeting
+          // them" — so it is written rather than treated as "unchanged".
+          ...(body.welcomeMessage !== undefined
+            ? { 'autoGuestLink.welcomeMessage': body.welcomeMessage }
+            : {}),
         },
       },
       { new: true },
@@ -110,6 +126,9 @@ tenantRouter.patch(
         templateName: tenant.autoGuestLink?.templateName ?? '',
         templateLanguage: tenant.autoGuestLink?.templateLanguage ?? '',
         bodyVariable: tenant.autoGuestLink?.bodyVariable ?? 'none',
+        maxSends: tenant.autoGuestLink?.maxSends ?? 1,
+        holdWhatsAppUntilOpened: tenant.autoGuestLink?.holdWhatsAppUntilOpened ?? false,
+        welcomeMessage: tenant.autoGuestLink?.welcomeMessage ?? '',
       },
     });
   }),

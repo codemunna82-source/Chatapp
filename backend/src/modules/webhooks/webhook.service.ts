@@ -100,10 +100,19 @@ async function handleIncomingMessage(
     item.timestamp,
   );
 
+  // Held back while the customer has been invited to the web window and
+  // has not moved over yet. The message is already stored — this only
+  // decides whether anyone is told about it now, or when they arrive.
+  // See conversation.model.ts's awaitingWebChat for why holding beats
+  // dropping.
+  const held = updatedConversation?.awaitingWebChat === true;
+
   const realtime = getRealtimeEmitter();
-  realtime.emitMessageNew(tenantId, toRealtimeMessage(message), String(conversation.whatsappPhoneNumberId));
-  if (updatedConversation) {
-    realtime.emitConversationUpdated(tenantId, toRealtimeConversation(updatedConversation));
+  if (!held) {
+    realtime.emitMessageNew(tenantId, toRealtimeMessage(message), String(conversation.whatsappPhoneNumberId));
+    if (updatedConversation) {
+      realtime.emitConversationUpdated(tenantId, toRealtimeConversation(updatedConversation));
+    }
   }
 
   // Push last, and never awaited for its result beyond its own internal
@@ -112,6 +121,20 @@ async function handleIncomingMessage(
   // handler, because Meta would then retry the whole delivery and the
   // message would be processed twice.
   const contactName = contact.name || contact.phone;
+  // No push either, for the same reason: a notification about a message
+  // the inbox is deliberately not showing would send an agent looking for
+  // a conversation that is not there.
+  if (held) {
+    await maybeSendGuestLinkAutoReply({
+      tenantId,
+      conversationId: String(conversation._id),
+      contactId: String(contact._id),
+      whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
+      inboundMessageType: item.messageType,
+    });
+    return;
+  }
+
   if (item.messageType === 'reaction') {
     const raw = item.raw as { reaction?: { emoji?: string } };
     const target = replyToMessageId ? await findMessageByIdAndTenant(replyToMessageId, tenantId) : null;

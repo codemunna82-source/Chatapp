@@ -134,3 +134,67 @@ export async function revokeSessionsForConversation(conversationId: string, tena
   );
   return result.modifiedCount;
 }
+
+/**
+ * A fresh plaintext token for a session that already exists.
+ *
+ * Needed because the invitation is sent more than once and the token is
+ * only ever returned at creation — the stored hash cannot be reversed
+ * back into a URL, so a re-send has nothing to put in the button.
+ *
+ * The old token stops working, and that is the right trade rather than a
+ * regrettable one. The alternative is storing the plaintext so it can be
+ * read back, which would make a database dump a working key to every
+ * customer conversation in the workspace. A customer holding two copies
+ * of a link in one WhatsApp thread taps the most recent one; a leaked
+ * database is not recoverable at all.
+ */
+export async function reissueGuestSessionToken(
+  sessionId: string,
+  tenantId: string,
+): Promise<string | null> {
+  if (!Types.ObjectId.isValid(sessionId)) return null;
+  const token = generateGuestToken();
+  const updated = await GuestSession.findOneAndUpdate(
+    { _id: sessionId, tenantId, revokedAt: { $exists: false } },
+    { $set: { tokenHash: hashGuestToken(token) } },
+    { new: true },
+  );
+  return updated ? token : null;
+}
+
+/**
+ * Counts one invitation against the session's cap.
+ *
+ * $inc rather than a read-modify-write: two inbound messages landing at
+ * the same moment would otherwise both read the same count and both
+ * decide there was room for one more.
+ */
+export async function recordInviteSent(conversationId: string, tenantId: string): Promise<void> {
+  if (!Types.ObjectId.isValid(conversationId)) return;
+  await GuestSession.updateOne(
+    { conversationId, tenantId, revokedAt: { $exists: false } },
+    { $inc: { invitesSent: 1 } },
+  );
+}
+
+/**
+ * Marks the customer as having actually moved to the web window.
+ *
+ * Idempotent on purpose — it is called on every guest message, and only
+ * the FIRST one means anything. `activatedAt: { $exists: false }` in the
+ * filter is what makes the later calls no-ops rather than a timestamp
+ * that keeps sliding forward.
+ *
+ * Returns true only for the call that actually flipped it, so the caller
+ * knows whether this is the moment to release held messages and post the
+ * greeting — both of which must happen exactly once.
+ */
+export async function activateGuestSession(sessionId: string): Promise<boolean> {
+  if (!Types.ObjectId.isValid(sessionId)) return false;
+  const result = await GuestSession.updateOne(
+    { _id: sessionId, activatedAt: { $exists: false } },
+    { $set: { activatedAt: new Date() } },
+  );
+  return result.modifiedCount === 1;
+}
