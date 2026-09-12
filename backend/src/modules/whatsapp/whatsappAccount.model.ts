@@ -29,6 +29,15 @@ const whatsappAccountSchema = new Schema(
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
     /** The app user who ran Embedded Signup. Absent = tenant-wide (legacy). */
     ownerUserId: { type: Schema.Types.ObjectId, ref: 'User' },
+    /**
+     * Which Meta app (Business Manager) this account lives under.
+     *
+     * Optional, because every account connected before multi-BM support
+     * has none and is served by the single global META_* configuration —
+     * that fallback is what keeps the existing deployment sending and
+     * receiving while accounts are assigned an app. See metaApp.model.ts.
+     */
+    metaAppId: { type: Schema.Types.ObjectId, ref: 'MetaApp', index: true },
     wabaId: { type: String, required: true }, // Meta WhatsApp Business Account ID
     businessName: { type: String, trim: true },
     /** AES-256-GCM envelope from lib/crypto.ts. Never plaintext. */

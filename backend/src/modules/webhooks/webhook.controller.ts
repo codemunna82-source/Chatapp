@@ -12,10 +12,42 @@ import { enqueueWebhookDelivery } from '../../queues/webhook.queue';
 import { isRedisConfigured } from '../../queues/connection';
 import { getPushGateway } from '../../integrations/fcm';
 import { processWebhookDelivery } from './webhook.service';
+import { findMetaAppByWebhookRef, readAppSecret } from '../whatsapp/metaApp.repository';
 
-/** GET /api/webhooks/meta — one-time subscription challenge (spec §16). */
-export function verifyWebhookHandler(req: Request, res: Response): void {
-  const result = verifyChallenge(req.query as Record<string, unknown>);
+/**
+ * The credentials to check one inbound delivery against.
+ *
+ * A request to /api/webhooks/meta/:ref names its Meta app in the URL, and
+ * that is deliberate: it is the ONLY part of the request that can be
+ * trusted before the signature is checked, since the body at that point is
+ * unauthenticated bytes from the open internet. The bare
+ * /api/webhooks/meta keeps working on the global META_* values, so the
+ * deployment that predates multi-BM support carries on unchanged.
+ *
+ * An unknown ref returns nulls rather than throwing: it is an unsolicited
+ * request to a URL nobody configured, and it should fall through to the
+ * ordinary rejection path rather than become a 500.
+ */
+async function resolveWebhookCredentials(
+  ref: string | undefined,
+): Promise<{ appSecret: string; verifyToken: string; appName: string | null }> {
+  if (!ref) {
+    return { appSecret: env.META_APP_SECRET, verifyToken: env.META_VERIFY_TOKEN, appName: null };
+  }
+  const app = await findMetaAppByWebhookRef(ref);
+  if (!app) return { appSecret: '', verifyToken: '', appName: null };
+  return {
+    appSecret: readAppSecret(app.appSecretEnc) ?? '',
+    verifyToken: readAppSecret(app.verifyTokenEnc) ?? '',
+    appName: app.name,
+  };
+}
+
+/** GET /api/webhooks/meta[/:ref] — one-time subscription challenge (spec §16). */
+export const verifyWebhookHandler = asyncHandler(async (req: Request, res: Response) => {
+  const ref = req.params.ref as string | undefined;
+  const { verifyToken, appName } = await resolveWebhookCredentials(ref);
+  const result = verifyChallenge(req.query as Record<string, unknown>, verifyToken);
 
   if (!result.ok) {
     // Logged at warn so a failed subscription attempt is always visible in
@@ -30,7 +62,12 @@ export function verifyWebhookHandler(req: Request, res: Response): void {
         reason: result.reason,
         mode: req.query['hub.mode'],
         receivedTokenLength: typeof received === 'string' ? received.length : null,
-        configuredTokenLength: env.META_VERIFY_TOKEN.length,
+        configuredTokenLength: verifyToken.length,
+        // Which app's URL was called, and whether it resolved at all. A ref
+        // that names no app is the single most likely cause of a challenge
+        // that fails on a URL the admin just copied out of VOXO.
+        webhookRef: ref ?? null,
+        appName,
       },
       'Meta webhook verification failed',
     );
@@ -42,12 +79,12 @@ export function verifyWebhookHandler(req: Request, res: Response): void {
     return;
   }
 
-  logger.info('Meta webhook verification succeeded');
+  logger.info({ webhookRef: ref ?? null, appName }, 'Meta webhook verification succeeded');
   // Explicitly text/plain: Meta compares the response body to the challenge
   // byte-for-byte, so it must be the bare value with no JSON quoting and no
   // HTML content type sniffing around it.
   res.status(200).type('text/plain').send(result.challenge);
-}
+});
 
 /**
  * GET /api/webhooks/meta/health — configuration self-check.
@@ -105,7 +142,11 @@ export const receiveWebhookHandler = asyncHandler(async (req: Request, res: Resp
   // post JSON without going through the raw-capturing middleware.
   const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
 
-  const signature = checkSignature(rawBody, signatureHeader);
+  // Resolved from the URL, never from the body — see resolveWebhookCredentials.
+  const ref = req.params.ref as string | undefined;
+  const { appSecret, appName } = await resolveWebhookCredentials(ref);
+
+  const signature = checkSignature(rawBody, signatureHeader, appSecret);
   if (!signature.ok) {
     // Logged rather than only returned, because this is the one failure
     // nobody can see from either side: Meta's dashboard reports a failed
@@ -115,11 +156,17 @@ export const receiveWebhookHandler = asyncHandler(async (req: Request, res: Resp
     logger.warn(
       {
         reason: signature.reason,
-        appSecretConfigured: Boolean(env.META_APP_SECRET),
+        // Which app's URL this arrived on. A ref that resolved to no app is
+        // the first thing to check: it means the URL in Meta's dashboard
+        // names an app this workspace does not have, so there was never a
+        // secret to verify against.
+        webhookRef: ref ?? null,
+        appName,
+        appSecretConfigured: Boolean(appSecret),
         // A DIGEST_MISMATCH with a well-shaped secret means the wrong app's
         // secret; with a badly-shaped one it means a different Meta
         // credential was pasted into the box. See appSecretHasExpectedShape.
-        appSecretLooksLikeAnAppSecret: appSecretHasExpectedShape(),
+        appSecretLooksLikeAnAppSecret: appSecretHasExpectedShape(appSecret),
         rawBodyCaptured: req.rawBody !== undefined,
         bodyBytes: rawBody.length,
       },

@@ -26,6 +26,7 @@ import { callRouter } from './modules/calls/call.routes';
 import { quickReplyRouter } from './modules/quickReplies/quickReply.routes';
 import { deviceRouter } from './modules/devices/deviceToken.routes';
 import { whatsappRouter } from './modules/whatsapp/whatsapp.routes';
+import { metaAppRouter } from './modules/whatsapp/metaApp.routes';
 import { tenantRouter } from './modules/tenants/tenant.routes';
 import { guestRouter } from './modules/guest/guest.routes';
 import { Sentry, isSentryEnabled, isReportableError } from './lib/sentry';
@@ -95,6 +96,7 @@ export function createApp(): Express {
   app.use('/api/quick-replies', quickReplyRouter);
   app.use('/api/devices', deviceRouter);
   app.use('/api/whatsapp', whatsappRouter);
+  app.use('/api/meta-apps', metaAppRouter);
   app.use('/api/tenant', tenantRouter);
   // The customer-facing web chat. Authenticated by a link token rather
   // than a login, so it sits outside every requireAuth router above and

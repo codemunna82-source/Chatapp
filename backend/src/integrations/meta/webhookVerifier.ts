@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { safeEqual } from '../../lib/crypto';
 import { env } from '../../config/env';
 
 /**
@@ -25,7 +26,19 @@ export type ChallengeResult =
  * GET /api/webhooks/meta challenge-response, required once when subscribing
  * the webhook URL in the Meta App dashboard (spec §16).
  */
-export function verifyChallenge(query: Record<string, unknown>): ChallengeResult {
+export function verifyChallenge(
+  query: Record<string, unknown>,
+  /**
+   * The verify token to match against.
+   *
+   * Passed in rather than read from env so a per-app webhook URL can match
+   * that app's own token — each Meta app (Business Manager) configures its
+   * own, and they are not interchangeable. Omitted, it falls back to the
+   * global META_VERIFY_TOKEN, which is what the single-app webhook URL
+   * still uses.
+   */
+  expectedToken: string = env.META_VERIFY_TOKEN,
+): ChallengeResult {
   const mode = query['hub.mode'];
   const token = query['hub.verify_token'];
   const challenge = query['hub.challenge'];
@@ -33,7 +46,7 @@ export function verifyChallenge(query: Record<string, unknown>): ChallengeResult
   // Checked before anything else, and never treated as "matches an empty
   // token": an unconfigured deployment must reject every caller, not accept
   // whoever happens to send hub.verify_token= with no value.
-  if (!env.META_VERIFY_TOKEN) {
+  if (!expectedToken) {
     return { ok: false, reason: 'VERIFY_TOKEN_NOT_CONFIGURED' };
   }
 
@@ -43,7 +56,7 @@ export function verifyChallenge(query: Record<string, unknown>): ChallengeResult
   if (mode !== 'subscribe') {
     return { ok: false, reason: 'MODE_NOT_SUBSCRIBE' };
   }
-  if (token !== env.META_VERIFY_TOKEN) {
+  if (!safeEqual(token, expectedToken)) {
     return { ok: false, reason: 'TOKEN_MISMATCH' };
   }
 
@@ -86,8 +99,8 @@ export type SignatureResult = { ok: true } | { ok: false; reason: SignatureFailu
  * documented SHAPE of an app secret. It reveals no part of the value,
  * and the shape itself is true of every Meta app secret in existence.
  */
-export function appSecretHasExpectedShape(): boolean {
-  return /^[0-9a-f]{32}$/.test(env.META_APP_SECRET);
+export function appSecretHasExpectedShape(appSecret: string = env.META_APP_SECRET): boolean {
+  return /^[0-9a-f]{32}$/.test(appSecret);
 }
 
 /**
@@ -99,12 +112,23 @@ export function appSecretHasExpectedShape(): boolean {
 export function checkSignature(
   rawBody: Buffer,
   signatureHeader: string | undefined,
+  /**
+   * The app secret to verify against.
+   *
+   * Meta signs each webhook with the secret of the app subscribed to that
+   * WABA, so a workspace spanning several Business Managers has several
+   * secrets and no single one of them verifies every delivery. The caller
+   * picks the right one from the webhook URL — which is known before any
+   * of the body is trusted, and is the only thing that can be trusted at
+   * that moment. Omitted, it falls back to the global META_APP_SECRET.
+   */
+  appSecret: string = env.META_APP_SECRET,
 ): SignatureResult {
   if (!signatureHeader) return { ok: false, reason: 'HEADER_MISSING' };
   if (!signatureHeader.startsWith('sha256=')) return { ok: false, reason: 'HEADER_MALFORMED' };
-  if (!env.META_APP_SECRET) return { ok: false, reason: 'APP_SECRET_NOT_CONFIGURED' };
+  if (!appSecret) return { ok: false, reason: 'APP_SECRET_NOT_CONFIGURED' };
 
-  const expectedHex = createHmac('sha256', env.META_APP_SECRET).update(rawBody).digest('hex');
+  const expectedHex = createHmac('sha256', appSecret).update(rawBody).digest('hex');
   const providedHex = signatureHeader.slice('sha256='.length);
 
   const expected = Buffer.from(expectedHex, 'hex');
@@ -118,6 +142,10 @@ export function checkSignature(
 }
 
 /** Boolean form, kept for callers that only branch on pass/fail. */
-export function verifySignature(rawBody: Buffer, signatureHeader: string | undefined): boolean {
-  return checkSignature(rawBody, signatureHeader).ok;
+export function verifySignature(
+  rawBody: Buffer,
+  signatureHeader: string | undefined,
+  appSecret?: string,
+): boolean {
+  return checkSignature(rawBody, signatureHeader, appSecret).ok;
 }

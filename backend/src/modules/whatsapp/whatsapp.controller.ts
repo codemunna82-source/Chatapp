@@ -16,8 +16,12 @@ export const listPhoneNumbersHandler = asyncHandler(async (req: Request, res: Re
 
 export const registerPhoneNumberHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  const { phoneNumberId, wabaId } = req.body as { phoneNumberId: string; wabaId?: string };
-  const number = await registerPhoneNumberForTenant(auth.tenantId, phoneNumberId, wabaId);
+  const { phoneNumberId, wabaId, metaAppId } = req.body as {
+    phoneNumberId: string;
+    wabaId?: string;
+    metaAppId?: string;
+  };
+  const number = await registerPhoneNumberForTenant(auth.tenantId, phoneNumberId, wabaId, metaAppId);
   res.status(201).json({ success: true, data: number });
 });
 

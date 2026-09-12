@@ -1,5 +1,7 @@
 import { Types } from 'mongoose';
 import { WhatsAppAccount, type WhatsAppAccountDoc } from './whatsappAccount.model';
+import { MetaApp } from './metaApp.model';
+import { readAppSecret, findMetaAppByIdAndTenant } from './metaApp.repository';
 import { WhatsAppPhoneNumber, type WhatsAppPhoneNumberDoc } from './whatsappPhoneNumber.model';
 import { findPhoneNumbersByTenant, findPhoneNumberByIdAndTenant } from './whatsapp.repository';
 import { ApiError } from '../../lib/ApiError';
@@ -62,6 +64,43 @@ export function resolveAccessToken(accessTokenRef: string | undefined, accessTok
 }
 
 /**
+ * The token to act as this account, most specific source first.
+ *
+ * 1. The account's own token, from Embedded Signup. Most specific, so it
+ *    wins — it was issued for this WABA and nothing else.
+ * 2. Its Business Manager's token, when the account has no token of its
+ *    own. This is what makes a second BM work: numbers added by hand under
+ *    it have no per-account token, and the global META_ACCESS_TOKEN belongs
+ *    to a different Business Manager entirely, so sending with it would
+ *    fail with a permissions error that names nothing useful.
+ * 3. The global token, which is the single-BM deployment this all grew
+ *    out of and must keep working.
+ *
+ * An app whose token will not decrypt falls through to (3) rather than
+ * throwing: a rotated ENCRYPTION_KEY should not be a total outage when a
+ * working global token is sitting right there. A rotated key on the
+ * ACCOUNT's own token still throws, because there the alternative is
+ * sending this customer's message from some other business's number.
+ */
+async function resolveAccountAccessToken(account: {
+  accessTokenRef?: string | null;
+  accessTokenEnc?: string | null;
+  metaAppId?: unknown;
+}): Promise<string> {
+  if (account.accessTokenEnc && isEncryptedEnvelope(account.accessTokenEnc)) {
+    return resolveAccessToken(account.accessTokenRef ?? undefined, account.accessTokenEnc);
+  }
+
+  if (account.metaAppId) {
+    const app = await MetaApp.findById(String(account.metaAppId)).select('+accessTokenEnc');
+    const appToken = readAppSecret(app?.accessTokenEnc);
+    if (appToken) return appToken;
+  }
+
+  return resolveAccessToken(account.accessTokenRef ?? undefined, account.accessTokenEnc);
+}
+
+/**
  * Resolves the Meta credentials needed to act on behalf of one tenant's
  * WhatsApp connection, from our own tenant-scoped records — never from
  * anything the Android client sends.
@@ -100,7 +139,7 @@ export async function resolveMetaCredentialsForPhoneNumber(
   }
 
   return {
-    accessToken: resolveAccessToken(account.accessTokenRef, account.accessTokenEnc),
+    accessToken: await resolveAccountAccessToken(account),
     phoneNumberId: phoneNumber.phoneNumberId,
     // Returned so the send path can mark this exact connection EXPIRED when
     // Meta rejects the token, rather than having to look it up again from
@@ -120,7 +159,7 @@ export async function resolveWabaCredentialsForTenant(
   if (!account) {
     throw ApiError.notFound('WHATSAPP_ACCOUNT_NOT_FOUND', 'WhatsApp account not found');
   }
-  return { accessToken: resolveAccessToken(account.accessTokenRef, account.accessTokenEnc), wabaId: account.wabaId };
+  return { accessToken: await resolveAccountAccessToken(account), wabaId: account.wabaId };
 }
 
 export interface PublicWhatsAppNumber {
@@ -346,8 +385,34 @@ export async function registerPhoneNumberForTenant(
   tenantId: string,
   phoneNumberId: string,
   wabaId?: string,
+  /**
+   * Which Business Manager this number belongs to.
+   *
+   * Omitted means the single-BM setup this grew out of: the global
+   * META_ACCESS_TOKEN verifies the number and the tenant's one account
+   * holds it. Given, the number is verified with THAT BM's token — using
+   * the global one would fail with a permissions error naming nothing
+   * useful, because a token from BM 1 cannot see a number in BM 2.
+   */
+  metaAppId?: string,
 ): Promise<PublicWhatsAppNumber> {
-  const accessToken = resolveAccessToken(undefined); // env token; the account row may still hold the placeholder
+  let metaApp = null;
+  if (metaAppId) {
+    metaApp = await findMetaAppByIdAndTenant(metaAppId, tenantId);
+    if (!metaApp) {
+      throw ApiError.badRequest('META_APP_NOT_FOUND', 'That Business Manager does not belong to this workspace.');
+    }
+  }
+
+  const accessToken = metaApp
+    ? (readAppSecret(metaApp.accessTokenEnc) ??
+      (() => {
+        throw ApiError.badRequest(
+          'META_APP_TOKEN_MISSING',
+          `"${metaApp.name}" has no access token saved, so its numbers cannot be verified. Add one first.`,
+        );
+      })())
+    : resolveAccessToken(undefined); // env token; the account row may still hold the placeholder
 
   let profile;
   try {
@@ -373,7 +438,7 @@ export async function registerPhoneNumberForTenant(
     );
   }
 
-  const account = await findOrCreateRealAccount(tenantId, wabaId);
+  const account = await findOrCreateRealAccount(tenantId, wabaId, metaApp ? String(metaApp._id) : undefined);
 
   if (existingAnywhere) {
     existingAnywhere.displayPhoneNumber = profile.displayPhoneNumber;
@@ -398,13 +463,28 @@ export async function registerPhoneNumberForTenant(
 /**
  * The WhatsAppAccount to hang a newly registered number off.
  *
- * Reuses the tenant's existing account — including the seeded demo one,
- * upgraded in place with the real WABA id — rather than creating a second.
- * A tenant with two accounts would make template sync ambiguous, and the
- * demo row is otherwise dead weight nothing ever cleans up.
+ * Scoped to the Business Manager, which is the part that changed when a
+ * workspace stopped being one BM. Previously this reused the tenant's one
+ * account for everything; a number from a second BM hung off it would then
+ * be sent with the FIRST BM's token, and fail — quietly, since the row
+ * looks perfectly configured either way.
+ *
+ * Within one BM the old behaviour is unchanged and still deliberate: reuse
+ * the existing account, including the seeded demo one upgraded in place
+ * with the real WABA id, rather than creating a second. Two accounts for
+ * one BM would make template sync ambiguous, and the demo row is otherwise
+ * dead weight nothing ever cleans up.
  */
-async function findOrCreateRealAccount(tenantId: string, wabaId?: string): Promise<WhatsAppAccountDoc> {
-  const existing = await WhatsAppAccount.findOne({ tenantId }).sort({ createdAt: 1 });
+async function findOrCreateRealAccount(
+  tenantId: string,
+  wabaId?: string,
+  metaAppId?: string,
+): Promise<WhatsAppAccountDoc> {
+  // `metaAppId: null` for the no-BM case, not `undefined`: an unfiltered
+  // query would hand back some other Business Manager's account, which is
+  // exactly the mix-up this scoping exists to prevent.
+  const scope = metaAppId ? { metaAppId } : { metaAppId: { $exists: false } };
+  const existing = await WhatsAppAccount.findOne({ tenantId, ...scope }).sort({ createdAt: 1 });
   if (existing) {
     if (wabaId && existing.wabaId !== wabaId) {
       existing.wabaId = wabaId;
@@ -416,6 +496,7 @@ async function findOrCreateRealAccount(tenantId: string, wabaId?: string): Promi
   }
   return WhatsAppAccount.create({
     tenantId,
+    metaAppId,
     wabaId: wabaId ?? `PENDING-WABA-${tenantId}`,
     accessTokenRef: 'env:META_ACCESS_TOKEN', // resolveAccessToken() defers to the environment
     verifyToken: env.META_VERIFY_TOKEN || 'unset',

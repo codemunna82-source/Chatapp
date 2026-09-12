@@ -6,6 +6,8 @@ export const registerPhoneNumberSchema = z.object({
   // rejected here rather than sent to Meta as a doomed lookup.
   phoneNumberId: z.string().trim().regex(/^\d{5,25}$/, 'Must be the numeric phone number id from Meta'),
   wabaId: z.string().trim().regex(/^\d{5,25}$/, 'Must be the numeric WhatsApp Business Account id').optional(),
+  /** Which Business Manager this number lives under. Omitted = the global META_* setup. */
+  metaAppId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Not a valid Business Manager id').optional(),
 });
 
 export const connectWhatsAppSchema = z.object({

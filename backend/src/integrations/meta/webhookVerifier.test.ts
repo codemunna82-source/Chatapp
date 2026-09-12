@@ -1,5 +1,10 @@
 import { createHmac } from 'node:crypto';
-import { verifyChallenge, verifySignature, checkSignature } from './webhookVerifier';
+import {
+  verifyChallenge,
+  verifySignature,
+  checkSignature,
+  appSecretHasExpectedShape,
+} from './webhookVerifier';
 import { env } from '../../config/env';
 
 describe('verifyChallenge', () => {
@@ -136,5 +141,74 @@ describe('checkSignature reasons', () => {
   it('keeps verifySignature agreeing with it', () => {
     expect(verifySignature(body, sign(env.META_APP_SECRET))).toBe(true);
     expect(verifySignature(body, sign('a'.repeat(32)))).toBe(false);
+  });
+});
+
+/**
+ * Multi-Business-Manager verification.
+ *
+ * This is the property the whole per-app webhook URL exists for: two Meta
+ * apps sign with two different secrets, and neither one verifies the
+ * other's deliveries. Before the URL carried the app, every workspace was
+ * pinned to a single global secret — so a number added under a second
+ * Business Manager sent fine and then had every inbound message rejected
+ * with a 401 that looked identical to a misconfiguration.
+ */
+describe('per-app webhook secrets', () => {
+  const body = Buffer.from(JSON.stringify({ object: 'whatsapp_business_account', entry: [] }));
+  const bm1 = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  const bm2 = '0f9e8d7c6b5a4938271605f4e3d2c1b0';
+  const sign = (secret: string) =>
+    `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+
+  it('accepts each app against its own secret', () => {
+    expect(checkSignature(body, sign(bm1), bm1)).toEqual({ ok: true });
+    expect(checkSignature(body, sign(bm2), bm2)).toEqual({ ok: true });
+  });
+
+  it('refuses one app signed with the other app’s secret', () => {
+    // The exact failure a shared global secret produced for every number
+    // outside the first Business Manager.
+    expect(checkSignature(body, sign(bm2), bm1)).toEqual({ ok: false, reason: 'DIGEST_MISMATCH' });
+    expect(checkSignature(body, sign(bm1), bm2)).toEqual({ ok: false, reason: 'DIGEST_MISMATCH' });
+  });
+
+  it('reports an unknown webhook URL as an unconfigured secret, not a mismatch', () => {
+    // A URL naming an app this workspace does not have resolves to an empty
+    // secret. Distinguishing it matters: "not configured" sends an admin to
+    // the URL they pasted, "mismatch" sends them to the secret — and only
+    // one of those is where the problem is.
+    expect(checkSignature(body, sign(bm1), '')).toEqual({
+      ok: false,
+      reason: 'APP_SECRET_NOT_CONFIGURED',
+    });
+  });
+
+  it('keeps each app’s verify token to itself', () => {
+    const query = (token: string) => ({
+      'hub.mode': 'subscribe',
+      'hub.verify_token': token,
+      'hub.challenge': '42',
+    });
+    expect(verifyChallenge(query('token-for-bm1'), 'token-for-bm1')).toEqual({ ok: true, challenge: '42' });
+    expect(verifyChallenge(query('token-for-bm1'), 'token-for-bm2')).toEqual({
+      ok: false,
+      reason: 'TOKEN_MISMATCH',
+    });
+  });
+
+  it('refuses an empty expected token rather than matching an empty one sent', () => {
+    // An app whose stored token could not be decrypted resolves to ''. It
+    // must reject every caller, not accept whoever sends a blank token.
+    expect(
+      verifyChallenge({ 'hub.mode': 'subscribe', 'hub.verify_token': '', 'hub.challenge': '42' }, ''),
+    ).toEqual({ ok: false, reason: 'VERIFY_TOKEN_NOT_CONFIGURED' });
+  });
+
+  it('judges each secret’s shape independently', () => {
+    expect(appSecretHasExpectedShape(bm1)).toBe(true);
+    // An access token pasted into the app-secret box — the common mistake,
+    // and worth catching per app now that there are several to confuse.
+    expect(appSecretHasExpectedShape('EAAUydPo2YYkBS' + 'x'.repeat(200))).toBe(false);
   });
 });
