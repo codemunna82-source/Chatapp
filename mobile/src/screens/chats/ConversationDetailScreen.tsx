@@ -37,7 +37,6 @@ import {
   useGuestLinkStatus,
   useIssueGuestLink,
   useRevokeGuestLink,
-  useSendGuestReply,
 } from '../../queries/useGuestChat';
 import {
   useMessages,
@@ -314,7 +313,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const guestLinkQuery = useGuestLinkStatus(conversationId);
   const issueGuestLink = useIssueGuestLink(conversationId);
   const revokeGuestLink = useRevokeGuestLink(conversationId);
-  const sendGuestReply = useSendGuestReply(conversationId);
 
   const guestActive = guestLinkQuery.data?.active ?? false;
   /**
@@ -329,12 +327,15 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     (conversationQuery.data?.isDemo ?? false) ||
     (conversationQuery.data?.withinCustomerServiceWindow ?? false);
   /**
-   * Outside Meta's window a live web window is the only way through, so
-   * that is where a reply goes. Inside it, WhatsApp stays the default —
-   * the customer is far more likely to be reading there than to still
-   * have the link open.
+   * Where the server will deliver this reply — a label, not a decision.
+   *
+   * Once the customer has actually used the private window, that is where
+   * the conversation is, so that is where every reply goes; the server
+   * routes it there whichever endpoint is called. This used to be decided
+   * here instead, which is how a customer with the window open received
+   * every reply twice — once in the window, once in WhatsApp.
    */
-  const replyingViaWeb = !withinWhatsAppWindow && guestActive;
+  const replyingViaWeb = guestLinkQuery.data?.openedByCustomer ?? false;
 
   const shareGuestLink = useCallback(
     async (url: string) => {
@@ -401,15 +402,13 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   const handleSendText = useCallback(
     (text: string) => {
-      if (replyingViaWeb) {
-        sendGuestReply.mutate(text, {
-          onError: (err) => Alert.alert('Message not sent', getApiErrorMessage(err)),
-        });
-        return;
-      }
+      // One path for both channels. The server decides which one this
+      // leaves on, so the composer no longer has to — and cannot get it
+      // wrong, which it did: choosing WhatsApp while the window was open
+      // delivered the message to the customer twice.
       submitSend({ type: 'text', text, replyToMessageId: replyingTo?.id });
     },
-    [replyingViaWeb, sendGuestReply, submitSend, replyingTo],
+    [submitSend, replyingTo],
   );
 
   const handleRetry = useCallback(

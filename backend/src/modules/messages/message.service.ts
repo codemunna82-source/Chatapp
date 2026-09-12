@@ -18,6 +18,12 @@ import { getRealtimeEmitter } from '../../realtime/events';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
 import type { MessageDoc } from './message.model';
 import { toWhatsAppId } from '../../lib/phone';
+import { findActiveSessionForConversation } from '../guest/guestSession.repository';
+import { resolveReplyChannel } from '../guest/webChatRouting';
+import { pushGuestMessage } from '../guest/guestPush.service';
+import { resolveBusinessNameForConversation } from '../guest/businessName';
+import type { ConversationDoc } from '../conversations/conversation.model';
+import type { ContactDoc } from '../contacts/contact.model';
 
 /**
  * Message types this service can actually dispatch through the Meta
@@ -126,6 +132,36 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
   // the template prompt it replaced. See contact.model.ts.
   const isDemoContact = contact.isDemo === true;
 
+  /**
+   * Where this reply actually goes.
+   *
+   * Decided here, on the server, rather than by whichever client is
+   * composing. A customer sitting in the private window was receiving
+   * every reply twice — once over the socket into the window, once
+   * through Meta into WhatsApp — because both halves ran and nothing
+   * chose between them. The clients each had their own idea of when to
+   * use the web window, which meant three places to get it right and one
+   * customer to receive the consequences.
+   *
+   * Nothing about the WhatsApp connection changes: inbound webhooks,
+   * credentials and the 24-hour window are all untouched. This only
+   * decides which way an outbound message leaves.
+   */
+  const channel = resolveReplyChannel({
+    messageType: input.type,
+    isDemoContact,
+    session: await findActiveSessionForConversation(input.conversationId, input.tenantId),
+  });
+
+  // Delivered into the window the customer is actually reading, and not
+  // to Meta at all. Its own path because none of what follows applies:
+  // there is no gateway to call, no Meta id to attach, and no 24-hour
+  // window to enforce — that rule is Meta's, and this message never
+  // reaches them.
+  if (channel === 'web') {
+    return deliverToWebChat(input, conversation, contact);
+  }
+
   // Server-side 24h window enforcement — never trust an Android countdown.
   if (!isDemoContact && input.type !== 'template' && !isWithinCustomerServiceWindow(conversation)) {
     throw new ApiError(
@@ -231,6 +267,87 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     if (err instanceof ApiError) throw err;
     throw toMetaApiError(err);
   }
+}
+
+/**
+ * An outbound message delivered into the customer's private window.
+ *
+ * Written SENT rather than QUEUED: there is no gateway to wait on, and
+ * the socket carries it in the same tick. A QUEUED row would sit there
+ * forever waiting for a Meta status webhook that is never coming.
+ *
+ * No Meta id is attached for the same reason — this message does not
+ * exist on Meta's side, and inventing an id for it would make every
+ * later status lookup lie.
+ */
+async function deliverToWebChat(
+  input: SendOutboundMessageInput,
+  conversation: ConversationDoc,
+  contact: ContactDoc,
+): Promise<MessageDoc> {
+  const message = await createMessage({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+    senderId: input.senderId,
+    recipientPhone: contact.phone,
+    direction: 'OUT',
+    type: input.type,
+    text:
+      input.type === 'reaction'
+        ? input.emoji
+        : input.type === 'template'
+          ? `Template: ${input.templateName}`
+          : input.text,
+    mediaId: input.mediaId,
+    replyToMessageId: input.type === 'reaction' ? input.reactToMessageId : input.replyToMessageId,
+    status: 'SENT',
+  });
+
+  const updatedConversation = await recordOutboundActivity(
+    input.conversationId,
+    input.tenantId,
+    input.text ?? input.caption ?? `[${input.type}]`,
+    new Date(),
+    'SENT',
+    String(message._id),
+  );
+
+  const realtime = getRealtimeEmitter();
+  realtime.emitMessageNew(
+    input.tenantId,
+    toRealtimeMessage(message),
+    String(conversation.whatsappPhoneNumberId),
+  );
+  if (updatedConversation) {
+    realtime.emitConversationUpdated(input.tenantId, toRealtimeConversation(updatedConversation));
+  }
+
+  // The customer's own browser, for the tab that is closed or frozen.
+  // This is what makes web-only routing safe: without it, a customer who
+  // backgrounded the window would simply never learn a reply had arrived,
+  // and WhatsApp is no longer carrying it for them.
+  //
+  // Never allowed to fail the send — the message is stored and already on
+  // the socket, and an FCM hiccup must not surface as "message not sent".
+  try {
+    const businessName = (
+      await resolveBusinessNameForConversation(
+        input.tenantId,
+        String(conversation.whatsappPhoneNumberId),
+      )
+    ).name;
+    await pushGuestMessage({
+      tenantId: input.tenantId,
+      conversationId: input.conversationId,
+      businessName,
+      messageType: input.type === 'text' ? 'text' : 'media',
+      text: input.text,
+    });
+  } catch {
+    // Deliberately swallowed; see above.
+  }
+
+  return message;
 }
 
 async function dispatch(

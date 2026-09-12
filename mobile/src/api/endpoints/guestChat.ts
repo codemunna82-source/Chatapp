@@ -12,6 +12,18 @@ import type { ApiSuccess, Message } from '../types';
 export interface GuestLinkStatus {
   active: boolean;
   expiresAt?: string;
+  /** The customer has blocked the window; neither side may write to it. */
+  blockedByCustomer?: boolean;
+  /**
+   * The customer has actually USED the window, so the server is
+   * delivering replies there instead of to WhatsApp.
+   *
+   * Only ever used to label the composer. The routing decision is the
+   * server's alone — see backend guest/webChatRouting.ts — because a
+   * client that decided for itself is how the same reply ended up in both
+   * the private window and WhatsApp.
+   */
+  openedByCustomer?: boolean;
 }
 
 export interface IssuedGuestLink {

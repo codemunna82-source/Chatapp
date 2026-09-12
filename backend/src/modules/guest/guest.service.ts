@@ -367,12 +367,27 @@ export async function issueGuestLinkForPhone(
 export async function getGuestLinkStatus(
   auth: AuthContext,
   conversationId: string,
-): Promise<{ active: boolean; expiresAt?: string; blockedByCustomer?: boolean }> {
+): Promise<{
+  active: boolean;
+  expiresAt?: string;
+  blockedByCustomer?: boolean;
+  openedByCustomer?: boolean;
+}> {
   const session = await findActiveSessionForConversation(conversationId, auth.tenantId);
   if (!session) return { active: false };
   return {
     active: true,
     expiresAt: session.expiresAt.toISOString(),
+    /**
+     * The customer has actually used the window, so replies are being
+     * delivered there instead of to WhatsApp (see webChatRouting.ts).
+     *
+     * Reported so the composer can say where a message is going. It does
+     * not decide anything — the server routes every send on its own — but
+     * an agent typing into a chat deserves to know which of the two
+     * places the customer will read it.
+     */
+    openedByCustomer: Boolean(session.activatedAt) && !session.blockedAt,
     // So the composer can say why it is disabled instead of failing on
     // send. The agent finding out at the moment they press the button is
     // the worst time to learn this.
