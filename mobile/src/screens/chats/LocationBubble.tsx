@@ -1,6 +1,7 @@
 import React from 'react';
 import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { WebView } from 'react-native-webview';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export interface SharedLocation {
@@ -18,17 +19,15 @@ export interface SharedLocation {
  * That is the raw data, not a place: an agent could not tell at a glance
  * where a customer was, and tapping it did nothing.
  *
- * The surface behind the pin is a DRAWN abstraction, not a map of these
- * coordinates. No tiles are fetched and none could be without handing a
- * third-party map host every customer's location along with it. A picture
- * that looked like the real streets around the pin while being generated
- * from nothing would be worse than no picture, so this one is
- * unmistakably a graphic: flat bands, no labels, no scale. The same card
- * the customer's own web window draws, so both sides agree.
+ * Real map tiles, from OpenStreetMap's own embed page, in a WebView. No
+ * API key and no map SDK — the URL is the whole integration, and it is
+ * the same one the customer's web window loads, so both sides of a
+ * conversation see the same picture.
  *
- * What it is honest about is where the place is: the coordinates are
- * printed underneath, and tapping opens the phone's real map app, which
- * does have the tiles.
+ * It does tell openstreetmap.org the coordinates, which an earlier
+ * drawn-graphic version of this card deliberately avoided. That was the
+ * owner's call and they made it: a picture of the actual streets is what
+ * makes a shared location useful.
  */
 export function LocationBubble({
   place,
@@ -40,6 +39,14 @@ export function LocationBubble({
   const { colors, radius, typography } = useTheme();
   const label = place.name?.trim() || 'Shared location';
   const coords = `${place.latitude.toFixed(5)}, ${place.longitude.toFixed(5)}`;
+
+  // OpenStreetMap's embed takes a bounding box, not a zoom level. This
+  // span is roughly a couple of streets across — close enough to place
+  // the pin on a recognisable corner, wide enough that a GPS reading a
+  // few metres out does not look like the wrong building.
+  const d = 0.0025;
+  const bbox = `${place.longitude - d},${place.latitude - d},${place.longitude + d},${place.latitude + d}`;
+  const embedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${place.latitude},${place.longitude}`;
 
   const open = () => {
     // geo: is the native handler and lets Android offer every installed
@@ -62,12 +69,26 @@ export function LocationBubble({
       style={[styles.card, { borderRadius: radius.sm, backgroundColor: colors.surfaceAlt }]}
     >
       <View style={styles.map}>
-        {/* Bands, not a street grid: a grid invites the eye to read it as
-            a real place. These read as "map-ish surface" and no more. */}
-        <View style={[styles.band, styles.bandA]} />
-        <View style={[styles.band, styles.bandB]} />
-        <View style={styles.blobA} />
-        <View style={styles.blobB} />
+        <WebView
+          source={{ uri: embedUrl }}
+          style={styles.webview}
+          // A picture, not a map to pan. Every touch belongs to the card:
+          // dragging inside the WebView would fight the thread's own
+          // scroll, and the tap is what opens the phone's map app.
+          pointerEvents="none"
+          scrollEnabled={false}
+          // No JS is needed to draw tiles, and the less this page can do
+          // the better — it is a third-party document inside a chat.
+          javaScriptEnabled={false}
+          // Android renders a white card before the first tile lands;
+          // matching the tile background stops it flashing.
+          containerStyle={styles.webviewContainer}
+          androidLayerType="software"
+        />
+        {/* OSM draws its own marker, but only once the tiles are in. This
+            sits on top so the card reads as a location from the first
+            frame rather than as a blank rectangle that gains a meaning a
+            second later. */}
         <Ionicons name="location" size={30} color="#E0483D" style={styles.pin} />
       </View>
 
@@ -96,30 +117,11 @@ export function LocationBubble({
 
 const styles = StyleSheet.create({
   card: { width: 232, overflow: 'hidden' },
-  map: { height: 118, width: '100%', backgroundColor: '#CFE0D2', overflow: 'hidden' },
-  band: { position: 'absolute', backgroundColor: '#FFFFFF', opacity: 0.7 },
-  bandA: { height: 9, width: 300, top: 52, left: -20, transform: [{ rotate: '-24deg' }] },
-  bandB: { height: 6, width: 300, top: 86, left: -40, transform: [{ rotate: '32deg' }], opacity: 0.5 },
-  blobA: {
-    position: 'absolute',
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#B7D3BD',
-    opacity: 0.75,
-    left: 8,
-    top: 70,
-  },
-  blobB: {
-    position: 'absolute',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#B7D3BD',
-    opacity: 0.6,
-    right: 10,
-    top: 82,
-  },
+  // The tile background, so the card is the right colour before the
+  // first tile arrives rather than a white flash inside a dark bubble.
+  map: { height: 118, width: '100%', backgroundColor: '#E8E4DF', overflow: 'hidden' },
+  webview: { flex: 1, backgroundColor: 'transparent' },
+  webviewContainer: { flex: 1, backgroundColor: '#E8E4DF' },
   pin: { position: 'absolute', left: 101, top: 38 },
   footer: { paddingHorizontal: 9, paddingTop: 6, paddingBottom: 6 },
   labelRow: { flexDirection: 'row', alignItems: 'center' },
