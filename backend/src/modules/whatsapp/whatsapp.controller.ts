@@ -6,6 +6,7 @@ import {
   registerPhoneNumberForTenant,
   registerNumberForCloudApi,
   setNumberEnabled,
+  setCallingEnabled,
 } from './whatsapp.service';
 import {
   connectWhatsAppForUser,
@@ -69,6 +70,19 @@ export const setNumberEnabledHandler = asyncHandler(async (req: Request, res: Re
   const auth = getTenantContext(req);
   const { enabled } = req.body as { enabled: boolean };
   const number = await setNumberEnabled(auth.tenantId, req.params.id as string, enabled);
+  res.status(200).json({ success: true, data: number });
+});
+
+/**
+ * Switching WhatsApp voice calling on for a number, at Meta.
+ *
+ * MASTER_ADMIN only, by the guard this router sits behind: it changes
+ * whether customers see a call button in their own WhatsApp.
+ */
+export const setCallingEnabledHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const { enabled } = req.body as { enabled: boolean };
+  const number = await setCallingEnabled(auth.tenantId, req.params.id as string, enabled);
   res.status(200).json({ success: true, data: number });
 });
 

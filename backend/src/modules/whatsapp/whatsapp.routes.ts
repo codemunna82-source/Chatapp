@@ -7,6 +7,7 @@ import {
   connectWhatsAppSchema,
   numberIdParamSchema,
   numberEnabledSchema,
+  numberCallingSchema,
 } from './whatsapp.validation';
 import {
   listPhoneNumbersHandler,
@@ -16,6 +17,7 @@ import {
   disconnectWhatsAppHandler,
   registerNumberForCloudApiHandler,
   setNumberEnabledHandler,
+  setCallingEnabledHandler,
 } from './whatsapp.controller';
 import { whatsappSignupPageHandler, whatsappSignupCallbackHandler } from './signupPage.controller';
 
@@ -61,4 +63,13 @@ whatsappRouter.patch(
   '/numbers/:id/enabled',
   validate({ params: numberIdParamSchema, body: numberEnabledSchema }),
   setNumberEnabledHandler,
+);
+
+// WhatsApp voice calling, switched at Meta. Off by default on every
+// number — this is what makes an inbound call possible at all; see
+// setCallingEnabled for the two subscriptions that must also be in place.
+whatsappRouter.patch(
+  '/numbers/:id/calling',
+  validate({ params: numberIdParamSchema, body: numberCallingSchema }),
+  setCallingEnabledHandler,
 );

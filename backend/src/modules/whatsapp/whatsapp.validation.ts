@@ -21,3 +21,6 @@ export const numberIdParamSchema = z.object({ id: z.string().min(1) });
 
 /** The admin's per-number access switch. */
 export const numberEnabledSchema = z.object({ enabled: z.boolean() });
+
+/** Switching WhatsApp voice calling on or off at Meta. */
+export const numberCallingSchema = z.object({ enabled: z.boolean() });

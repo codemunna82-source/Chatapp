@@ -74,6 +74,20 @@ const whatsappPhoneNumberSchema = new Schema(
      * every number has to pass.
      */
     enabled: { type: Boolean, default: true },
+    /**
+     * Whether Meta has voice calling switched on for this number —
+     * ENABLED or DISABLED, as Meta reports it.
+     *
+     * Calling is OFF by default on every number, including test ones. A
+     * number that messages perfectly will never ring, and nothing about
+     * its status hints at why, so this is stored purely so the admin
+     * screen can say which it is instead of leaving someone to guess.
+     *
+     * Meta's word, read back on the same refresh as the quality rating —
+     * never set from the switch itself, or turning it on here would claim
+     * a state Meta had not confirmed.
+     */
+    callingStatus: { type: String },
   },
   { timestamps: true },
 );

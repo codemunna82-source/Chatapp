@@ -180,6 +180,14 @@ export interface PublicWhatsAppNumber {
    * still be switched off here.
    */
   enabled: boolean;
+  /**
+   * Meta's calling status for this number — 'ENABLED' | 'DISABLED', or
+   * absent when it has never been read.
+   *
+   * Off by default on every number, which is the single most common
+   * reason a WhatsApp call never arrives.
+   */
+  callingStatus?: string;
   qualityRating?: string;
   messagingLimitTier?: string;
   /** When quality and tier were last read from Meta — null if never. */
@@ -203,6 +211,7 @@ export function toPublicWhatsAppNumber(n: WhatsAppPhoneNumberDoc): PublicWhatsAp
     // absent has to mean ON — a migration that silently locked out every
     // existing member would be the worst possible reading of it.
     enabled: n.enabled !== false,
+    callingStatus: n.callingStatus ?? undefined,
     qualityRating: n.qualityRating ?? undefined,
     messagingLimitTier: n.messagingLimitTier ?? undefined,
     healthCheckedAt: n.healthCheckedAt ? n.healthCheckedAt.toISOString() : undefined,
@@ -249,6 +258,21 @@ export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promi
     // not erase a name we already have, or the web window would fall back
     // to the workspace's internal label on a single bad Graph response.
     if (profile.verifiedName) number.verifiedName = profile.verifiedName;
+
+    // Calling lives behind its own Graph call, and it is off by default on
+    // every number — so without reading it the admin screen cannot tell a
+    // number that will ring from one that silently never can.
+    // Never allowed to fail the refresh: the rating is the more important
+    // half, and an older calling status beats no health reading at all.
+    try {
+      const calling = await getMetaGateway().getCallingSettings(
+        credentials.accessToken,
+        number.phoneNumberId,
+      );
+      if (calling.status) number.callingStatus = calling.status;
+    } catch (err) {
+      logger.warn({ err, phoneNumberId: number.phoneNumberId }, 'Could not read calling settings');
+    }
     number.codeVerificationStatus = profile.codeVerificationStatus;
     number.healthCheckedAt = new Date();
     await number.save();
@@ -291,6 +315,71 @@ export async function listPhoneNumbersForTenant(tenantId: string): Promise<Publi
   for (const number of numbers) void refreshNumberHealthIfStale(number);
 
   return numbers.map(toPublicWhatsAppNumber);
+}
+
+/**
+ * Switching WhatsApp voice calling on for a number.
+ *
+ * This is the step nothing else does. Calling is OFF by default on every
+ * number Meta issues — including test numbers — so an app with the whole
+ * calling path built end to end still never rings, and no status on the
+ * number says why. Every other piece was already here: the `calls`
+ * webhook is parsed, an inbound call creates a log, rings the agent's
+ * socket and pushes to their phone. Only the switch was missing.
+ *
+ * Meta's answer is read back afterwards rather than assumed. Writing
+ * 'ENABLED' locally because the POST returned 200 would put a state on
+ * the admin screen that Meta had not confirmed, and the whole point of
+ * showing it is to answer "why is this not ringing?".
+ *
+ * TWO THINGS still have to be true for a call to arrive, and neither is
+ * ours to set: the Meta app must subscribe to the `calls` webhook field,
+ * and the number's WABA must be subscribed to the app. The message path
+ * needs the second one too, so a workspace whose messages work already
+ * has it — the webhook FIELD is the one people miss.
+ */
+export async function setCallingEnabled(
+  tenantId: string,
+  numberId: string,
+  enabled: boolean,
+): Promise<PublicWhatsAppNumber> {
+  const number = await findPhoneNumberByIdAndTenant(numberId, tenantId);
+  if (!number) {
+    throw ApiError.notFound('WHATSAPP_NUMBER_NOT_FOUND', 'That number is not registered to this workspace.');
+  }
+
+  const credentials = await resolveMetaCredentialsForPhoneNumber(tenantId, numberId);
+  const gateway = getMetaGateway();
+
+  try {
+    await gateway.setCallingEnabled(credentials.accessToken, number.phoneNumberId, enabled);
+  } catch (err) {
+    // Meta's own message is the useful part — "calling not available in
+    // this country", a permissions error on the token. Passing it through
+    // is what makes this endpoint worth calling.
+    throw ApiError.badRequest(
+      'WHATSAPP_CALLING_UPDATE_FAILED',
+      `Meta refused that: ${err instanceof Error ? err.message : 'unknown error'}`,
+    );
+  }
+
+  try {
+    const calling = await gateway.getCallingSettings(credentials.accessToken, number.phoneNumberId);
+    number.callingStatus = calling.status ?? (enabled ? 'ENABLED' : 'DISABLED');
+  } catch {
+    // The write succeeded; only the read-back did not. Recording what was
+    // asked for beats leaving the field blank, and the next health
+    // refresh corrects it either way.
+    number.callingStatus = enabled ? 'ENABLED' : 'DISABLED';
+  }
+  await number.save();
+
+  logger.info(
+    { numberId, enabled, callingStatus: number.callingStatus },
+    'WhatsApp calling switched by an admin',
+  );
+
+  return toPublicWhatsAppNumber(number);
 }
 
 /**
