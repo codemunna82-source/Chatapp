@@ -177,6 +177,15 @@ const TYPING_AUTO_CLEAR_MS = 6000;
  */
 const SCREEN_EDGES: Edge[] = [];
 
+/**
+ * How much wallpaper shows between the composer and the keyboard.
+ *
+ * Small on purpose: enough that the two are visibly separate things,
+ * not so much that the composer floats away from the keyboard it belongs
+ * to.
+ */
+const KEYBOARD_GAP = 8;
+
 // Module scope so these never change identity between renders.
 const keyExtractor = (item: RenderItem) => item.id;
 /** Far enough up that the user is clearly reading history, not just
@@ -294,12 +303,48 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     };
   }, [keyboardGone]);
 
+  /**
+   * The two conditions that mean the keyboard is genuinely up.
+   *
+   * Spelled out in both styles below rather than shared through a helper.
+   * They must agree — a gap opening without the keyboard that is meant to
+   * be under it would be a visible hole — and the safest way to guarantee
+   * two worklets agree is for them to read the same shared values in the
+   * same frame, which they do. Keep them adjacent, and change them
+   * together.
+   */
   const keyboardPadStyle = useAnimatedStyle(() => {
     const up =
       keyboardGone.value === 0 &&
       (keyboard.state.value === KeyboardState.OPEN ||
         keyboard.state.value === KeyboardState.OPENING);
     return { paddingBottom: up ? Math.max(keyboard.height.value, insets.bottom) : insets.bottom };
+  });
+
+  /**
+   * The breathing space between the composer and the keyboard.
+   *
+   * The composer sat flush against the top of the keyboard, so the two
+   * read as one block and the field looked wedged under it. The messenger
+   * leaves a sliver of wallpaper showing between them, which is what makes
+   * the composer look like it is sitting ON the conversation rather than
+   * being pushed out of it.
+   *
+   * Its own transparent view below the composer rather than more padding
+   * on the wrapper above: that padding is the strip the navigation buttons
+   * sit on and is painted the composer's colour, so a gap added there
+   * would simply be more composer. Here the wallpaper behind shows
+   * through, which is the whole point.
+   *
+   * Zero when the keyboard is down — down there the composer should run
+   * to the navigation buttons with nothing between them.
+   */
+  const keyboardGapStyle = useAnimatedStyle(() => {
+    const up =
+      keyboardGone.value === 0 &&
+      (keyboard.state.value === KeyboardState.OPEN ||
+        keyboard.state.value === KeyboardState.OPENING);
+    return { height: up ? KEYBOARD_GAP : 0 };
   });
 
 
@@ -1027,6 +1072,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               replyToMessageId={replyingTo?.id}
               onSent={() => setReplyingTo(null)}
             />
+
+            {/* See keyboardGapStyle. */}
+            <Animated.View style={keyboardGapStyle} />
           </View>
         </Animated.View>
 
