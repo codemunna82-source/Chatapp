@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { User, computeSubscriptionStatus } from '../users/user.model';
+import { WhatsAppPhoneNumber } from '../whatsapp/whatsappPhoneNumber.model';
 import { findUserByPhone } from '../users/user.repository';
 import { normalizePhone } from '../../lib/phone';
 import { RefreshToken } from './refreshToken.model';
@@ -156,6 +157,32 @@ export async function login(identifier: string, password: string, meta: RequestM
   const subscriptionStatus = computeSubscriptionStatus(user.validFrom, user.validUntil, user.status);
   if (subscriptionStatus === 'EXPIRED') {
     throw ApiError.forbidden('SUBSCRIPTION_EXPIRED', 'Subscription/validity window has expired');
+  }
+
+  /**
+   * The admin's per-number access switch, checked at the door.
+   *
+   * The auth context already refuses every REQUEST from a member whose
+   * number is switched off, so this is not what makes the rule hold. What
+   * it fixes is the experience: without it the sign-in SUCCEEDS, the app
+   * opens, and the first call behind it is refused — so the member sees
+   * the app flash past and land back on the sign-in screen, which reads
+   * like a bug rather than a decision someone made.
+   *
+   * `enabled !== false` for the same reason it is written that way
+   * everywhere else: numbers stored before this field existed have no
+   * value, and absent has to mean on.
+   */
+  if (user.whatsappPhoneNumberId) {
+    const number = await WhatsAppPhoneNumber.findById(user.whatsappPhoneNumberId)
+      .select('enabled')
+      .lean();
+    if (number && number.enabled === false) {
+      throw ApiError.forbidden(
+        'NUMBER_ACCESS_DENIED',
+        'Your access has been turned off. Please contact your administrator.',
+      );
+    }
   }
 
   const family = randomUUID();
