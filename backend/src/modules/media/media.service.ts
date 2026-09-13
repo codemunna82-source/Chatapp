@@ -7,12 +7,19 @@ import {
   createMedia,
   markMediaReady,
   findMediaBySha256,
+  findMediaByIdAndTenant,
   findMediaWithBytesByIdAndTenant,
   setMediaCloudinaryRef,
 } from './media.repository';
 import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
 import { getMetaGateway } from '../../integrations/meta';
-import { cloudinaryVariant, isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer } from '../../integrations/cloudinary';
+import {
+  cloudinaryVariant,
+  cloudinaryVideoPoster,
+  isCloudinaryConfigured,
+  uploadBufferToCloudinary,
+  fetchCloudinaryBuffer,
+} from '../../integrations/cloudinary';
 import type { MediaDoc } from './media.model';
 
 export interface UploadMediaInput {
@@ -117,6 +124,48 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
  * request that asked for it, which matters when the payload is a video.
  */
 const inFlightFetches = new Map<string, Promise<{ buffer: Buffer; mimeType: string }>>();
+
+/**
+ * A video's first frame, as an image.
+ *
+ * Separate from getMediaBytesForTenant because it answers a different
+ * question: not "give me this file" but "give me something I can draw
+ * where this file goes". A chat list needs the second one — it was
+ * downloading entire videos, up to sixteen megabytes each, so a bubble
+ * could show one still.
+ *
+ * Returns null rather than throwing when no poster can be derived: a
+ * video still held at Meta has not been cached here yet, and one stored
+ * in Mongo has no transformation service behind it. Neither is an error
+ * the user should see — the bubble falls back to the play badge it drew
+ * before this existed, and the poster appears on a later view once the
+ * file has been cached.
+ */
+export async function getMediaPosterForTenant(
+  tenantId: string,
+  mediaId: string,
+  width: number,
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  const media = await findMediaByIdAndTenant(mediaId, tenantId);
+  if (!media) {
+    throw ApiError.notFound('MEDIA_NOT_FOUND', 'Media not found');
+  }
+  if (!media.mimeType.startsWith('video/')) return null;
+  if (!media.storageRef.startsWith('https://')) return null;
+
+  const posterUrl = cloudinaryVideoPoster(media.storageRef, width);
+  if (!posterUrl) return null;
+
+  try {
+    return { buffer: await fetchCloudinaryBuffer(posterUrl), mimeType: 'image/jpeg' };
+  } catch (err) {
+    // A derivation that fails is not worth a 500. Cloudinary refuses to
+    // make a poster from some sources, and the answer to that is the same
+    // as having no poster at all.
+    logger.warn({ err, mediaId }, 'Cloudinary poster derivation failed');
+    return null;
+  }
+}
 
 export async function getMediaBytesForTenant(
   tenantId: string,

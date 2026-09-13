@@ -52,3 +52,16 @@ export function mediaUrl(mediaId: string, width?: number): string {
   const base = `${apiBaseUrl}/media/${mediaId}`;
   return width ? `${base}?w=${width}` : base;
 }
+
+/**
+ * A video's first frame, as an image.
+ *
+ * Not a variant of mediaUrl's width: this returns a DIFFERENT FILE — a
+ * JPEG derived from the video — so a bubble can show what a video looks
+ * like without pulling down the sixteen megabytes behind it. The server
+ * answers 204 when it cannot derive one yet, which is an ordinary
+ * "no poster", not an error.
+ */
+export function mediaPosterUrl(mediaId: string, width: number): string {
+  return `${apiBaseUrl}/media/${mediaId}?poster=1&w=${width}`;
+}

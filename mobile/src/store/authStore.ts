@@ -6,6 +6,7 @@ import * as authApi from '../api/endpoints/auth';
 import type { AuthTokens, AuthUser } from '../api/types';
 import { setSentryUser } from '../lib/sentry';
 import { clearChatCache } from '../storage/chatCache';
+import { clearMediaShapes } from '../storage/mediaShape';
 
 const CACHED_USER_KEY = 'voxo.cachedUser';
 
@@ -57,6 +58,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await clearStoredTokens();
       removeCached(CACHED_USER_KEY);
       clearChatCache();
+    clearMediaShapes();
       setSentryUser(null);
       set({ status: 'signedOut', accessToken: null, refreshToken: null, user: null });
     }
@@ -82,6 +84,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // for whoever signs in next — on a shared phone, or after an admin
     // revokes access — is not a cache, it is a leak.
     clearChatCache();
+    clearMediaShapes();
     // Cleared on the way out so a crash after signing out is not still
     // attributed to the person who just left.
     setSentryUser(null);

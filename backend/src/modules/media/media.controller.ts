@@ -3,8 +3,11 @@ import { asyncHandler } from '../../lib/asyncHandler';
 import { ApiError } from '../../lib/ApiError';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { serveCachedAsset, IMMUTABLE_MAX_AGE_SECONDS } from '../../lib/httpAssetCache';
-import { uploadMediaForTenant, getMediaBytesForTenant } from './media.service';
+import { uploadMediaForTenant, getMediaBytesForTenant, getMediaPosterForTenant } from './media.service';
 import { resolveMediaWidth } from './media.validation';
+
+/** What a poster is served at when the caller does not say. One chat bubble wide on a dense screen. */
+const DEFAULT_POSTER_WIDTH = 480;
 
 export const uploadMediaHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
@@ -45,6 +48,48 @@ export const getMediaHandler = asyncHandler(async (req: Request, res: Response) 
   // service all along; nothing ever asked for it. No `w` still means the
   // original, which is what the full-screen viewer wants.
   const width = resolveMediaWidth(req.query.w);
+
+  // `?poster=1` asks for a video's first frame instead of the video.
+  //
+  // Its own branch rather than a variant of the width parameter, because
+  // it returns a DIFFERENT FILE of a different type: a JPEG derived from
+  // an mp4. A client showing a video in a list wants this and never wants
+  // the sixteen megabytes behind it.
+  if (req.query.poster === '1') {
+    const posterWidth = width ?? DEFAULT_POSTER_WIDTH;
+
+    // Before the derivation, not after: a client that already holds this
+    // frame should cost a header comparison, not a round trip to
+    // Cloudinary to fetch bytes that are then thrown away.
+    if (
+      serveCachedAsset(req, res, {
+        etag: `"poster-${mediaId}-w${posterWidth}"`,
+        immutable: true,
+        maxAgeSeconds: IMMUTABLE_MAX_AGE_SECONDS,
+      })
+    ) {
+      return;
+    }
+
+    const poster = await getMediaPosterForTenant(auth.tenantId, mediaId, posterWidth);
+    // No poster is an ordinary answer, not a failure: this video may
+    // simply not be cached here yet. 204 says so without the client
+    // having to read a body or treat it as an error.
+    if (!poster) {
+      // Deliberately overrides the immutable header serveCachedAsset just
+      // set. "There is no poster" is a fact about right now — the same
+      // video gets one as soon as it has been fetched once — and caching
+      // that answer for a year would make it permanent.
+      res.setHeader('Cache-Control', 'no-store');
+      res.removeHeader('ETag');
+      res.status(204).end();
+      return;
+    }
+    res.setHeader('Content-Type', poster.mimeType);
+    res.setHeader('Content-Length', String(poster.buffer.length));
+    res.status(200).send(poster.buffer);
+    return;
+  }
 
   // The bytes behind a media id never change — WhatsApp media is written
   // once and referenced by an immutable id — so the id IS the validator,

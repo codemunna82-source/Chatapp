@@ -1,5 +1,5 @@
 import { File, Paths } from 'expo-file-system';
-import { mediaUrl } from '../../api/endpoints/media';
+import { mediaPosterUrl, mediaUrl } from '../../api/endpoints/media';
 
 /**
  * Downloads a media file once and keeps it on disk.
@@ -33,5 +33,50 @@ export async function downloadMedia(
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     idempotent: true,
   });
+  return result.uri;
+}
+
+/**
+ * A video's poster frame, cached like any other media file.
+ *
+ * Returns null when the server has no poster for this video yet — it
+ * answers 204, which arrives here as a zero-length file. The empty file
+ * is deleted rather than kept, so the next view asks again: a video
+ * uncached at the server on Monday has a poster once anyone has opened
+ * it, and a cached emptiness would hide that forever.
+ */
+/**
+ * The video file itself.
+ *
+ * A separate function only because the extension matters: ExoPlayer picks
+ * its extractor from it, and a file with no suffix is guessed at.
+ */
+export async function downloadVideo(mediaId: string, accessToken: string | null): Promise<string> {
+  const target = new File(Paths.cache, `voxo-media-${mediaId}.mp4`);
+  if (target.exists) return target.uri;
+
+  const result = await File.downloadFileAsync(mediaUrl(mediaId), target, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    idempotent: true,
+  });
+  return result.uri;
+}
+
+export async function downloadPoster(
+  mediaId: string,
+  accessToken: string | null,
+  width: number,
+): Promise<string | null> {
+  const target = new File(Paths.cache, `voxo-poster-${mediaId}-w${width}.jpg`);
+  if (target.exists) return target.size > 0 ? target.uri : null;
+
+  const result = await File.downloadFileAsync(mediaPosterUrl(mediaId, width), target, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    idempotent: true,
+  });
+  if (result.size === 0) {
+    result.delete();
+    return null;
+  }
   return result.uri;
 }

@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, PixelRatio, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { downloadMedia } from './mediaCache';
+import { clampRatio, readMediaRatio, writeMediaRatio } from '../../storage/mediaShape';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeProvider';
 import { UploadProgress } from './UploadProgress';
@@ -47,12 +48,68 @@ function MediaImageImpl({
   const { width } = useWindowDimensions();
   const [localUri, setLocalUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  /**
+   * Which photo this component is currently showing.
+   *
+   * FlashList RECYCLES these rows, so the same component instance is
+   * handed a different photo as the list scrolls. Everything about the
+   * shape below is tagged with this, or a tall picture would keep its box
+   * when the row was reused for a wide one.
+   */
+  const shapeKey = mediaId ?? providedUri;
+
+  /**
+   * width / height as remembered from the last time this photo was seen —
+   * on this launch or any earlier one — so a photo already looked at is
+   * the right shape on its first frame rather than snapping into place
+   * once the file loads.
+   */
+  const remembered = useMemo(() => readMediaRatio(mediaId), [mediaId]);
+  const [measured, setMeasured] = useState<{ key: string | undefined; ratio: number } | null>(null);
+  const ratio = (measured && measured.key === shapeKey ? measured.ratio : null) ?? remembered;
 
   // Sized from the live window rather than a fixed square: the enclosing
   // bubble is maxWidth 80%, so a hardcoded size overflowed on a 320dp phone
   // and left dead space on a 430dp one.
   const side = size ?? Math.round(Math.min(Math.max(width * 0.58, 160), 280));
-  const box = { width: side, height: side };
+  /**
+   * The box the photo is drawn in.
+   *
+   * An album cell is given an exact square by its caller and stays one —
+   * a grid of differently-shaped tiles is not a grid. Everywhere else the
+   * width is fixed and the HEIGHT follows the picture, which is the whole
+   * point: every photo used to be forced into a square and cropped by
+   * `cover`, so a portrait shot lost its top and bottom and a wide one
+   * lost its sides. Until the shape is known it stays square, which is
+   * the same neutral placeholder as before.
+   */
+  const box =
+    size !== undefined || !ratio
+      ? { width: side, height: side }
+      : { width: side, height: Math.round(side / ratio) };
+
+  /** Learns this photo's shape from the file itself, and remembers it. */
+  const measure = useCallback(
+    (uri: string) => {
+      Image.getSize(
+        uri,
+        (w, h) => {
+          const next = clampRatio(w, h);
+          if (next === null) return;
+          setMeasured({ key: shapeKey, ratio: next });
+          // Only server-backed media is worth remembering: a local file
+          // being sent is about to become a real message with a real id,
+          // and its temporary path will never be asked about again.
+          writeMediaRatio(mediaId, next);
+        },
+        () => {
+          // A photo that cannot be measured is still a photo. It keeps the
+          // square box, which is exactly what it had before this existed.
+        },
+      );
+    },
+    [mediaId, shapeKey],
+  );
 
   /**
    * What this bubble actually needs, in physical pixels.
@@ -74,7 +131,12 @@ function MediaImageImpl({
     (async () => {
       try {
         const uri = await downloadMedia(mediaId, accessToken, requestWidth);
-        if (!cancelled) setLocalUri(uri);
+        if (cancelled) return;
+        setLocalUri(uri);
+        // The downloaded file is the only thing that knows this photo's
+        // proportions, and it is already on disk — so measuring costs a
+        // decode that was going to happen anyway.
+        measure(uri);
       } catch {
         if (!cancelled) setFailed(true);
       }
@@ -85,7 +147,14 @@ function MediaImageImpl({
       // state on it afterwards.
       cancelled = true;
     };
-  }, [mediaId, providedUri, accessToken, requestWidth]);
+  }, [mediaId, providedUri, accessToken, requestWidth, measure]);
+
+  // A photo being SENT is on disk already and has no download to hook
+  // measuring onto, so it gets its own. Without this a just-picked
+  // portrait sat in a square until the send resolved and then jumped.
+  useEffect(() => {
+    if (providedUri) measure(providedUri);
+  }, [providedUri, measure]);
 
   // Derived, not stored: the local file wins when present, otherwise
   // whatever the download produced.

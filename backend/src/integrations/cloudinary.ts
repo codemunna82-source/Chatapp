@@ -110,6 +110,40 @@ export function cloudinaryVariant(url: string, width: number): string {
   return `${url.slice(0, at + marker.length)}c_limit,w_${width},q_auto/${url.slice(at + marker.length)}`;
 }
 
+/**
+ * A still frame from a video, as a JPEG.
+ *
+ * `so_0` is the seek offset — the first frame — and changing the
+ * extension is how Cloudinary is asked for an image derived from a video.
+ * Everything else matches cloudinaryVariant: bounded, never enlarged,
+ * quality chosen automatically.
+ *
+ * This exists so a video in a chat can be SEEN without being
+ * DOWNLOADED. A poster is tens of kilobytes; the video behind it can be
+ * sixteen megabytes, and fetching all of it to show one frame in a list
+ * is the thing §16 is about.
+ *
+ * Returns null for a URL this cannot derive from — a video held at Meta
+ * and not yet cached here, or a file stored in Mongo. The caller treats
+ * that as "no poster", not as an error: the bubble simply shows its play
+ * badge, exactly as it did before.
+ */
+export function cloudinaryVideoPoster(url: string, width: number): string | null {
+  const marker = '/upload/';
+  const at = url.indexOf(marker);
+  if (at === -1) return null;
+
+  const head = url.slice(0, at + marker.length);
+  const tail = url.slice(at + marker.length);
+  // The derived asset is an image, so it has to be asked for by an image
+  // extension. A tail with no extension at all is not something to guess
+  // at — better no poster than a URL that 404s on every video in the app.
+  const dot = tail.lastIndexOf('.');
+  if (dot === -1) return null;
+
+  return `${head}so_0,c_limit,w_${width},q_auto/${tail.slice(0, dot)}.jpg`;
+}
+
 export async function fetchCloudinaryBuffer(url: string): Promise<Buffer> {
   const res = await axios.get<ArrayBuffer>(url, { responseType: 'arraybuffer' });
   return Buffer.from(res.data);
