@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Image, PixelRatio, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { File, Paths } from 'expo-file-system';
-import { mediaUrl } from '../../api/endpoints/media';
+import { downloadMedia } from './mediaCache';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeProvider';
 import { UploadProgress } from './UploadProgress';
@@ -38,7 +37,7 @@ function MediaImageImpl({
    * below, which is what a single photo wants.
    */
   size?: number;
-  onOpen?: (localUri: string) => void;
+  onOpen?: (localUri: string, mediaId?: string) => void;
   /** The bubble's action sheet. Handled here because this Pressable would
    *  otherwise swallow the long press before the bubble ever sees it. */
   onLongPress?: () => void;
@@ -55,27 +54,27 @@ function MediaImageImpl({
   const side = size ?? Math.round(Math.min(Math.max(width * 0.58, 160), 280));
   const box = { width: side, height: side };
 
+  /**
+   * What this bubble actually needs, in physical pixels.
+   *
+   * `side` is layout units; the screen draws them at 2x or 3x, and asking
+   * for the layout number would have handed a 3x phone a third of the
+   * pixels it paints and made every photo in the app soft. The server
+   * snaps this up to its own ladder, so the exact figure only has to be
+   * honest, not round.
+   */
+  const requestWidth = PixelRatio.getPixelSizeForLayoutSize(side);
+
   useEffect(() => {
     // A locally-picked photo needs no fetch at all — providedUri is used
     // directly below, so there is nothing to synchronise here.
     if (providedUri || !mediaId) return;
 
     let cancelled = false;
-    const target = new File(Paths.cache, `voxo-media-${mediaId}.img`);
-
     (async () => {
       try {
-        // Already cached from a previous mount (or an earlier session) —
-        // skip the network entirely.
-        if (target.exists) {
-          if (!cancelled) setLocalUri(target.uri);
-          return;
-        }
-        const result = await File.downloadFileAsync(mediaUrl(mediaId), target, {
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-          idempotent: true,
-        });
-        if (!cancelled) setLocalUri(result.uri);
+        const uri = await downloadMedia(mediaId, accessToken, requestWidth);
+        if (!cancelled) setLocalUri(uri);
       } catch {
         if (!cancelled) setFailed(true);
       }
@@ -86,7 +85,7 @@ function MediaImageImpl({
       // state on it afterwards.
       cancelled = true;
     };
-  }, [mediaId, providedUri, accessToken]);
+  }, [mediaId, providedUri, accessToken, requestWidth]);
 
   // Derived, not stored: the local file wins when present, otherwise
   // whatever the download produced.
@@ -109,7 +108,7 @@ function MediaImageImpl({
     <Pressable
       // Opening the viewer passes the already-cached file, so a full-screen
       // photo costs no extra request and works offline.
-      onPress={displayUri && onOpen ? () => onOpen(displayUri) : undefined}
+      onPress={displayUri && onOpen ? () => onOpen(displayUri, mediaId) : undefined}
       // Long-press has to reach the bubble's action sheet even while the
       // photo is still downloading, so this Pressable is never `disabled`:
       // a disabled Pressable stops responding entirely, which would take

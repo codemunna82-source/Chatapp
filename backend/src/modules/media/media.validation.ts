@@ -58,3 +58,40 @@ export function validateMediaFile(mimeType: string, sizeBytes: number): MediaCat
 export const uploadMediaBodySchema = z.object({
   whatsappPhoneNumberId: z.string().min(1),
 });
+
+/**
+ * The widths the media endpoint will resize an image to.
+ *
+ * A fixed ladder rather than any integer the caller names. Every distinct
+ * width is its own Cloudinary derivation — billed, and cached separately
+ * at every layer — so an open parameter would let one photo be turned
+ * into thousands of them by walking the number. Four buckets cover every
+ * place the agent app draws an image: an album tile, a chat bubble, and
+ * the same bubble on a 2x or 3x screen.
+ *
+ * The guest web chat has its own, shorter ladder on its own endpoint
+ * (guest.controller.ts). Kept separate deliberately: that one is reached
+ * with a link rather than a login, it is already deployed and working,
+ * and a browser's needs are not a phone's.
+ */
+export const MEDIA_WIDTH_BUCKETS = [320, 480, 720, 1080] as const;
+
+/**
+ * Snaps a requested width up to the next bucket.
+ *
+ * Rounding UP, because rounding down would hand a bubble fewer pixels
+ * than it draws and make every photo in the app soft. Anything beyond the
+ * largest bucket is served at the largest bucket rather than at full
+ * resolution: a request for 4000px is a request to undo the entire point
+ * of this, and the full original is still available by asking for no
+ * width at all — which is what the full-screen viewer does.
+ *
+ * Returns undefined for an absent or unparseable value, which means "the
+ * original", exactly as before this existed.
+ */
+export function resolveMediaWidth(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const requested = Number(raw);
+  if (!Number.isFinite(requested) || requested <= 0) return undefined;
+  return MEDIA_WIDTH_BUCKETS.find((w) => requested <= w) ?? MEDIA_WIDTH_BUCKETS[MEDIA_WIDTH_BUCKETS.length - 1];
+}

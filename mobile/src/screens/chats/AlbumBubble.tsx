@@ -30,7 +30,7 @@ export function AlbumBubble({
 }: {
   /** Oldest first: the order they were sent, which is the order they are read. */
   messages: Message[];
-  onOpenImage?: (localUri: string) => void;
+  onOpenImage?: (localUri: string, mediaId?: string) => void;
   onLongPress: (message: Message) => void;
 }) {
   const { colors, radius, typography } = useTheme();

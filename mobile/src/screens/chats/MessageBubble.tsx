@@ -31,7 +31,7 @@ interface MessageBubbleProps {
   /** Swipe left. Omit if this message can't be forwarded. */
   onForward?: (message: Message) => void;
   /** Tapping a photo opens it full-screen; receives the cached local uri. */
-  onOpenImage?: (localUri: string) => void;
+  onOpenImage?: (localUri: string, mediaId?: string) => void;
   /** True while the screen is in multi-select mode. */
   selectable?: boolean;
   selected?: boolean;
@@ -92,7 +92,7 @@ function MessageContent({
   message: Message;
   /** Tint for media chrome that sits on the bubble rather than on the media itself (the audio scrubber). */
   textColor: string;
-  onOpenImage?: (localUri: string) => void;
+  onOpenImage?: (localUri: string, mediaId?: string) => void;
   /**
    * Forwarded into every media child that renders its own Pressable.
    *

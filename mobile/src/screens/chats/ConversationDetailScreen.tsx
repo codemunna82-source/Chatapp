@@ -205,7 +205,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // the header turns into a selection bar with a forward action.
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [forwardTargets, setForwardTargets] = useState<Message[]>([]);
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  // The photo the full-screen viewer is showing: the bubble's already
+  // downloaded file, plus the media id so the viewer can upgrade it to
+  // the original once it is open.
+  const [viewer, setViewer] = useState<{ uri: string; mediaId?: string } | null>(null);
   // Short-lived confirmation for copy/forward — both are silent otherwise.
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -806,7 +809,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     headerBg,
     headerFg,
   ]);
-  const handleOpenImage = useCallback((localUri: string) => setViewerUri(localUri), []);
+  const handleOpenImage = useCallback((localUri: string, mediaId?: string) => setViewer({ uri: localUri, mediaId }), []);
 
   useEffect(
     () => () => {
@@ -1053,7 +1056,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           conversationId={conversationId}
         />
 
-        <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} />
+        <ImageViewerModal uri={viewer?.uri ?? null} mediaId={viewer?.mediaId} onClose={() => setViewer(null)} />
 
         <ForwardSheet
           visible={forwardTargets.length > 0}

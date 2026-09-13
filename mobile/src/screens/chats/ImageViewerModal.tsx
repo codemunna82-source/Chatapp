@@ -1,14 +1,25 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { touchTarget } from '../../theme/spacing';
+import { downloadMedia } from './mediaCache';
+import { useAuthStore } from '../../store/authStore';
 
 interface ImageViewerModalProps {
   /** Local (cached) file uri of the image to show; null closes the viewer. */
   uri: string | null;
+  /**
+   * The server id of the same photo, when it has one.
+   *
+   * The bubble downloads a version sized for a bubble. Zoomed to 4x on a
+   * full screen that would be visibly soft, so the original is fetched
+   * once the viewer opens and swapped in underneath — the thumbnail is on
+   * screen the whole time, so opening a photo is still instant.
+   */
+  mediaId?: string;
   onClose: () => void;
 }
 
@@ -25,9 +36,42 @@ const MAX_SCALE = 4;
  * The gestures run entirely on the UI thread via Reanimated shared values,
  * so zooming stays smooth even while the chat behind it is busy.
  */
-export function ImageViewerModal({ uri, onClose }: ImageViewerModalProps) {
+export function ImageViewerModal({ uri, mediaId, onClose }: ImageViewerModalProps) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const accessToken = useAuthStore((s) => s.accessToken);
+  /**
+   * The original, tagged with the photo it belongs to.
+   *
+   * Tagged rather than cleared on every change, so a download that
+   * finishes after the user has swiped to the next photo cannot paint
+   * itself over that one — and so this effect never has to reset state
+   * synchronously just to stay honest.
+   */
+  const [full, setFull] = useState<{ mediaId: string; uri: string } | null>(null);
+
+  useEffect(() => {
+    if (!uri || !mediaId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const upgraded = await downloadMedia(mediaId, accessToken);
+        if (!cancelled) setFull({ mediaId, uri: upgraded });
+      } catch {
+        // The thumbnail stays. A failed upgrade is a slightly soft photo,
+        // not a broken viewer, and there is nothing for the user to do
+        // about it.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uri, mediaId, accessToken]);
+
+  // The sharper file once it has landed FOR THIS PHOTO, the bubble's copy
+  // until then.
+  const displayUri = (mediaId && full?.mediaId === mediaId ? full.uri : null) ?? uri;
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -121,9 +165,9 @@ export function ImageViewerModal({ uri, onClose }: ImageViewerModalProps) {
       <View style={styles.root}>
         <GestureDetector gesture={gesture}>
           <Animated.View style={styles.canvas}>
-            {uri ? (
+            {displayUri ? (
               <Animated.Image
-                source={{ uri }}
+                source={{ uri: displayUri }}
                 style={[{ width, height: height * 0.8 }, imageStyle]}
                 resizeMode="contain"
               />

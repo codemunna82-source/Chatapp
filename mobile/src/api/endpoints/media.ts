@@ -38,7 +38,17 @@ export async function uploadMedia(
   return res.data.data;
 }
 
-/** GET /api/media/:id requires the same bearer token as every other request — see MediaImage's use of this. */
-export function mediaUrl(mediaId: string): string {
-  return `${apiBaseUrl}/media/${mediaId}`;
+/**
+ * GET /api/media/:id requires the same bearer token as every other
+ * request — see MediaImage's use of this.
+ *
+ * @param width the widest the image needs to be drawn, in PHYSICAL
+ * pixels. The server snaps it up to a fixed ladder and resizes at
+ * Cloudinary, so a chat bubble stops pulling the full photo out of
+ * someone's camera roll to draw it at a fraction of its size. Omit it for
+ * the original, which is what the full-screen viewer wants.
+ */
+export function mediaUrl(mediaId: string, width?: number): string {
+  const base = `${apiBaseUrl}/media/${mediaId}`;
+  return width ? `${base}?w=${width}` : base;
 }
