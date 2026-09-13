@@ -88,3 +88,15 @@ export const chatHeaderBackground = { light: '#F7F5F3', dark: '#1F2C34' } as con
 
 /** Header text and icons, against the backgrounds above. */
 export const chatHeaderForeground = { light: '#111B21', dark: '#E9EDEF' } as const;
+
+/**
+ * The chat LIST's ground, which is not the chat's.
+ *
+ * A conversation sits on the wallpaper; the inbox does not. Reusing
+ * `background` put the beige wallpaper colour behind forty list rows in
+ * light mode, which is the one place the messenger is plainly white. In
+ * dark the two happen to agree, and it is written out anyway rather than
+ * left implicit — a colour that is correct by coincidence is one edit
+ * away from being wrong.
+ */
+export const chatListBackground = { light: '#FFFFFF', dark: '#0B141A' } as const;

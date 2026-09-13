@@ -6,6 +6,8 @@ export interface ListConversationsParams {
   cursor?: string;
   limit?: number;
   pinnedOnly?: boolean;
+  /** The chat list's read/unread filter. Omitted means both. */
+  unread?: boolean;
   status?: ConversationStatus;
 }
 

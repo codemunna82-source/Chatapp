@@ -110,6 +110,15 @@ export interface ListConversationsOptions {
   limit?: number;
   pinnedOnly?: boolean;
   /**
+   * The chat list's read/unread filter. true keeps only unread chats,
+   * false only read ones, undefined keeps both.
+   *
+   * Applied here rather than after the query for the same reason the
+   * number scope is: dropping rows once they are fetched returns short
+   * pages and a cursor that has already skipped past the ones it hid.
+   */
+  unread?: boolean;
+  /**
    * Restricts the list to conversations for these contacts — used by the
    * search flow (conversation.service.ts resolves matching contacts first,
    * then passes their ids here), so this repository stays free of any
@@ -141,10 +150,29 @@ export async function listConversationsByTenant(
   if (opts.contactIds) {
     filter.contactId = { $in: opts.contactIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id)) };
   }
+  // Both the unread filter and the cursor want to express themselves as
+  // an $or, and a Mongo filter has room for exactly one at the top level —
+  // whichever was assigned second would silently replace the first, which
+  // on the cursor's side means every page returning page one. Collected
+  // into an $and instead, where several can coexist.
+  const clauses: Record<string, unknown>[] = [];
+  if (opts.unread === true) {
+    // Either kind of unread: messages nobody has opened, or a chat marked
+    // unread by hand. The row reads as unread for both, so the filter has
+    // to agree with the row.
+    clauses.push({ $or: [{ unreadCount: { $gt: 0 } }, { manuallyUnread: true }] });
+  } else if (opts.unread === false) {
+    // Written without $or so it needs no clause of its own. `$ne: true`
+    // rather than `false`, because a conversation created before
+    // manuallyUnread existed has no value at all.
+    filter.unreadCount = { $lte: 0 };
+    filter.manuallyUnread = { $ne: true };
+  }
+
   if (opts.cursor) {
     const cursor = decodeCursor(opts.cursor);
     if (cursor) {
-      filter.$or = afterCursor(cursor);
+      clauses.push({ $or: afterCursor(cursor) });
     } else if (Types.ObjectId.isValid(opts.cursor)) {
       // A cursor issued by the previous build. Honoured rather than
       // rejected so a client mid-scroll across a deploy keeps working; it
@@ -153,6 +181,8 @@ export async function listConversationsByTenant(
       filter._id = { $lt: new Types.ObjectId(opts.cursor) };
     }
   }
+
+  if (clauses.length > 0) filter.$and = clauses;
 
   // .lean() for the same reason as the message list: these rows are
   // serialised and never mutated.

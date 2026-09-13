@@ -21,7 +21,10 @@ export function ChatsStackNavigator() {
         freezeOnBlur: true,
       }}
     >
-      <Stack.Screen name="ChatsList" component={ChatsListScreen} options={{ title: 'Chats' }} />
+      {/* No navigator header: the screen draws its own, because the plain
+          title had nowhere to put the wordmark, the filter pills or the
+          actions beside them. It owns its top inset to match. */}
+      <Stack.Screen name="ChatsList" component={ChatsListScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="ConversationDetail"
         component={ConversationDetailScreen}

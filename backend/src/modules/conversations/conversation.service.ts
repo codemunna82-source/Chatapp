@@ -88,6 +88,8 @@ export interface ListConversationsQuery {
   cursor?: string;
   limit?: number;
   pinnedOnly?: boolean;
+  /** The chat list's read/unread filter — see listConversationsQuerySchema. */
+  unread?: boolean;
   status?: ConversationStatus;
 }
 
@@ -109,6 +111,7 @@ export async function listConversationsForTenant(auth: AuthContext, query: ListC
     cursor: query.cursor,
     limit: query.limit,
     pinnedOnly: query.pinnedOnly,
+    unread: query.unread,
     status: query.status,
     contactIds,
     whatsappPhoneNumberId: visibleWhatsAppPhoneNumberId(auth),

@@ -13,6 +13,7 @@ import {
   findOrCreateConversation,
   recordGuestInboundActivity,
   recordOutboundActivity,
+  updateLastMessageStatus,
 } from '../conversations/conversation.repository';
 import { resolveSendingPhoneNumberId } from '../conversations/conversation.service';
 import { visibleWhatsAppPhoneNumberId } from '../conversations/conversation.access';
@@ -1146,6 +1147,30 @@ export async function markBusinessMessagesRead(guest: GuestContext): Promise<{ r
       'READ',
       guest.whatsappPhoneNumberId,
     );
+  }
+
+  /**
+   * And the chat row, which was being left behind.
+   *
+   * The messages were marked read and the open conversation was told
+   * over the socket — but nothing updated lastMessageStatus, so the chat
+   * LIST kept showing the grey tick it was given when the message was
+   * sent. The customer had read it; every screen said so except the one
+   * the agent looks at most.
+   *
+   * unread is sorted newest first, so its first entry is the newest
+   * message just marked read. updateLastMessageStatus only writes when
+   * that id is still the conversation's last, which is the guard against
+   * a late receipt rewriting a row that has since moved on.
+   */
+  const newest = String(ids[0]);
+  await updateLastMessageStatus(guest.tenantId, newest, 'READ');
+  const conversation = await findConversationByIdAndTenant(guest.conversationId, guest.tenantId);
+  if (conversation) {
+    // conversation:updated is what the agent app's list listens to.
+    // message:status only patches the open thread's message cache — the
+    // row in the list is a different query and hears nothing from it.
+    realtime.emitConversationUpdated(guest.tenantId, toRealtimeConversation(conversation));
   }
 
   return { read: ids.length };

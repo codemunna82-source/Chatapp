@@ -6,6 +6,18 @@ export const listConversationsQuerySchema = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
   pinnedOnly: z.coerce.boolean().optional(),
+  /**
+   * The chat list's read/unread filter.
+   *
+   * Parsed from the two literal strings rather than with coerce.boolean,
+   * which would read "false" as TRUE — every JavaScript non-empty string
+   * is truthy — and quietly turn "show me the read chats" into "show me
+   * the unread ones".
+   */
+  unread: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
   status: z.enum(CONVERSATION_STATUSES).optional(),
 });
 

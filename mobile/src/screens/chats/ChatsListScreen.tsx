@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -21,8 +22,11 @@ import {
   useMarkConversationUnread,
   useBulkConversations,
 } from '../../queries/useConversations';
+import { useTabBadges } from '../../queries/useTabBadges';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
-import { useTheme } from '../../theme/ThemeProvider';
+import { ThemeProvider, useTheme, useResolvedScheme } from '../../theme/ThemeProvider';
+import { chatLightColors, chatDarkColors, chatListBackground } from '../../theme/chatTheme';
+import { ChatListFilters, type ChatFilter } from './ChatListFilters';
 import { touchTarget } from '../../theme/spacing';
 import type { ChatsStackParamList } from '../../navigation/types';
 import { impactMedium, selectionFeedback } from '../../utils/haptics';
@@ -33,10 +37,40 @@ type Props = NativeStackScreenProps<ChatsStackParamList, 'ChatsList'>;
 /** Module scope: a stable identity FlashList can rely on across renders. */
 const keyExtractor = (item: Conversation) => item.id;
 
-export function ChatsListScreen({ navigation }: Props) {
+/**
+ * The inbox wears the same palette as the conversation it opens.
+ *
+ * The two screens are one place to the person using them, and the list
+ * kept the app's indigo while the chat had already moved to the
+ * messenger's greens — so opening a chat changed the colour of the
+ * product. Scoped to this subtree exactly as the chat screen scopes its
+ * own, and still following the app's light/dark/system setting.
+ */
+export function ChatsListScreen(props: Props) {
+  const scheme = useResolvedScheme();
+  const chatColors = useMemo(() => {
+    const base = scheme === 'dark' ? chatDarkColors : chatLightColors;
+    // The inbox is not the conversation: it does not sit on the
+    // wallpaper. Overridden here rather than in chatTheme itself so the
+    // conversation screen keeps the ground it wants.
+    return { ...base, background: chatListBackground[scheme === 'dark' ? 'dark' : 'light'] };
+  }, [scheme]);
+  return (
+    <ThemeProvider colors={chatColors}>
+      <ChatsListScreenInner {...props} />
+    </ThemeProvider>
+  );
+}
+
+function ChatsListScreenInner({ navigation }: Props) {
   const { colors, spacing, radius, typography, shadow } = useTheme();
+  const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [filter, setFilter] = useState<ChatFilter>('all');
+  // The same figure the Chats tab badge shows, off the same cache entry —
+  // two counts of the same thing that disagreed would be worse than one.
+  const { unreadChats } = useTabBadges();
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<Conversation | null>(null);
   // Multi-select. Held as an id array rather than a Set so it stays a plain
@@ -52,6 +86,10 @@ export function ChatsListScreen({ navigation }: Props) {
   const query = useConversations({
     search: debouncedSearch || undefined,
     status: showArchived ? 'ARCHIVED' : 'OPEN',
+    // Sent to the server rather than applied to the loaded pages: filtering
+    // after the fetch returns short pages and a cursor that has already
+    // walked past the rows it hid.
+    unread: filter === 'all' ? undefined : filter === 'unread',
   });
   // Keyed off the query data (stable identity from react-query) rather than
   // the freshly-allocated array flatten returns, so the list only rebuilds
@@ -231,7 +269,10 @@ export function ChatsListScreen({ navigation }: Props) {
   const showEmpty = !showSkeleton && conversations.length === 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    // paddingTop, not a SafeAreaView: the status bar has to be the SAME
+    // colour as the header below it, and a wrapper that insets would put
+    // the screen background there instead of the header's.
+    <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
       {selectionMode ? (
         <ChatSelectionBar
           count={selectedIds.length}
@@ -243,43 +284,44 @@ export function ChatsListScreen({ navigation }: Props) {
           onDelete={confirmBulkDelete}
         />
       ) : (
-        <SearchBar value={search} onChangeText={setSearch} placeholder={showArchived ? 'Search archived' : 'Search chats'} />
-      )}
-
-      <Pressable
-        onPress={() => setShowArchived((prev) => !prev)}
-        style={[styles.archiveToggle, { paddingHorizontal: spacing.md, marginBottom: spacing.xs }]}
-        accessibilityRole="button"
-        accessibilityLabel={showArchived ? 'Back to active chats' : 'Show archived chats'}
-      >
-        {({ pressed }) => (
-          <View
-            style={[
-              styles.archiveToggleInner,
-              {
-                backgroundColor: showArchived ? colors.primaryMuted : 'transparent',
-                borderRadius: radius.md,
-                paddingHorizontal: spacing.sm,
-                opacity: pressed ? 0.6 : 1,
-              },
-            ]}
-          >
-            <Ionicons
-              name={showArchived ? 'chevron-back' : 'archive-outline'}
-              size={17}
-              color={showArchived ? colors.primary : colors.textSecondary}
-            />
-            <Text
-              style={[
-                typography.label,
-                { color: showArchived ? colors.primary : colors.textSecondary, marginLeft: spacing.xs },
-              ]}
+        <>
+          {/* The wordmark, where the messenger puts its own. This screen
+              renders its own header now — the navigator's plain "Chats"
+              title had no room for a brand, a filter row or the actions
+              beside it. */}
+          <View style={[styles.brandRow, { paddingHorizontal: spacing.md }]}>
+            <Text style={[styles.brand, { color: colors.success }]}>VOXO</Text>
+            <Pressable
+              onPress={() => setShowArchived((prev) => !prev)}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={showArchived ? 'Back to active chats' : 'Show archived chats'}
             >
-              {showArchived ? 'Back to chats' : 'Archived'}
-            </Text>
+              {({ pressed }) => (
+                <Ionicons
+                  name={showArchived ? 'chevron-back' : 'archive-outline'}
+                  size={22}
+                  color={showArchived ? colors.success : colors.textSecondary}
+                  style={{ opacity: pressed ? 0.5 : 1 }}
+                />
+              )}
+            </Pressable>
           </View>
-        )}
-      </Pressable>
+
+          <SearchBar value={search} onChangeText={setSearch} placeholder={showArchived ? 'Search archived' : 'Search chats'} />
+
+          {/* Hidden in the archive, where read and unread are not the
+              question being asked. */}
+          {!showArchived ? (
+            <ChatListFilters value={filter} unreadCount={unreadChats} onChange={setFilter} />
+          ) : (
+            <View style={[styles.archiveRow, { paddingHorizontal: spacing.md, paddingBottom: spacing.sm }]}>
+              <Ionicons name="archive" size={17} color={colors.success} />
+              <Text style={[typography.label, { color: colors.success, marginLeft: spacing.xs }]}>Archived</Text>
+            </View>
+          )}
+        </>
+      )}
 
       <ConnectionBanner />
       <NumberHealthBanner />
@@ -288,20 +330,39 @@ export function ChatsListScreen({ navigation }: Props) {
         <ChatListSkeleton />
       ) : showEmpty ? (
         <EmptyState
-          icon={debouncedSearch ? 'search-outline' : showArchived ? 'archive-outline' : 'chatbubbles-outline'}
+          icon={
+            debouncedSearch
+              ? 'search-outline'
+              : showArchived
+                ? 'archive-outline'
+                : filter === 'unread'
+                  ? 'checkmark-done-outline'
+                  : 'chatbubbles-outline'
+          }
           title={
             debouncedSearch
               ? 'No chats match your search'
               : showArchived
                 ? 'Nothing archived'
-                : 'No conversations yet'
+                : filter === 'unread'
+                  ? // The happy emptiness. Reaching zero unread is the
+                    // point of the filter, so it should not be reported
+                    // in the same words as having no chats at all.
+                    'All caught up'
+                  : filter === 'read'
+                    ? 'Nothing read yet'
+                    : 'No conversations yet'
           }
           subtitle={
             debouncedSearch
               ? 'Try a different name or number.'
               : showArchived
                 ? 'Chats you archive will be kept here.'
-                : 'New conversations will show up here as customers message in.'
+                : filter === 'unread'
+                  ? 'Every chat has been read.'
+                  : filter === 'read'
+                    ? 'Chats you have opened will show up here.'
+                    : 'New conversations will show up here as customers message in.'
           }
         />
       ) : (
@@ -359,7 +420,17 @@ export function ChatsListScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  archiveToggle: { minHeight: touchTarget.compact, justifyContent: 'center' },
-  archiveToggleInner: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', minHeight: 32 },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: touchTarget.compact,
+    paddingTop: 6,
+  },
+  // 25/700 with a tight track: the messenger's wordmark is the largest
+  // thing on the screen and the only place this weight appears, which is
+  // what makes it read as a name rather than a heading.
+  brand: { fontSize: 25, fontWeight: '700', letterSpacing: -0.4 },
+  archiveRow: { flexDirection: 'row', alignItems: 'center' },
   fab: { position: 'absolute', right: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
 });
