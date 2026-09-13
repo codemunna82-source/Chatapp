@@ -63,7 +63,7 @@ export function ChatsListScreen(props: Props) {
 }
 
 function ChatsListScreenInner({ navigation }: Props) {
-  const { colors, spacing, radius, typography, shadow } = useTheme();
+  const { colors, spacing, typography } = useTheme();
   const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
@@ -291,21 +291,45 @@ function ChatsListScreenInner({ navigation }: Props) {
               beside it. */}
           <View style={[styles.brandRow, { paddingHorizontal: spacing.md }]}>
             <Text style={[styles.brand, { color: colors.success }]}>VOXO</Text>
-            <Pressable
-              onPress={() => setShowArchived((prev) => !prev)}
-              hitSlop={10}
-              accessibilityRole="button"
-              accessibilityLabel={showArchived ? 'Back to active chats' : 'Show archived chats'}
-            >
-              {({ pressed }) => (
-                <Ionicons
-                  name={showArchived ? 'chevron-back' : 'archive-outline'}
-                  size={22}
-                  color={showArchived ? colors.success : colors.textSecondary}
-                  style={{ opacity: pressed ? 0.5 : 1 }}
-                />
-              )}
-            </Pressable>
+            <View style={styles.brandActions}>
+              {/* New chat lives here now, not on a floating button. The
+                  FAB sat on top of the list and covered a row's name and
+                  timestamp wherever it landed — and this is the only way
+                  to start a conversation since the Contacts tab went, so
+                  it had to keep a home rather than simply be removed. */}
+              {!showArchived ? (
+                <Pressable
+                  onPress={() => setNewChatOpen(true)}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Start a new chat"
+                >
+                  {({ pressed }) => (
+                    <Ionicons
+                      name="create-outline"
+                      size={22}
+                      color={colors.textSecondary}
+                      style={{ opacity: pressed ? 0.5 : 1 }}
+                    />
+                  )}
+                </Pressable>
+              ) : null}
+              <Pressable
+                onPress={() => setShowArchived((prev) => !prev)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={showArchived ? 'Back to active chats' : 'Show archived chats'}
+              >
+                {({ pressed }) => (
+                  <Ionicons
+                    name={showArchived ? 'chevron-back' : 'archive-outline'}
+                    size={22}
+                    color={showArchived ? colors.success : colors.textSecondary}
+                    style={{ opacity: pressed ? 0.5 : 1 }}
+                  />
+                )}
+              </Pressable>
+            </View>
           </View>
 
           <SearchBar value={search} onChangeText={setSearch} placeholder={showArchived ? 'Search archived' : 'Search chats'} />
@@ -383,20 +407,6 @@ function ChatsListScreenInner({ navigation }: Props) {
         />
       )}
 
-      {/* New chat: pick a contact and the thread opens (creating it the
-          first time). This is the only entry point now that the Contacts
-          tab is gone, so it also offers adding a contact. */}
-      {!showArchived ? (
-        <Pressable
-          onPress={() => setNewChatOpen(true)}
-          style={[styles.fab, shadow.lg, { backgroundColor: colors.primary, borderRadius: radius.full, bottom: spacing.lg }]}
-          accessibilityRole="button"
-          accessibilityLabel="Start a new chat"
-        >
-          {({ pressed }) => <Ionicons name="add" size={28} color={colors.textOnPrimary} style={{ opacity: pressed ? 0.6 : 1 }} />}
-        </Pressable>
-      ) : null}
-
       <ChatActionSheet
         conversation={actionTarget}
         onClose={() => setActionTarget(null)}
@@ -432,5 +442,5 @@ const styles = StyleSheet.create({
   // what makes it read as a name rather than a heading.
   brand: { fontSize: 25, fontWeight: '700', letterSpacing: -0.4 },
   archiveRow: { flexDirection: 'row', alignItems: 'center' },
-  fab: { position: 'absolute', right: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
+  brandActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
 });

@@ -38,6 +38,7 @@ import { useMessageDraft } from '../../utils/useMessageDraft';
 import { impactLight } from '../../utils/haptics';
 import { MediaSourceSheet } from './MediaSourceSheet';
 import { QuickReplySheet } from './QuickReplySheet';
+import { EmojiSheet } from './EmojiSheet';
 import { recordQuickReplyUse } from '../../queries/useQuickReplies';
 
 interface ComposerProps {
@@ -181,6 +182,7 @@ export function Composer({
 
   const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
 
   const canSend = Boolean(text.trim()) && !sending;
@@ -771,16 +773,22 @@ export function Composer({
           />
           {/* Inside the pill rather than as a fifth button in the row: at
               four icons the row is already at the width where touch targets
-              start being squeezed on a small phone. */}
+              start being squeezed on a small phone.
+
+              Emoji, where the saved-replies bolt used to be. Saved
+              replies did not go anywhere — they moved to a long press on
+              this same spot, which is where a second, rarer action
+              belongs when the first one is reached constantly. */}
           <Pressable
-            onPress={() => setQuickReplyOpen(true)}
+            onPress={() => setEmojiOpen(true)}
+            onLongPress={() => setQuickReplyOpen(true)}
             hitSlop={8}
             style={styles.pillAction}
             accessibilityRole="button"
-            accessibilityLabel="Saved replies"
+            accessibilityLabel="Emoji. Long press for saved replies."
           >
             {({ pressed }) => (
-              <Ionicons name="flash-outline" size={19} color={colors.textTertiary} style={{ opacity: pressed ? 0.5 : 1 }} />
+              <Ionicons name="happy-outline" size={20} color={colors.textTertiary} style={{ opacity: pressed ? 0.5 : 1 }} />
             )}
           </Pressable>
         </View>
@@ -834,6 +842,16 @@ export function Composer({
           </Pressable>
         )}
       </View>
+
+      <EmojiSheet
+        visible={emojiOpen}
+        onClose={() => setEmojiOpen(false)}
+        // Appended rather than inserted at the cursor: the composer holds
+        // the text but not the selection, and an emoji landing in the
+        // middle of a half-typed word would be worse than one landing at
+        // the end where it was going anyway.
+        onPick={(emoji) => handleChangeText(text + emoji)}
+      />
 
       <QuickReplySheet
         visible={quickReplyOpen}

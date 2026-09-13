@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../../theme/ThemeProvider';
 
 /**
@@ -20,10 +20,12 @@ const OPTIONS: { value: ChatFilter; label: string }[] = [
 /**
  * The row of pills under the search field.
  *
- * Horizontally scrollable even though three pills fit on every phone
- * sold: the alternative is a row that wraps to two lines the first time
- * a longer label or a larger font scale arrives, which moves the whole
- * list down by a row's height for one word.
+ * A plain row, not a horizontal ScrollView. It was one, and a horizontal
+ * ScrollView inside a column stretches to fill the space below it — so
+ * the three pills ended up floating in the middle of a third of the
+ * screen, with the chat list pushed below all of it. Three pills fit on
+ * every phone sold; wrapping is the right answer for the day a longer
+ * label arrives, and it costs nothing until then.
  */
 export function ChatListFilters({
   value,
@@ -38,11 +40,7 @@ export function ChatListFilters({
   const { colors, spacing, typography } = useTheme();
 
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={[styles.row, { paddingHorizontal: spacing.md, gap: spacing.sm }]}
-    >
+    <View style={[styles.row, { paddingHorizontal: spacing.md, gap: spacing.sm }]}>
       {OPTIONS.map((option) => {
         const active = option.value === value;
         return (
@@ -83,12 +81,12 @@ export function ChatListFilters({
           </Pressable>
         );
       })}
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { alignItems: 'center', paddingBottom: 8 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', paddingBottom: 8 },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',

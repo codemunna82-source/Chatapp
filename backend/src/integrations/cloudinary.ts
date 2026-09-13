@@ -144,6 +144,30 @@ export function cloudinaryVideoPoster(url: string, width: number): string | null
   return `${head}so_0,c_limit,w_${width},q_auto/${tail.slice(0, dot)}.jpg`;
 }
 
+/**
+ * The same image, as a JPEG.
+ *
+ * `f_jpg` is the conversion; the extension has to change with it or
+ * Cloudinary is being asked for a format the filename contradicts.
+ * Bounded at the same time, because the only caller is about to hand
+ * these bytes to Meta, which has its own size ceiling.
+ *
+ * Returns null for a URL this cannot derive from, and the caller treats
+ * that as "cannot convert" rather than as an error of its own.
+ */
+export function cloudinaryAsJpeg(url: string, maxWidth: number): string | null {
+  const marker = '/upload/';
+  const at = url.indexOf(marker);
+  if (at === -1) return null;
+
+  const head = url.slice(0, at + marker.length);
+  const tail = url.slice(at + marker.length);
+  const dot = tail.lastIndexOf('.');
+  if (dot === -1) return null;
+
+  return `${head}f_jpg,c_limit,w_${maxWidth},q_auto/${tail.slice(0, dot)}.jpg`;
+}
+
 export async function fetchCloudinaryBuffer(url: string): Promise<Buffer> {
   const res = await axios.get<ArrayBuffer>(url, { responseType: 'arraybuffer' });
   return Buffer.from(res.data);

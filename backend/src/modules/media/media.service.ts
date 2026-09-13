@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import { ApiError } from '../../lib/ApiError';
 import { logger } from '../../lib/logger';
 import { recordAudit } from '../audit/auditLog.service';
-import { validateMediaFile } from './media.validation';
+import {
+  validateMediaFile,
+  CONVERTIBLE_IMAGE_TYPES,
+  CONVERTED_IMAGE_MAX_WIDTH,
+} from './media.validation';
 import {
   createMedia,
   markMediaReady,
@@ -14,6 +18,7 @@ import {
 import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
 import { getMetaGateway } from '../../integrations/meta';
 import {
+  cloudinaryAsJpeg,
   cloudinaryVariant,
   cloudinaryVideoPoster,
   isCloudinaryConfigured,
@@ -35,10 +40,66 @@ function cloudinaryFolderFor(tenantId: string): string {
   return `voxo/${tenantId}/media`;
 }
 
+/**
+ * Turns a format Meta refuses into one it accepts.
+ *
+ * Through Cloudinary, which is already how every other derived image in
+ * this app is produced, rather than by adding an image library to this
+ * process — a transcoder is a large native dependency to carry for a
+ * conversion that a service we already pay for does from a URL.
+ *
+ * The round trip is real: an upload, then a fetch of the derived file.
+ * It is paid only by the formats that would otherwise have failed
+ * outright, which is the comparison that matters.
+ */
+async function convertImageForMeta(
+  tenantId: string,
+  buffer: Buffer,
+): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
+  if (!isCloudinaryConfigured()) {
+    throw ApiError.badRequest(
+      'MEDIA_CONVERSION_UNAVAILABLE',
+      'That image is in a format WhatsApp does not accept, and image conversion is not configured on this server. Send it as a JPEG or PNG.',
+    );
+  }
+
+  const staged = await uploadBufferToCloudinary(buffer, {
+    folder: cloudinaryFolderFor(tenantId),
+    resourceType: 'image',
+  });
+  const jpegUrl = cloudinaryAsJpeg(staged.url, CONVERTED_IMAGE_MAX_WIDTH);
+  if (!jpegUrl) {
+    throw ApiError.badRequest(
+      'MEDIA_CONVERSION_FAILED',
+      'That image could not be converted to a format WhatsApp accepts.',
+    );
+  }
+
+  return {
+    buffer: await fetchCloudinaryBuffer(jpegUrl),
+    mimeType: 'image/jpeg',
+    filename: `image-${Date.now()}.jpg`,
+  };
+}
+
 export async function uploadMediaForTenant(input: UploadMediaInput): Promise<MediaDoc> {
   validateMediaFile(input.mimeType, input.buffer.length);
 
-  const sha256 = createHash('sha256').update(input.buffer).digest('hex');
+  /**
+   * Everything below works on the CONVERTED file, deliberately.
+   *
+   * The hash, the dedupe, the stored mime type and the bytes sent to
+   * Meta all describe what was actually sent. Hashing the original would
+   * dedupe two identical webps into one JPEG upload, which is right —
+   * but it would also record a mime type no client can play back, and
+   * the dedupe hit would return a document describing a file Meta never
+   * received.
+   */
+  const file = CONVERTIBLE_IMAGE_TYPES.has(input.mimeType)
+    ? await convertImageForMeta(input.tenantId, input.buffer)
+    : { buffer: input.buffer, mimeType: input.mimeType, filename: input.filename };
+
+  const sha256 = createHash('sha256').update(file.buffer).digest('hex');
 
   // Dedupe: re-uploading the exact same file within a tenant reuses the
   // already-uploaded Meta media id rather than uploading (and paying for,
@@ -51,8 +112,8 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
   const media = await createMedia({
     tenantId: input.tenantId,
     whatsappPhoneNumberId: input.whatsappPhoneNumberId,
-    mimeType: input.mimeType,
-    sizeBytes: input.buffer.length,
+    mimeType: file.mimeType,
+    sizeBytes: file.buffer.length,
     sha256,
     storageRef: `pending:${sha256}`,
     status: 'UPLOADING',
@@ -62,9 +123,9 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
     const credentials = await resolveMetaCredentialsForPhoneNumber(input.tenantId, input.whatsappPhoneNumberId);
     const gateway = getMetaGateway();
     const result = await gateway.uploadMedia(credentials, {
-      buffer: input.buffer,
-      mimeType: input.mimeType,
-      filename: input.filename,
+      buffer: file.buffer,
+      mimeType: file.mimeType,
+      filename: file.filename,
     });
 
     const ready = await markMediaReady(String(media._id), input.tenantId, result.metaMediaId);
@@ -74,7 +135,7 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
       action: 'media.upload',
       targetType: 'Media',
       targetId: media._id,
-      metadata: { mimeType: input.mimeType, sizeBytes: input.buffer.length },
+      metadata: { mimeType: file.mimeType, sizeBytes: file.buffer.length },
     });
 
     // Cache to Cloudinary while the buffer is already in hand — never lets
@@ -82,7 +143,7 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
     // what actually matters for being able to send the message at all.
     if (isCloudinaryConfigured()) {
       try {
-        const cached = await uploadBufferToCloudinary(input.buffer, {
+        const cached = await uploadBufferToCloudinary(file.buffer, {
           folder: cloudinaryFolderFor(input.tenantId),
           resourceType: 'auto',
         });

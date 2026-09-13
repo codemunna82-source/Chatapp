@@ -30,6 +30,24 @@ export const MEDIA_LIMITS: Record<string, { mimeTypes: string[]; maxSizeBytes: n
   },
 };
 
+/**
+ * Image formats a phone produces that Meta will not accept.
+ *
+ * MEDIA_LIMITS above is Meta's list, and it stays Meta's list — it is
+ * the contract with their API, not a description of what a camera roll
+ * contains. Android's photo picker hands back webp constantly
+ * (screenshots, anything saved from the web) and newer phones hand back
+ * heic, and every one of those sends failed with "Unsupported media MIME
+ * type" for a picture the person could see perfectly well on screen.
+ *
+ * These are accepted at upload and CONVERTED to JPEG before Meta ever
+ * sees them — see uploadMediaForTenant.
+ */
+export const CONVERTIBLE_IMAGE_TYPES = new Set(['image/webp', 'image/heic', 'image/heif']);
+
+/** The widest a converted image is served at, inside Meta's 5MB image ceiling. */
+export const CONVERTED_IMAGE_MAX_WIDTH = 1600;
+
 export type MediaCategory = keyof typeof MEDIA_LIMITS;
 
 export function categoryForMimeType(mimeType: string): MediaCategory | null {
@@ -41,6 +59,20 @@ export function categoryForMimeType(mimeType: string): MediaCategory | null {
 
 /** Throws a typed ApiError if the file doesn't match a supported type/size — never silently accepted. */
 export function validateMediaFile(mimeType: string, sizeBytes: number): MediaCategory {
+  // A convertible image is an image, and its ceiling is the image
+  // ceiling. It is checked before it is converted, which is the
+  // conservative order: conversion only ever makes the file smaller.
+  if (CONVERTIBLE_IMAGE_TYPES.has(mimeType)) {
+    const limit = MEDIA_LIMITS.image!;
+    if (sizeBytes > limit.maxSizeBytes) {
+      throw ApiError.badRequest(
+        'MEDIA_TOO_LARGE',
+        `image files must be under ${Math.floor(limit.maxSizeBytes / (1024 * 1024))}MB`,
+      );
+    }
+    return 'image';
+  }
+
   const category = categoryForMimeType(mimeType);
   if (!category) {
     throw ApiError.badRequest('UNSUPPORTED_MEDIA_TYPE', `Unsupported media MIME type: ${mimeType}`);
