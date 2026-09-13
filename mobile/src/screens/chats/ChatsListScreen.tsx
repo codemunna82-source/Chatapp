@@ -13,6 +13,7 @@ import { ChatListItem } from './ChatListItem';
 import { NewChatSheet } from './NewChatSheet';
 import { ChatActionSheet } from './ChatActionSheet';
 import { ChatSelectionBar } from './ChatSelectionBar';
+import { LiveNowSheet } from './LiveNowSheet';
 import {
   useConversations,
   flattenConversations,
@@ -22,6 +23,7 @@ import {
   useMarkConversationUnread,
   useBulkConversations,
 } from '../../queries/useConversations';
+import { useGuestPresenceStore } from '../../store/guestPresenceStore';
 import { useTabBadges } from '../../queries/useTabBadges';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { ThemeProvider, useTheme, useResolvedScheme } from '../../theme/ThemeProvider';
@@ -71,6 +73,15 @@ function ChatsListScreenInner({ navigation }: Props) {
   // The same figure the Chats tab badge shows, off the same cache entry —
   // two counts of the same thing that disagreed would be worse than one.
   const { unreadChats } = useTabBadges();
+  const [liveOpen, setLiveOpen] = useState(false);
+  /**
+   * How many customers have their private chat window open right now.
+   *
+   * Selected down to a NUMBER rather than subscribing to the map: this
+   * screen re-renders a list of forty rows, and it should do that when
+   * the count changes, not every time any one customer's dot flickers.
+   */
+  const liveCount = useGuestPresenceStore((s) => Object.keys(s.open).length);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<Conversation | null>(null);
   // Multi-select. Held as an id array rather than a Set so it stays a plain
@@ -407,6 +418,43 @@ function ChatsListScreenInner({ navigation }: Props) {
         />
       )}
 
+      {/* Where the new-chat button used to be, doing something worth the
+          space. These are the only customers a reply reaches while they
+          are looking at it, and the only ones who can answer a call.
+
+          Only when there IS someone — a button that opens an empty list
+          is worse than no button, and this is also what keeps it from
+          sitting on top of a row for no reason, which is what the old one
+          did all day. Its appearing is itself the signal. */}
+      {!showArchived && liveCount > 0 ? (
+        <Pressable
+          onPress={() => setLiveOpen(true)}
+          style={[styles.fab, { backgroundColor: colors.success, bottom: spacing.lg }]}
+          accessibilityRole="button"
+          accessibilityLabel={`${liveCount} customer${liveCount === 1 ? '' : 's'} in the chat window now`}
+        >
+          {({ pressed }) => (
+            <View style={[styles.fabInner, { opacity: pressed ? 0.7 : 1 }]}>
+              <Ionicons name="pulse" size={26} color={colors.textOnPrimary} />
+              <View style={[styles.fabCount, { backgroundColor: colors.textOnPrimary }]}>
+                <Text style={[typography.caption, styles.fabCountText, { color: colors.success }]}>
+                  {liveCount > 9 ? '9+' : liveCount}
+                </Text>
+              </View>
+            </View>
+          )}
+        </Pressable>
+      ) : null}
+
+      <LiveNowSheet
+        visible={liveOpen}
+        onClose={() => setLiveOpen(false)}
+        onOpenConversation={(conversationId) => {
+          setLiveOpen(false);
+          navigation.navigate('ConversationDetail', { conversationId });
+        }}
+      />
+
       <ChatActionSheet
         conversation={actionTarget}
         onClose={() => setActionTarget(null)}
@@ -443,4 +491,28 @@ const styles = StyleSheet.create({
   brand: { fontSize: 25, fontWeight: '700', letterSpacing: -0.4 },
   archiveRow: { flexDirection: 'row', alignItems: 'center' },
   brandActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
+  // Same size, same corner, same circle the new-chat button had.
+  fab: {
+    position: 'absolute',
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+  },
+  fabInner: { alignItems: 'center', justifyContent: 'center' },
+  fabCount: {
+    position: 'absolute',
+    top: -12,
+    right: -14,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabCountText: { fontWeight: '700', fontSize: 11 },
 });
