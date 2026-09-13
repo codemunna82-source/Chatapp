@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
+import { File, Paths } from 'expo-file-system';
 import { useTheme } from '../theme/ThemeProvider';
 import { useAuthStore } from '../store/authStore';
 import { userAvatarUrl } from '../api/endpoints/users';
@@ -34,20 +35,63 @@ function InitialsCircle({ label, size }: { label: string; size: number }) {
  * below. Its `failed` fallback is for a photo that has since been deleted
  * or cannot be fetched right now, not for the ordinary no-photo case.
  */
-function AvatarPhoto({ url, label, size }: { url: string; label: string; size: number }) {
+function AvatarPhoto({
+  url,
+  cacheKey,
+  label,
+  size,
+}: {
+  url: string;
+  /** Stable per photo VERSION, so a new upload is a new file. */
+  cacheKey: string;
+  label: string;
+  size: number;
+}) {
   const accessToken = useAuthStore((s) => s.accessToken);
+  const [localUri, setLocalUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
-  // A fresh {uri, headers} object each render makes RN's Image see a new
-  // source and re-fetch through the authenticated media proxy. Memoize so
-  // the request happens once per avatar.
-  const source = useMemo(
-    () => ({
-      uri: url,
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-    }),
-    [url, accessToken],
-  );
+  /**
+   * Downloaded with the token, then rendered from disk.
+   *
+   * This used to hand RN's Image a `{uri, headers}` source and trust it to
+   * send the Authorization header. On Android it does not: the server's
+   * logs show the upload returning 200 and the very next GET for the same
+   * photo arriving with no authorization header at all and coming back
+   * 401 — so every avatar fell silently back to initials and a photo
+   * someone had just cropped and uploaded looked like it had not saved.
+   *
+   * MediaImage already downloads its bytes this way for the same reason.
+   * The cache is a bonus: the file is keyed by version, so it is fetched
+   * once per photo rather than once per mount of every row that shows it.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const target = new File(Paths.cache, `voxo-avatar-${cacheKey}.img`);
+
+    (async () => {
+      try {
+        if (target.exists) {
+          if (!cancelled) setLocalUri(target.uri);
+          return;
+        }
+        const result = await File.downloadFileAsync(url, target, {
+          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+          idempotent: true,
+        });
+        if (!cancelled) setLocalUri(result.uri);
+      } catch {
+        // No photo, offline, a deleted image — all the same answer here,
+        // and initials are a perfectly good one.
+        if (!cancelled) setFailed(true);
+      }
+    })();
+
+    return () => {
+      // A list row can scroll away mid-download; don't set state after.
+      cancelled = true;
+    };
+  }, [url, cacheKey, accessToken]);
 
   if (failed) {
     return <InitialsCircle label={label} size={size} />;
@@ -55,7 +99,13 @@ function AvatarPhoto({ url, label, size }: { url: string; label: string; size: n
 
   return (
     <View style={[styles.circle, { width: size, height: size, borderRadius: size / 2, overflow: 'hidden' }]}>
-      <Image source={source} style={{ width: size, height: size }} onError={() => setFailed(true)} />
+      {localUri ? (
+        <Image source={{ uri: localUri }} style={{ width: size, height: size }} onError={() => setFailed(true)} />
+      ) : (
+        // Initials while the bytes arrive, not a blank ring: on a list of
+        // thirty rows a blank would read as thirty broken avatars.
+        <InitialsCircle label={label} size={size} />
+      )}
     </View>
   );
 }
@@ -111,13 +161,20 @@ export function Avatar({ label, size = 48, userId, contactId, version }: AvatarP
   }
   if (userId) {
     return (
-      <AvatarPhoto key={`u:${userId}:${version}`} url={userAvatarUrl(userId, version)} label={label} size={size} />
+      <AvatarPhoto
+        key={`u:${userId}:${version}`}
+        cacheKey={`u-${userId}-${cacheSafe(version)}`}
+        url={userAvatarUrl(userId, version)}
+        label={label}
+        size={size}
+      />
     );
   }
   if (contactId) {
     return (
       <AvatarPhoto
         key={`c:${contactId}:${version}`}
+        cacheKey={`c-${contactId}-${cacheSafe(version)}`}
         url={contactAvatarUrl(contactId, version)}
         label={label}
         size={size}
@@ -125,6 +182,11 @@ export function Avatar({ label, size = 48, userId, contactId, version }: AvatarP
     );
   }
   return <InitialsCircle label={label} size={size} />;
+}
+
+/** avatarUpdatedAt is an ISO string; colons and dots are not filenames. */
+function cacheSafe(version: string): string {
+  return version.replace(/[^a-zA-Z0-9]/g, '');
 }
 
 const styles = StyleSheet.create({
