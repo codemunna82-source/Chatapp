@@ -163,7 +163,12 @@ export function CallOverlay() {
           {showNumber ? <Text style={styles.number}>{fromPhone}</Text> : null}
 
           {phase === 'ringing' ? <Text style={styles.status}>Incoming call…</Text> : null}
-          {phase === 'connecting' ? <Text style={styles.status}>Connecting…</Text> : null}
+          {/* placeWebCall sets this to "Ringing…" or "Calling…" depending
+              on whether the customer is actually in the private window.
+              A WhatsApp call sets nothing, and falls through to the
+              generic word, which is all that can be said about a call
+              handed to Meta to deliver. */}
+          {phase === 'connecting' ? <Text style={styles.status}>{message ?? 'Connecting…'}</Text> : null}
           {phase === 'active' && connectedAt ? <CallDuration connectedAt={connectedAt} /> : null}
           {phase === 'ended' || phase === 'failed' ? (
             <Text style={[styles.status, phase === 'failed' && styles.statusError]}>{message ?? 'Call ended'}</Text>

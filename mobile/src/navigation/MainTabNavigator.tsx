@@ -1,5 +1,6 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import type { MainTabParamList } from './types';
 import { ChatsStackNavigator } from './ChatsStackNavigator';
@@ -34,14 +35,28 @@ const TAB_ICONS: Record<keyof MainTabParamList, IoniconName> = {
  * which keeps the bar's normal styling. Returning {} would silently drop
  * the background and border colours set in screenOptions.
  */
-function hideTabBarOnConversation(route: unknown) {
-  const nested = (route as { state?: { routes?: { name: string }[]; index?: number } }).state;
-  const current = nested?.routes?.[nested.index ?? 0]?.name;
-  return current === 'ConversationDetail' ? ({ display: 'none' } as const) : undefined;
+/**
+ * Which screen inside the Chats stack is actually on top.
+ *
+ * getFocusedRouteNameFromRoute rather than reading route.state by hand,
+ * which is what this did and why the bar never actually hid: the route
+ * object handed to a screen's `options` does not carry the nested
+ * navigator's state in React Navigation 7, so the lookup found nothing
+ * and quietly returned "show the bar" for every screen, conversation
+ * included. This helper is the supported way to ask, and falls back to
+ * the stack's initial route before that state exists.
+ */
+function focusedChatsScreen(route: Parameters<typeof getFocusedRouteNameFromRoute>[0]): string {
+  return getFocusedRouteNameFromRoute(route) ?? 'ChatsList';
 }
 
 export function MainTabNavigator() {
   const { colors } = useTheme();
+  // Named once so the Chats tab can restore it: a screen's own
+  // `tabBarStyle` REPLACES the navigator's rather than merging with it,
+  // so returning undefined there would drop the bar's colours instead of
+  // leaving them alone.
+  const tabBarBase = { backgroundColor: colors.surface, borderTopColor: colors.border };
   const { unreadChats, missedCalls } = useTabBadges();
   const markCallsSeen = useCallsSeenStore((s) => s.markSeen);
 
@@ -60,7 +75,7 @@ export function MainTabNavigator() {
         freezeOnBlur: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
+        tabBarStyle: tabBarBase,
         tabBarIcon: ({ color, size }) => (
           <Ionicons name={TAB_ICONS[route.name as keyof MainTabParamList]} color={color} size={size} />
         ),
@@ -79,7 +94,7 @@ export function MainTabNavigator() {
         component={ChatsStackNavigator}
         options={({ route }) => ({
           title: 'Chats',
-          tabBarStyle: hideTabBarOnConversation(route),
+          tabBarStyle: focusedChatsScreen(route) === 'ConversationDetail' ? { display: 'none' } : tabBarBase,
           // 99+ rather than a four-digit number: past a point the exact
           // count stops being information and starts being a wide pill
           // that pushes the label out of the tab.

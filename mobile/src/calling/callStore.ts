@@ -83,7 +83,12 @@ interface CallState {
   ring: (payload: IncomingCallPayload) => void;
   ringWeb: (payload: WebIncomingCallPayload) => void;
   /** Calls the customer in their web chat window. */
-  placeWebCall: (conversationId: string, contactName: string) => Promise<void>;
+  /**
+   * @param present whether the customer currently has the private chat
+   * window open. Only changes what the overlay says while the call is
+   * being placed — see below.
+   */
+  placeWebCall: (conversationId: string, contactName: string, present?: boolean) => Promise<void>;
   /** The customer picked up — apply their answer. */
   applyWebAnswer: (callId: string, sdp: string) => void;
   /** A trickled candidate from the far end; buffered if the call is not answered yet. */
@@ -221,18 +226,24 @@ export const useCallStore = create<CallState>((set, get) => ({
     pendingRemoteIce.push(candidate);
   },
 
-  placeWebCall: async (conversationId, contactName) => {
+  placeWebCall: async (conversationId, contactName, present = false) => {
     if (get().phase !== 'idle') return;
 
-    // 'connecting' rather than a new phase: the overlay already renders it
-    // as "Connecting…" with a hang-up button and no ringer, which is
-    // exactly an outgoing call.
+    // 'connecting' rather than a new phase: the overlay renders it with a
+    // hang-up button and no ringer, which is exactly an outgoing call.
+    //
+    // What it SAYS depends on whether anyone is there. "Ringing" claims a
+    // device is audibly ringing at the other end, and that is only true
+    // when the customer has the private window open — otherwise the
+    // invitation is going out to a page nobody is looking at, and the
+    // honest word is "Calling".
     pendingRemoteIce = [];
     set({
       ...IDLE,
       phase: 'connecting',
       channel: 'web',
       contactName,
+      message: present ? 'Ringing…' : 'Calling…',
     });
 
     try {

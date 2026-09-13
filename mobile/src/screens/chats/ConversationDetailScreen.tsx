@@ -164,7 +164,18 @@ function buildRenderItems(renderableNewestFirst: Message[]): RenderItem[] {
 }
 
 const TYPING_AUTO_CLEAR_MS = 6000;
-const SCREEN_EDGES: Edge[] = ['top'];
+/**
+ * No safe-area edges at all on this screen.
+ *
+ * It used to inset the top, which put a band of the chat's background —
+ * near-black in dark mode — directly under the header, reading as a
+ * second empty banner below the contact's name. The navigation header
+ * above already consumes the status-bar inset, so insetting again simply
+ * added one; and the bottom is owned by the keyboard-tracking wrapper
+ * below, which resolves the navigation bar and the keyboard as a single
+ * value instead of stacking them.
+ */
+const SCREEN_EDGES: Edge[] = [];
 
 // Module scope so these never change identity between renders.
 const keyExtractor = (item: RenderItem) => item.id;
@@ -379,6 +390,28 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     setAnchorMessageId(null);
   }, []);
 
+  /**
+   * A new message pulls the thread down to it — unless you have scrolled
+   * up to read something.
+   *
+   * The list is inverted, so a new message goes in at offset 0 and in
+   * principle the view is already there. In practice it is not: the row
+   * is measured and laid out after it is inserted, so the content grows
+   * underneath a viewport that stays where it was and the message lands
+   * just off the bottom edge. Every messenger scrolls here; this one sat
+   * still, which read as the message not having arrived.
+   *
+   * Keyed on the newest id rather than the count, because a status change
+   * or a read receipt rewrites a row without adding one, and those must
+   * not move the thread. Someone scrolled up is left alone — the
+   * jump-to-bottom button with its count is what speaks to them.
+   */
+  const newestId = messages[0]?.id;
+  useEffect(() => {
+    if (!newestId || scrolledUpRef.current) return;
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, [newestId]);
+
   // messages is newest-first, so the anchor's index IS how many arrived
   // after it. -1 (anchor paged out or was deleted) means don't guess.
   const newSinceAnchor = useMemo(() => {
@@ -474,11 +507,15 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const handleCall = useCallback(() => {
     if (guestActive) {
       const name = conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Customer';
-      void useCallStore.getState().placeWebCall(conversationId, name);
+      // Whether the customer is actually IN the window decides what the
+      // overlay says. With the page open there is a device to ring and
+      // "Ringing…" is true; without it the invitation is going out to
+      // something nobody is looking at yet, and only "Calling…" is.
+      void useCallStore.getState().placeWebCall(conversationId, name, guestOnline);
       return;
     }
     if (contactId) placeCall(contactId);
-  }, [guestActive, conversationId, contactId, placeCall, conversationQuery.data]);
+  }, [guestActive, guestOnline, conversationId, contactId, placeCall, conversationQuery.data]);
 
   /**
    * Setting the customer's photo from the chat itself.
@@ -752,15 +789,15 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               />
             )}
           </Pressable>
-          {/* Only while the customer is actually in the private window.
-              The button used to show whenever the chat had a contact, so
-              it offered a call to someone with nothing to ring: the web
-              call needs the customer's page open to answer on, and a live
-              LINK is not the same as a live window — a link sits in a
-              WhatsApp thread for a month whether or not anyone opened it.
-              An icon that places a call nobody can pick up is worse than
-              an icon that appears when the call will connect. */}
-          {contactId && guestOnline ? (
+          {/* Always available, so long as there is someone to call.
+              It used to appear only while the customer had the private
+              window open, which meant the one control people look for
+              kept vanishing — and it was wrong anyway: without the window
+              the call goes out over WhatsApp instead, which needs nothing
+              open at the other end. What the window changes is not
+              whether the call can be placed but what can honestly be said
+              while it is being placed, which handleCall passes on. */}
+          {contactId ? (
           <Pressable
             onPress={handleCall}
             disabled={callPending}
@@ -897,8 +934,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     // this subtree only, and itself following Settings' light/dark/system
     // preference (via chatColors above) same as every other screen does.
     <ThemeProvider colors={chatColors}>
-      {/* edges={['top']}: the keyboard-tracking wrapper below owns the
-          bottom inset, resolving nav bar and keyboard as a single value. */}
       <Screen padded={false} edges={SCREEN_EDGES}>
         <Animated.View style={[styles.flex, keyboardPadStyle]}>
           <View style={styles.flex}>

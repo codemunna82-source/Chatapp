@@ -23,7 +23,8 @@ function MediaImageImpl({
   mediaId,
   localUri: providedUri,
   uploadProgress,
-  size,
+  width: fixedWidth,
+  height: fixedHeight,
   onOpen,
   onLongPress,
 }: {
@@ -33,11 +34,12 @@ function MediaImageImpl({
   /** 0-1 while this photo's bytes are still going up; absent once sent. */
   uploadProgress?: number;
   /**
-   * An exact square side, for a caller that has already decided the
-   * layout — an album cell. Absent means the standalone bubble sizing
-   * below, which is what a single photo wants.
+   * An exact box, for a caller that has already decided the layout — an
+   * album cell. Both or neither; absent means the standalone bubble
+   * sizing below, which is what a single photo wants.
    */
-  size?: number;
+  width?: number;
+  height?: number;
   onOpen?: (localUri: string, mediaId?: string) => void;
   /** The bubble's action sheet. Handled here because this Pressable would
    *  otherwise swallow the long press before the bubble ever sees it. */
@@ -71,12 +73,12 @@ function MediaImageImpl({
   // Sized from the live window rather than a fixed square: the enclosing
   // bubble is maxWidth 80%, so a hardcoded size overflowed on a 320dp phone
   // and left dead space on a 430dp one.
-  const side = size ?? Math.round(Math.min(Math.max(width * 0.58, 160), 280));
+  const side = fixedWidth ?? Math.round(Math.min(Math.max(width * 0.58, 160), 280));
   /**
    * The box the photo is drawn in.
    *
-   * An album cell is given an exact square by its caller and stays one —
-   * a grid of differently-shaped tiles is not a grid. Everywhere else the
+   * An album cell is given an exact box by its caller and keeps it — a
+   * grid whose tiles each took their own shape is not a grid. Everywhere else the
    * width is fixed and the HEIGHT follows the picture, which is the whole
    * point: every photo used to be forced into a square and cropped by
    * `cover`, so a portrait shot lost its top and bottom and a wide one
@@ -84,9 +86,11 @@ function MediaImageImpl({
    * the same neutral placeholder as before.
    */
   const box =
-    size !== undefined || !ratio
-      ? { width: side, height: side }
-      : { width: side, height: Math.round(side / ratio) };
+    fixedWidth !== undefined && fixedHeight !== undefined
+      ? { width: fixedWidth, height: fixedHeight }
+      : ratio
+        ? { width: side, height: Math.round(side / ratio) }
+        : { width: side, height: side };
 
   /** Learns this photo's shape from the file itself, and remembers it. */
   const measure = useCallback(
