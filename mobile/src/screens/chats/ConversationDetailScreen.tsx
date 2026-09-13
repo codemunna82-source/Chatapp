@@ -935,7 +935,19 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     // preference (via chatColors above) same as every other screen does.
     <ThemeProvider colors={chatColors}>
       <Screen padded={false} edges={SCREEN_EDGES}>
-        <Animated.View style={[styles.flex, keyboardPadStyle]}>
+        {/* The padding this view carries is the strip the navigation
+            buttons sit on, and it was painted in the CHAT's background —
+            a band of wallpaper colour under the composer, so the composer
+            read as cut off rather than as ending where the buttons begin.
+            Paint it the composer's own colour and the two are one surface
+            running down to the buttons, which is what the messenger does.
+
+            Behind everything else this is invisible: the view below fills
+            the rest and carries the wallpaper. It only shows through
+            where the padding is — under the composer, and briefly behind
+            the keyboard as it animates, where the composer's colour is
+            also the right answer. */}
+        <Animated.View style={[styles.flex, keyboardPadStyle, { backgroundColor: chatColors.surfaceElevated }]}>
           <View style={styles.flex}>
             <ChatWallpaper />
             <ConnectionBanner />
