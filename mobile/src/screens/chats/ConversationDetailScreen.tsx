@@ -63,7 +63,12 @@ import { getApiErrorMessage } from '../../api/client';
 import * as Clipboard from 'expo-clipboard';
 import { ThemeProvider, useResolvedScheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
-import { chatLightColors, chatDarkColors, chatHeaderBackground } from '../../theme/chatTheme';
+import {
+  chatLightColors,
+  chatDarkColors,
+  chatHeaderBackground,
+  chatHeaderForeground,
+} from '../../theme/chatTheme';
 import { dayKey } from '../../utils/formatTime';
 import type { Edge } from 'react-native-safe-area-context';
 import type { ChatsStackParamList } from '../../navigation/types';
@@ -216,6 +221,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // crimson version, it now follows Settings' own light/dark/system
   // preference like every other screen instead of forcing one look.
   const scheme = useResolvedScheme();
+  // The header is chrome, not a band of brand colour: near-white in light,
+  // raised charcoal in dark, with its icons and title drawn against it.
+  // It used to be one fixed navy in both schemes, which made it the
+  // loudest thing on the screen either way.
+  const headerBg = chatHeaderBackground[scheme];
+  const headerFg = chatHeaderForeground[scheme];
   const chatColors = scheme === 'dark' ? chatDarkColors : chatLightColors;
 
   // Keyboard avoidance, take two. KeyboardAvoidingView did not work here:
@@ -337,14 +348,25 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const [anchorMessageId, setAnchorMessageId] = useState<string | null>(null);
   const [scrolledUp, setScrolledUp] = useState(false);
 
+  /**
+   * Only the CROSSING matters, not every frame of the scroll.
+   *
+   * This ran setState on every scroll event and did its transition work
+   * inside the updater. React bails out on an unchanged value, so it was
+   * cheap enough at four callbacks a second — but the throttle is 16ms
+   * now, so it fires sixty times a second, and a side effect living in a
+   * state updater is the wrong place for it either way (it can run twice
+   * under StrictMode). The ref makes the common frame do one comparison
+   * and nothing else.
+   */
+  const scrolledUpRef = useRef(false);
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const away = e.nativeEvent.contentOffset.y > SCROLLED_UP_THRESHOLD;
-      setScrolledUp((wasAway) => {
-        if (away && !wasAway) setAnchorMessageId(messages[0]?.id ?? null);
-        if (!away && wasAway) setAnchorMessageId(null);
-        return away;
-      });
+      if (away === scrolledUpRef.current) return;
+      scrolledUpRef.current = away;
+      setScrolledUp(away);
+      setAnchorMessageId(away ? (messages[0]?.id ?? null) : null);
     },
     [messages],
   );
@@ -613,9 +635,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       navigation.setOptions({
         title: 'Search in chat',
         headerTitle: undefined,
-        headerStyle: { backgroundColor: chatHeaderBackground },
-        headerTintColor: '#FFFFFF',
-        headerTitleStyle: { color: '#FFFFFF' },
+        headerStyle: { backgroundColor: headerBg },
+        headerTintColor: headerFg,
+        headerTitleStyle: { color: headerFg },
         headerRight: () => null,
         headerLeft: () => (
           <Pressable
@@ -624,7 +646,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
             accessibilityRole="button"
             accessibilityLabel="Close search"
           >
-            {({ pressed }) => <Ionicons name="close" size={24} color="#FFFFFF" style={{ opacity: pressed ? 0.5 : 1 }} />}
+            {({ pressed }) => <Ionicons name="close" size={24} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />}
           </Pressable>
         ),
       });
@@ -639,9 +661,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         // Explicitly cleared: a custom headerTitle set on the previous pass
         // would otherwise survive and keep showing the contact name here.
         headerTitle: undefined,
-        headerStyle: { backgroundColor: chatHeaderBackground },
-        headerTintColor: '#FFFFFF',
-        headerTitleStyle: { color: '#FFFFFF' },
+        headerStyle: { backgroundColor: headerBg },
+        headerTintColor: headerFg,
+        headerTitleStyle: { color: headerFg },
         headerLeft: () => (
           <Pressable
             onPress={clearSelection}
@@ -649,7 +671,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
             accessibilityRole="button"
             accessibilityLabel="Cancel selection"
           >
-            {({ pressed }) => <Ionicons name="close" size={24} color="#FFFFFF" style={{ opacity: pressed ? 0.5 : 1 }} />}
+            {({ pressed }) => <Ionicons name="close" size={24} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />}
           </Pressable>
         ),
         headerRight: () => (
@@ -660,7 +682,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
             accessibilityLabel={`Forward ${selectedIds.length} selected messages`}
           >
             {({ pressed }) => (
-              <Ionicons name="arrow-redo" size={22} color="#FFFFFF" style={{ opacity: pressed ? 0.5 : 1 }} />
+              <Ionicons name="arrow-redo" size={22} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />
             )}
           </Pressable>
         ),
@@ -678,6 +700,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       // send once it has already closed.
       headerTitle: () => (
         <ChatHeaderTitle
+          foreground={headerFg}
           name={contactLabel}
           contactId={contactId}
           avatarUpdatedAt={conversationQuery.data?.contact?.avatarUpdatedAt}
@@ -694,9 +717,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       // since headerStyle/headerTintColor render through React Navigation's
       // own header, outside the nested <ThemeProvider colors={chatColors}>
       // wrap below (that only covers this component's own returned JSX).
-      headerStyle: { backgroundColor: chatHeaderBackground },
-      headerTintColor: '#FFFFFF',
-      headerTitleStyle: { color: '#FFFFFF' },
+      headerStyle: { backgroundColor: headerBg },
+      headerTintColor: headerFg,
+      headerTitleStyle: { color: headerFg },
       headerRight: () => (
         <View style={styles.headerActions}>
           <Pressable
@@ -706,7 +729,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
             accessibilityLabel="Search in this chat"
           >
             {({ pressed }) => (
-              <Ionicons name="search" size={21} color="#FFFFFF" style={{ opacity: pressed ? 0.5 : 1 }} />
+              <Ionicons name="search" size={21} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />
             )}
           </Pressable>
           <Pressable
@@ -721,7 +744,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
                 // without opening anything.
                 name={guestActive ? 'link' : 'link-outline'}
                 size={21}
-                color="#FFFFFF"
+                color={headerFg}
                 style={{ opacity: pressed ? 0.5 : 1 }}
               />
             )}
@@ -747,7 +770,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               <Ionicons
                 name="call"
                 size={22}
-                color={callPending ? 'rgba(255,255,255,0.5)' : '#FFFFFF'}
+                color={callPending ? `${headerFg}80` : headerFg}
                 style={{ opacity: pressed ? 0.5 : 1 }}
               />
             )}
@@ -778,6 +801,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     // which closes over a stale contactId — so tapping the photo on a
     // chat opened second would upload to the first one's contact.
     pickContactPhoto,
+    // The header is rebuilt when the scheme flips, or switching to dark
+    // would leave a white-on-white title until the screen was reopened.
+    headerBg,
+    headerFg,
   ]);
   const handleOpenImage = useCallback((localUri: string) => setViewerUri(localUri), []);
 
@@ -896,7 +923,17 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               onEndReached={handleEndReached}
               onEndReachedThreshold={0.5}
               onScroll={handleScroll}
-              scrollEventThrottle={64}
+              // 16ms rather than 64: the scroll handler drives the
+              // scrolled-up state and the jump-to-bottom button, and at 64
+              // that button appeared a visible beat after the thumb moved.
+              // It is a cheap handler — two comparisons — so the extra
+              // callbacks cost far less than the lag they remove.
+              scrollEventThrottle={16}
+              // Rows kept rendered beyond the viewport. The default is
+              // conservative, so flicking a thread showed blank cells that
+              // filled in a frame later; a screen's worth of runway ahead
+              // is what makes a fast scroll look continuous.
+              drawDistance={600}
               ListHeaderComponent={isTyping ? <TypingIndicator /> : null}
               contentContainerStyle={styles.listContent}
             />

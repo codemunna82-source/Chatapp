@@ -29,6 +29,8 @@ interface ChatHeaderTitleProps {
   avatarUpdatedAt?: string;
   /** Tapping the photo sets a new one. Omitted makes it a plain image. */
   onPressAvatar?: () => void;
+  /** The header's text colour for the current scheme — see chatTheme. */
+  foreground?: string;
 }
 
 /** Re-checked once a minute — enough to keep an hours/minutes label honest
@@ -56,7 +58,12 @@ export function ChatHeaderTitle({
   contactId,
   avatarUpdatedAt,
   onPressAvatar,
+  foreground,
 }: ChatHeaderTitleProps) {
+  // The header follows the scheme, so the name and the line under it are
+  // drawn against whatever it currently is rather than assumed white.
+  const fg = foreground ?? '#111B21';
+  const sub = `${fg}A6`;
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -95,7 +102,7 @@ export function ChatHeaderTitle({
       ) : null}
 
       <View style={styles.wrap}>
-      <Text style={styles.name} numberOfLines={1}>
+      <Text style={[styles.name, { color: fg }]} numberOfLines={1}>
         {name}
       </Text>
       {/* Ahead of the window countdown, because it outranks it: a customer
@@ -109,7 +116,7 @@ export function ChatHeaderTitle({
           </Text>
         </View>
       ) : isDemo ? (
-        <Text style={[styles.subtitle, styles.normal]} numberOfLines={1}>
+        <Text style={[styles.subtitle, { color: sub }]} numberOfLines={1}>
           Sample chat
         </Text>
       ) : guestActive ? (
@@ -118,7 +125,7 @@ export function ChatHeaderTitle({
         // it stops being the user's problem the moment there is another way
         // through — and showing it anyway taught people to worry about a
         // deadline that no longer applies to them.
-        <Text style={[styles.subtitle, styles.normal]} numberOfLines={1}>
+        <Text style={[styles.subtitle, { color: sub }]} numberOfLines={1}>
           Private chat open · reply anytime
         </Text>
       ) : !withinWindow ? (
@@ -126,7 +133,7 @@ export function ChatHeaderTitle({
           Reply window closed · template only
         </Text>
       ) : remaining ? (
-        <Text style={[styles.subtitle, urgent ? styles.urgent : styles.normal]} numberOfLines={1}>
+        <Text style={[styles.subtitle, urgent ? styles.urgent : { color: sub }]} numberOfLines={1}>
           {remaining} to reply freely
         </Text>
       ) : null}
@@ -141,14 +148,15 @@ const styles = StyleSheet.create({
   // Shrinks rather than pushing the avatar off: a long name should
   // ellipsize, not shove the photo out of the header.
   wrap: { justifyContent: 'center', flexShrink: 1 },
-  // The header is a fixed navy in both schemes (see chatHeaderBackground),
-  // so these colors are fixed against it rather than theme tokens.
-  name: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },
+  // The header follows the scheme now (see chatTheme's
+  // chatHeaderBackground / chatHeaderForeground), so the name and subtitle
+  // take their colour from the caller rather than assuming white on navy.
+  name: { fontSize: 17, fontWeight: '600' },
   subtitle: { fontSize: 11, marginTop: 1 },
-  normal: { color: 'rgba(255,255,255,0.65)' },
-  urgent: { color: '#F0B84B' },
-  closed: { color: '#F0B84B' },
+  urgentColor: { color: '#F0B84B' },
+  urgent: { color: '#E8A33D' },
+  closed: { color: '#E8A33D' },
   presenceRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
-  dot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#4ADE80' },
-  present: { color: '#4ADE80', marginTop: 0 },
+  dot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#00A884' },
+  present: { color: '#00A884', marginTop: 0 },
 });

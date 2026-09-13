@@ -162,7 +162,7 @@ function MessageBubbleImpl({
   selected = false,
   onSelectTap,
 }: MessageBubbleProps) {
-  const { colors, spacing, radius, typography } = useTheme();
+  const { colors, spacing, typography } = useTheme();
   const isOut = message.direction === 'OUT';
   const bubbleColor = isOut ? colors.bubbleSent : colors.bubbleReceived;
   const textColor = isOut ? colors.bubbleSentText : colors.bubbleReceivedText;
@@ -194,15 +194,24 @@ function MessageBubbleImpl({
 
   const activeReactions = reactions ? [reactions.IN, reactions.OUT].filter((e): e is string => Boolean(e)) : [];
 
-  // A soft "tail" corner (WhatsApp/iMessage-style, without copying either's
-  // exact bubble shape) — the corner nearest the sender's own side of the
-  // screen is pinched in, giving each bubble a subtle directional read even
-  // at a glance, before the alignment itself registers.
+  /**
+   * WhatsApp's bubble geometry, which is squarer than it looks.
+   *
+   * Every corner is about 8px and the TAIL corner — the top one nearest
+   * the sender's own side — is nearly square. The previous shape used the
+   * 20px `lg` token all round and pinched the BOTTOM corner instead,
+   * which reads as a different messenger entirely: rounder, softer, and
+   * with the tail pointing the wrong way.
+   *
+   * Literal numbers rather than the radius tokens on purpose. These are
+   * one specific shape being matched, and moving with a token meant for
+   * cards and sheets is exactly how it would drift back out of step.
+   */
   const bubbleRadius = {
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    borderBottomLeftRadius: isOut ? radius.lg : radius.sm,
-    borderBottomRightRadius: isOut ? radius.sm : radius.lg,
+    borderTopLeftRadius: isOut ? 8 : 3,
+    borderTopRightRadius: isOut ? 3 : 8,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
   };
 
   // --- swipe-to-reply -----------------------------------------------------

@@ -197,7 +197,13 @@ function ChatWallpaperImpl() {
           style={style === 'custom' ? 'plain' : style}
           width={size.width}
           height={size.height}
-          tint={colors.primary}
+          // The text colour, not the accent. WhatsApp's doodles are a
+          // muted version of the ground they sit on — darker than it in
+          // light, lighter in dark — which textPrimary gives in both
+          // schemes for free. Tinted with the brand green they read as
+          // decoration competing with the bubbles rather than as paper
+          // behind them.
+          tint={colors.textPrimary}
         />
       )}
     </View>
