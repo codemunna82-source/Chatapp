@@ -612,7 +612,7 @@ export async function postGuestMessage(
     conversationId: guest.conversationId,
     // Delivered by definition: it was written straight into our own
     // database, with no gateway in between that could still drop it.
-    recipientPhone: phoneNumber?.displayPhoneNumber ?? '',
+    recipientPhone: phoneNumber?.displayPhoneNumber?.trim() || guest.whatsappPhoneNumberId,
     direction: 'IN',
     type: 'text',
     text,
@@ -690,7 +690,7 @@ async function postWelcomeMessage(guest: GuestContext): Promise<void> {
       conversationId: guest.conversationId,
       // No senderId: nobody wrote this. Stamping an agent's id would put
       // their name on a greeting they never typed.
-      recipientPhone: '',
+      recipientPhone: await guestRecipientPhone(guest),
       direction: 'OUT',
       type: 'text',
       text,
@@ -745,6 +745,28 @@ async function resolveQuotedMessage(
  * by an insert — two taps arriving together could otherwise both delete
  * and both insert, leaving one person with two reactions on one message.
  */
+/**
+ * What goes in a guest message's `recipientPhone`.
+ *
+ * The field is required on the model, and the web-chat paths were filling
+ * it with the business number when one was known and an EMPTY STRING when
+ * it was not — which Mongoose rejects, because an empty string does not
+ * satisfy `required` on a String. The welcome message passed '' outright
+ * and so failed every single time it ran: "Message validation failed:
+ * recipientPhone: Path `recipientPhone` is required", on every customer's
+ * first message, in production.
+ *
+ * The number's own id is the last resort. It is not a phone number, but
+ * it is stable, always present, and identifies exactly the same thing the
+ * display number would have — and a greeting that arrives beats a
+ * greeting lost to a field nobody reads.
+ */
+async function guestRecipientPhone(guest: GuestContext): Promise<string> {
+  const phoneNumber = await findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId);
+  const display = phoneNumber?.displayPhoneNumber?.trim();
+  return display || guest.whatsappPhoneNumberId;
+}
+
 export async function postGuestReaction(
   guest: GuestContext,
   messageId: string,
@@ -772,7 +794,7 @@ export async function postGuestReaction(
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     targetMessageId: messageId,
-    recipientPhone: phoneNumber?.displayPhoneNumber ?? '',
+    recipientPhone: phoneNumber?.displayPhoneNumber?.trim() || guest.whatsappPhoneNumberId,
     emoji,
   });
 
@@ -818,7 +840,7 @@ export async function postGuestMediaMessage(
   const message = await createMessage({
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
-    recipientPhone: phoneNumber?.displayPhoneNumber ?? '',
+    recipientPhone: phoneNumber?.displayPhoneNumber?.trim() || guest.whatsappPhoneNumberId,
     direction: 'IN',
     type: kind,
     mediaId,
@@ -884,7 +906,7 @@ export async function postGuestLocationMessage(
   const message = await createMessage({
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
-    recipientPhone: phoneNumber?.displayPhoneNumber ?? '',
+    recipientPhone: phoneNumber?.displayPhoneNumber?.trim() || guest.whatsappPhoneNumberId,
     direction: 'IN',
     type: 'location',
     text,
@@ -1059,7 +1081,7 @@ export async function sendGuestReply(
     tenantId: auth.tenantId,
     conversationId,
     senderId: auth.userId,
-    recipientPhone: phoneNumber?.displayPhoneNumber ?? '',
+    recipientPhone: phoneNumber?.displayPhoneNumber?.trim() || String(conversation.whatsappPhoneNumberId),
     direction: 'OUT',
     type: 'text',
     text,

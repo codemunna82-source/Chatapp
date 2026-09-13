@@ -50,7 +50,8 @@ export function AlbumBubble({
 }: {
   /** Oldest first: the order they were sent, which is the order they are read. */
   messages: Message[];
-  onOpenImage?: (localUri: string, mediaId?: string) => void;
+  /** Given the whole album, so the viewer can reach every photo — including the ones behind the +N. */
+  onOpenImage?: (localUri: string, mediaId: string | undefined, album?: Message[]) => void;
   onLongPress: (message: Message) => void;
 }) {
   const { colors, radius, typography } = useTheme();
@@ -109,6 +110,7 @@ export function AlbumBubble({
                 message={m}
                 width={half}
                 height={half}
+                album={messages}
                 onOpenImage={onOpenImage}
                 onLongPress={onLongPress}
               />
@@ -120,6 +122,7 @@ export function AlbumBubble({
               message={tiles[0]!}
               width={inner}
               height={leadHeight}
+              album={messages}
               onOpenImage={onOpenImage}
               onLongPress={onLongPress}
             />
@@ -130,6 +133,7 @@ export function AlbumBubble({
                   message={m}
                   width={half}
                   height={half}
+                  album={messages}
                   // The bottom-right cell carries the count. Tapping it
                   // opens the viewer like any other — the rest are in
                   // there.
@@ -170,6 +174,7 @@ function Tile({
   width,
   height,
   more = 0,
+  album,
   onOpenImage,
   onLongPress,
 }: {
@@ -177,7 +182,9 @@ function Tile({
   width: number;
   height: number;
   more?: number;
-  onOpenImage?: (localUri: string, mediaId?: string) => void;
+  /** Every photo in this album, forwarded to the viewer on open. */
+  album: Message[];
+  onOpenImage?: (localUri: string, mediaId: string | undefined, album?: Message[]) => void;
   onLongPress: (message: Message) => void;
 }) {
   const { typography } = useTheme();
@@ -187,7 +194,7 @@ function Tile({
         mediaId={message.mediaId}
         localUri={message.localUri}
         uploadProgress={message.uploadProgress}
-        onOpen={onOpenImage}
+        onOpen={(localUri, mediaId) => onOpenImage?.(localUri, mediaId, album)}
         onLongPress={() => onLongPress(message)}
         width={width}
         height={height}

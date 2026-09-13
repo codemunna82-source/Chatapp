@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -8,7 +8,29 @@ import { touchTarget } from '../../theme/spacing';
 import { downloadMedia } from './mediaCache';
 import { useAuthStore } from '../../store/authStore';
 
+/** One photo the viewer can show. */
+export interface ViewerPhoto {
+  /** The message this photo belongs to, so a reply has something to quote. */
+  messageId: string;
+  /** The bubble's already-downloaded file. */
+  uri: string;
+  mediaId?: string;
+}
+
 interface ImageViewerModalProps {
+  /**
+   * Every photo in the album this was opened from, so all of them are
+   * reachable — including the ones behind the "+N" tile, which the grid
+   * has no room to draw and which were, until now, impossible to open,
+   * reply to or forward at all.
+   *
+   * A single photo is an album of one.
+   */
+  photos?: ViewerPhoto[];
+  /** Which of them to show first. */
+  index?: number;
+  /** Replying closes the viewer and quotes the photo on screen. */
+  onReply?: (messageId: string) => void;
   /** Local (cached) file uri of the image to show; null closes the viewer. */
   uri: string | null;
   /**
@@ -36,8 +58,31 @@ const MAX_SCALE = 4;
  * The gestures run entirely on the UI thread via Reanimated shared values,
  * so zooming stays smooth even while the chat behind it is busy.
  */
-export function ImageViewerModal({ uri, mediaId, onClose }: ImageViewerModalProps) {
+export function ImageViewerModal({
+  uri,
+  mediaId,
+  photos,
+  index = 0,
+  onReply,
+  onClose,
+}: ImageViewerModalProps) {
   const { width, height } = useWindowDimensions();
+
+  /**
+   * Which photo of the album is on screen.
+   *
+   * Tagged with the album it belongs to, for the same reason everything
+   * else here is: the viewer is reused, and an index left over from a
+   * five-photo album would point past the end of the next one.
+   */
+  const albumKey = photos?.map((p) => p.messageId).join('|') ?? '';
+  const [picked, setPicked] = useState<{ key: string; at: number } | null>(null);
+  const current = picked && picked.key === albumKey ? picked.at : index;
+  const active = photos?.[current];
+
+  // The chosen photo when there is an album, the single uri otherwise.
+  const sourceUri = active?.uri ?? uri;
+  const sourceMediaId = active?.mediaId ?? mediaId;
   const insets = useSafeAreaInsets();
   const accessToken = useAuthStore((s) => s.accessToken);
   /**
@@ -51,13 +96,13 @@ export function ImageViewerModal({ uri, mediaId, onClose }: ImageViewerModalProp
   const [full, setFull] = useState<{ mediaId: string; uri: string } | null>(null);
 
   useEffect(() => {
-    if (!uri || !mediaId) return;
+    if (!sourceUri || !sourceMediaId) return;
 
     let cancelled = false;
     (async () => {
       try {
-        const upgraded = await downloadMedia(mediaId, accessToken);
-        if (!cancelled) setFull({ mediaId, uri: upgraded });
+        const upgraded = await downloadMedia(sourceMediaId, accessToken);
+        if (!cancelled) setFull({ mediaId: sourceMediaId, uri: upgraded });
       } catch {
         // The thumbnail stays. A failed upgrade is a slightly soft photo,
         // not a broken viewer, and there is nothing for the user to do
@@ -67,11 +112,11 @@ export function ImageViewerModal({ uri, mediaId, onClose }: ImageViewerModalProp
     return () => {
       cancelled = true;
     };
-  }, [uri, mediaId, accessToken]);
+  }, [sourceUri, sourceMediaId, accessToken]);
 
   // The sharper file once it has landed FOR THIS PHOTO, the bubble's copy
   // until then.
-  const displayUri = (mediaId && full?.mediaId === mediaId ? full.uri : null) ?? uri;
+  const displayUri = (sourceMediaId && full?.mediaId === sourceMediaId ? full.uri : null) ?? sourceUri;
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -188,7 +233,57 @@ export function ImageViewerModal({ uri, mediaId, onClose }: ImageViewerModalProp
           )}
         </Pressable>
 
-        <Text style={[styles.hint, { bottom: insets.bottom + 16 }]}>Pinch or double-tap to zoom</Text>
+        {/* Reply, on whichever photo is on screen. The whole point of the
+            strip below: a photo behind "+N" had no bubble to long-press,
+            so there was no way to answer one of five pictures. */}
+        {onReply && active ? (
+          <Pressable
+            onPress={() => {
+              const target = active.messageId;
+              handleClose();
+              onReply(target);
+            }}
+            style={[styles.reply, { top: insets.top + 8 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Reply to this photo"
+          >
+            {({ pressed }) => (
+              <View style={[styles.closeDot, { opacity: pressed ? 0.6 : 1 }]}>
+                <Ionicons name="arrow-undo-outline" size={20} color="#FFFFFF" />
+              </View>
+            )}
+          </Pressable>
+        ) : null}
+
+        {/* Tapped, not swiped. The picture itself owns pinch, pan and
+            double-tap; a horizontal swipe on top of those fights the pan
+            the moment anyone is zoomed in, and loses in a way that feels
+            broken. A strip is unambiguous and shows how many there are. */}
+        {photos && photos.length > 1 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={[styles.strip, { bottom: insets.bottom + 12 }]}
+            contentContainerStyle={styles.stripInner}
+          >
+            {photos.map((photo, i) => (
+              <Pressable
+                key={photo.messageId}
+                onPress={() => setPicked({ key: albumKey, at: i })}
+                accessibilityRole="button"
+                accessibilityLabel={`Photo ${i + 1} of ${photos.length}`}
+              >
+                <Image
+                  source={{ uri: photo.uri }}
+                  style={[styles.thumb, i === current && styles.thumbActive]}
+                  resizeMode="cover"
+                />
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : (
+          <Text style={[styles.hint, { bottom: insets.bottom + 16 }]}>Pinch or double-tap to zoom</Text>
+        )}
       </View>
     </Modal>
   );
@@ -209,4 +304,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hint: { position: 'absolute', alignSelf: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12.5 },
+  reply: { position: 'absolute', left: 8, width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
+  strip: { position: 'absolute', left: 0, right: 0, maxHeight: 64 },
+  stripInner: { paddingHorizontal: 12, gap: 8, alignItems: 'center' },
+  thumb: { width: 52, height: 52, borderRadius: 6, opacity: 0.5 },
+  // The one on screen, marked by being the only one at full strength.
+  thumbActive: { opacity: 1, borderWidth: 2, borderColor: '#FFFFFF' },
 });

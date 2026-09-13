@@ -33,7 +33,7 @@ import { MessageInfoSheet } from './MessageInfoSheet';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { AttachmentSheet } from './AttachmentSheet';
 import { ForwardSheet, buildForwardBody } from './ForwardSheet';
-import { ImageViewerModal } from './ImageViewerModal';
+import { ImageViewerModal, type ViewerPhoto } from './ImageViewerModal';
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
@@ -228,7 +228,18 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // The photo the full-screen viewer is showing: the bubble's already
   // downloaded file, plus the media id so the viewer can upgrade it to
   // the original once it is open.
-  const [viewer, setViewer] = useState<{ uri: string; mediaId?: string } | null>(null);
+  /**
+   * The photo the full-screen viewer is showing, plus the album it came
+   * from so every picture in it is reachable — the ones behind "+N" have
+   * no tile of their own and so had no way to be opened, replied to or
+   * forwarded at all.
+   */
+  const [viewer, setViewer] = useState<{
+    uri: string;
+    mediaId?: string;
+    photos?: ViewerPhoto[];
+    index?: number;
+  } | null>(null);
   // Short-lived confirmation for copy/forward — both are silent otherwise.
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -891,7 +902,24 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     headerBg,
     headerFg,
   ]);
-  const handleOpenImage = useCallback((localUri: string, mediaId?: string) => setViewer({ uri: localUri, mediaId }), []);
+  const handleOpenImage = useCallback(
+    (localUri: string, mediaId?: string, album?: Message[]) => {
+      if (!album || album.length < 2) {
+        setViewer({ uri: localUri, mediaId });
+        return;
+      }
+      // Only the photos already downloaded can be put in the strip — a
+      // thumbnail with no file is a grey square. In practice the album is
+      // on screen, so its tiles have fetched theirs; the ones behind the
+      // "+N" have not, and they arrive as the viewer pulls them.
+      const photos: ViewerPhoto[] = album
+        .filter((m) => m.mediaId || m.localUri)
+        .map((m) => ({ messageId: m.id, uri: m.localUri ?? localUri, mediaId: m.mediaId }));
+      const index = Math.max(0, photos.findIndex((p) => p.mediaId === mediaId));
+      setViewer({ uri: localUri, mediaId, photos, index });
+    },
+    [],
+  );
 
   useEffect(
     () => () => {
@@ -1151,7 +1179,20 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           conversationId={conversationId}
         />
 
-        <ImageViewerModal uri={viewer?.uri ?? null} mediaId={viewer?.mediaId} onClose={() => setViewer(null)} />
+        <ImageViewerModal
+          uri={viewer?.uri ?? null}
+          mediaId={viewer?.mediaId}
+          photos={viewer?.photos}
+          index={viewer?.index}
+          // Replying to a photo inside an album: the viewer names the
+          // message, the screen looks it up and quotes it exactly as a
+          // long press on an ordinary bubble would.
+          onReply={(messageId) => {
+            const target = view.messageById.get(messageId);
+            if (target) handleReply(target);
+          }}
+          onClose={() => setViewer(null)}
+        />
 
         <ForwardSheet
           visible={forwardTargets.length > 0}
