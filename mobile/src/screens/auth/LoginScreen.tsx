@@ -8,6 +8,7 @@ import { Screen } from '../../components/Screen';
 import { TextField } from '../../components/TextField';
 import { Button } from '../../components/Button';
 import { InlineBanner } from '../../components/InlineBanner';
+import { useAuthStore } from '../../store/authStore';
 import { useLogin } from '../../queries/useAuthMutations';
 import { getApiErrorMessage } from '../../api/client';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -52,6 +53,7 @@ type LoginForm = z.infer<typeof loginSchema>;
 export function LoginScreen() {
   const { colors, spacing, radius, typography } = useTheme();
   const login = useLogin();
+  const signedOutReason = useAuthStore((s) => s.signedOutReason);
   const [revealPassword, setRevealPassword] = useState(false);
   const passwordRef = useRef<TextInput>(null);
 
@@ -98,6 +100,15 @@ export function LoginScreen() {
             </Text>
           </View>
 
+          {/* Why the last session ended, when it ended for a reason — an
+              admin turning this number's access off. Shown above the form
+              rather than as a toast that has already gone by the time
+              anyone reads it, and dropped the moment a sign-in succeeds.
+              A failed attempt's own error takes precedence: it is about
+              what the user just did. */}
+          {!login.isError && signedOutReason ? (
+            <InlineBanner message={signedOutReason} tone="warning" />
+          ) : null}
           {login.isError ? <InlineBanner message={getApiErrorMessage(login.error)} /> : null}
 
           <Controller

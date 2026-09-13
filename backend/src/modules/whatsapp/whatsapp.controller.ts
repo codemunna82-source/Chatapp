@@ -1,7 +1,12 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
-import { listPhoneNumbersForTenant, registerPhoneNumberForTenant, registerNumberForCloudApi } from './whatsapp.service';
+import {
+  listPhoneNumbersForTenant,
+  registerPhoneNumberForTenant,
+  registerNumberForCloudApi,
+  setNumberEnabled,
+} from './whatsapp.service';
 import {
   connectWhatsAppForUser,
   disconnectWhatsAppForUser,
@@ -54,6 +59,19 @@ export const disconnectWhatsAppHandler = asyncHandler(async (req: Request, res: 
  * "Pending" and every send fails until POST /{id}/register has run, and
  * the admin path never ran it.
  */
+/**
+ * Switching one number's access on or off.
+ *
+ * MASTER_ADMIN only, by the guard this router sits behind: it decides
+ * whether other people in the workspace can work at all.
+ */
+export const setNumberEnabledHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const { enabled } = req.body as { enabled: boolean };
+  const number = await setNumberEnabled(auth.tenantId, req.params.id as string, enabled);
+  res.status(200).json({ success: true, data: number });
+});
+
 export const registerNumberForCloudApiHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const result = await registerNumberForCloudApi(auth.tenantId, req.params.id as string);

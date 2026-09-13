@@ -2,6 +2,7 @@ import { verifyAccessToken } from '../../lib/jwt';
 import { ApiError } from '../../lib/ApiError';
 import { createTtlCache } from '../../lib/ttlCache';
 import { User, computeSubscriptionStatus } from '../users/user.model';
+import { WhatsAppPhoneNumber } from '../whatsapp/whatsappPhoneNumber.model';
 import type { Permission } from '../users/permission';
 import type { AuthContext } from '../../types/express';
 
@@ -86,6 +87,36 @@ export async function resolveAuthContextFromToken(token: string): Promise<AuthCo
   }
   if (subscriptionStatus === 'SUSPENDED') {
     throw ApiError.forbidden('ACCOUNT_DISABLED', 'This account is suspended');
+  }
+
+  /**
+   * The admin's per-number off switch (WhatsAppPhoneNumber.enabled).
+   *
+   * Checked here rather than in each route because it has to hold
+   * everywhere at once: a member locked out of their number must not be
+   * able to read the chats on it, send on it, or open a socket for it,
+   * and enumerating those places is how one of them gets missed.
+   *
+   * Only for a user who HAS an assigned number — a MASTER_ADMIN normally
+   * has none, so the common case costs nothing. When there is one this is
+   * a single findById on a primary key, once per cache miss (ten seconds
+   * per user), not once per request.
+   *
+   * `enabled !== false` on purpose: numbers written before this field
+   * existed have no value at all, and absent must mean ON. A migration
+   * that locked out every existing member would be a far worse failure
+   * than the one this guards against.
+   */
+  if (user.whatsappPhoneNumberId) {
+    const number = await WhatsAppPhoneNumber.findById(user.whatsappPhoneNumberId)
+      .select('enabled')
+      .lean();
+    if (number && number.enabled === false) {
+      throw ApiError.forbidden(
+        'NUMBER_ACCESS_DENIED',
+        'Your access has been turned off. Please contact your administrator.',
+      );
+    }
   }
 
   const context: AuthContext = {

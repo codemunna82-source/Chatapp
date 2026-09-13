@@ -59,6 +59,21 @@ const whatsappPhoneNumberSchema = new Schema(
      */
     healthCheckedAt: { type: Date },
     status: { type: String, enum: PHONE_NUMBER_STATUSES, default: 'PENDING', required: true },
+    /**
+     * The admin's own switch: whether the people assigned to this number
+     * may use it at all.
+     *
+     * Deliberately NOT folded into `status`. That field is Meta's verdict
+     * on the number — PENDING, CONNECTED, RESTRICTED — and overloading it
+     * with a local decision would mean the next health refresh from Meta
+     * silently switched a member's access back on. Two different
+     * authorities, two fields.
+     *
+     * Default true so every number that already exists stays exactly as
+     * it is: this is an off switch nobody has pressed, not a new gate
+     * every number has to pass.
+     */
+    enabled: { type: Boolean, default: true },
   },
   { timestamps: true },
 );

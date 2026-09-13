@@ -2,7 +2,12 @@ import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/rbac.middleware';
 import { validate } from '../../middleware/validate.middleware';
-import { registerPhoneNumberSchema, connectWhatsAppSchema, numberIdParamSchema } from './whatsapp.validation';
+import {
+  registerPhoneNumberSchema,
+  connectWhatsAppSchema,
+  numberIdParamSchema,
+  numberEnabledSchema,
+} from './whatsapp.validation';
 import {
   listPhoneNumbersHandler,
   registerPhoneNumberHandler,
@@ -10,6 +15,7 @@ import {
   whatsappStatusHandler,
   disconnectWhatsAppHandler,
   registerNumberForCloudApiHandler,
+  setNumberEnabledHandler,
 } from './whatsapp.controller';
 import { whatsappSignupPageHandler, whatsappSignupCallbackHandler } from './signupPage.controller';
 
@@ -46,4 +52,13 @@ whatsappRouter.post(
   '/numbers/:id/register',
   validate({ params: numberIdParamSchema }),
   registerNumberForCloudApiHandler,
+);
+
+// The admin's per-number access switch. Off locks out every member
+// assigned to this number — see setNumberEnabled for what that covers and
+// what it deliberately does not (inbound messages still land).
+whatsappRouter.patch(
+  '/numbers/:id/enabled',
+  validate({ params: numberIdParamSchema, body: numberEnabledSchema }),
+  setNumberEnabledHandler,
 );

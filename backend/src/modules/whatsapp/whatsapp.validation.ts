@@ -18,3 +18,6 @@ export const connectWhatsAppSchema = z.object({
 });
 
 export const numberIdParamSchema = z.object({ id: z.string().min(1) });
+
+/** The admin's per-number access switch. */
+export const numberEnabledSchema = z.object({ enabled: z.boolean() });

@@ -12,6 +12,8 @@ import { getMetaGateway } from '../../integrations/meta';
 import type { MetaCredentials } from '../../integrations/meta';
 import { describeNumberHealth, type NumberHealth } from './numberHealth';
 import { registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta/oauth';
+import { User } from '../users/user.model';
+import { invalidateAuthContext } from '../auth/authContext.service';
 
 /**
  * Turns a stored `accessTokenRef` into the token to actually call Meta with.
@@ -170,6 +172,14 @@ export interface PublicWhatsAppNumber {
   phoneNumberId: string;
   displayPhoneNumber: string;
   status: string;
+  /**
+   * Whether the admin has left this number switched on.
+   *
+   * Separate from `status`: that is Meta's view of the number, this is
+   * the workspace's. A number can be perfectly CONNECTED at Meta and
+   * still be switched off here.
+   */
+  enabled: boolean;
   qualityRating?: string;
   messagingLimitTier?: string;
   /** When quality and tier were last read from Meta — null if never. */
@@ -182,12 +192,17 @@ export interface PublicWhatsAppNumber {
   health: NumberHealth;
 }
 
-function toPublicWhatsAppNumber(n: WhatsAppPhoneNumberDoc): PublicWhatsAppNumber {
+/** Exported for its test: `enabled` defaulting wrong locks out a workspace. */
+export function toPublicWhatsAppNumber(n: WhatsAppPhoneNumberDoc): PublicWhatsAppNumber {
   return {
     id: String(n._id),
     phoneNumberId: n.phoneNumberId,
     displayPhoneNumber: n.displayPhoneNumber,
     status: n.status,
+    // Absent on every document written before the field existed, and
+    // absent has to mean ON — a migration that silently locked out every
+    // existing member would be the worst possible reading of it.
+    enabled: n.enabled !== false,
     qualityRating: n.qualityRating ?? undefined,
     messagingLimitTier: n.messagingLimitTier ?? undefined,
     healthCheckedAt: n.healthCheckedAt ? n.healthCheckedAt.toISOString() : undefined,
@@ -276,6 +291,48 @@ export async function listPhoneNumbersForTenant(tenantId: string): Promise<Publi
   for (const number of numbers) void refreshNumberHealthIfStale(number);
 
   return numbers.map(toPublicWhatsAppNumber);
+}
+
+/**
+ * The admin switching one number on or off.
+ *
+ * Off means the members assigned to it cannot use the app at all — they
+ * are refused at the auth context with NUMBER_ACCESS_DENIED (see
+ * authContext.service.ts), which covers reading, sending and the socket
+ * in one place rather than in each of them.
+ *
+ * Inbound messages are deliberately NOT dropped. A customer writing to a
+ * number the workspace has switched off has done nothing wrong, and
+ * throwing their message away to enforce an internal decision would lose
+ * real business. The messages land and wait; what is gated is who may
+ * work them.
+ *
+ * Every affected member's cached auth context is dropped immediately, so
+ * the switch takes effect on their next request rather than up to ten
+ * seconds later — an admin turning off access should watch it happen.
+ */
+export async function setNumberEnabled(
+  tenantId: string,
+  numberId: string,
+  enabled: boolean,
+): Promise<PublicWhatsAppNumber> {
+  const number = await findPhoneNumberByIdAndTenant(numberId, tenantId);
+  if (!number) {
+    throw ApiError.notFound('WHATSAPP_NUMBER_NOT_FOUND', 'That number is not registered to this workspace.');
+  }
+
+  number.enabled = enabled;
+  await number.save();
+
+  const affected = await User.find({ tenantId, whatsappPhoneNumberId: numberId }).select('_id').lean();
+  for (const u of affected) invalidateAuthContext(String(u._id), tenantId);
+
+  logger.info(
+    { numberId, enabled, affectedUsers: affected.length },
+    'WhatsApp number access switched by an admin',
+  );
+
+  return toPublicWhatsAppNumber(number);
 }
 
 /**

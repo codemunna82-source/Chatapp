@@ -15,10 +15,20 @@ interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
   user: AuthUser | null;
+  /**
+   * Why the last session ended, when it ended for a reason worth telling
+   * someone about — an admin turning their number's access off, for
+   * instance. Null for an ordinary sign-out.
+   *
+   * Kept in the store rather than passed through navigation params: the
+   * sign-out happens inside an API interceptor, which has no navigation
+   * to pass anything to.
+   */
+  signedOutReason: string | null;
   /** Reads persisted tokens/user at app startup — call once from the root component. */
   hydrate: () => Promise<void>;
   setSession: (tokens: AuthTokens) => Promise<void>;
-  clearSession: () => Promise<void>;
+  clearSession: (reason?: string) => Promise<void>;
   /** Merges a partial update into the cached user (e.g. avatarUpdatedAt after an upload) without a full re-login. */
   updateUser: (patch: Partial<AuthUser>) => void;
   /** Re-reads role/permissions from the server — see the implementation. */
@@ -30,6 +40,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: null,
   refreshToken: null,
   user: null,
+  signedOutReason: null,
 
   hydrate: async () => {
     const { accessToken, refreshToken } = await getStoredTokens();
@@ -38,7 +49,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (accessToken && refreshToken && user) {
       // Ids only — never the email or display name. See setSentryUser.
       setSentryUser(user);
-      set({ status: 'signedIn', accessToken, refreshToken, user });
+      set({ status: 'signedIn', accessToken, refreshToken, user, signedOutReason: null });
     } else {
       // Partial/corrupt state (e.g. tokens without a cached user) is
       // treated as signed out — never guess at a session.
@@ -55,19 +66,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     setSentryUser(tokens.user);
     set({
       status: 'signedIn',
+      signedOutReason: null,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       user: tokens.user,
     });
   },
 
-  clearSession: async () => {
+  clearSession: async (reason?: string) => {
     await clearStoredTokens();
     removeCached(CACHED_USER_KEY);
     // Cleared on the way out so a crash after signing out is not still
     // attributed to the person who just left.
     setSentryUser(null);
-    set({ status: 'signedOut', accessToken: null, refreshToken: null, user: null });
+    set({
+      status: 'signedOut',
+      accessToken: null,
+      refreshToken: null,
+      user: null,
+      signedOutReason: reason ?? null,
+    });
   },
 
   updateUser: (patch: Partial<AuthUser>) => {
@@ -117,5 +135,8 @@ setAuthHandlers({
   },
   onAuthExpired: async () => {
     await useAuthStore.getState().clearSession();
+  },
+  onAccessRevoked: async (reason) => {
+    await useAuthStore.getState().clearSession(reason);
   },
 });

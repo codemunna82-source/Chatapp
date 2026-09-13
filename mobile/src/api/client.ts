@@ -21,6 +21,13 @@ export interface AuthHandlers {
   onTokensRefreshed: (accessToken: string, refreshToken: string) => Promise<void>;
   /** Called when refresh itself fails (refresh token invalid/expired/reused) — must clear the session. */
   onAuthExpired: () => Promise<void>;
+  /**
+   * Called when the server refuses this account outright, with the reason
+   * to show. Distinct from onAuthExpired: no refresh could help, and the
+   * user needs to be told WHY rather than dropped at a login screen that
+   * looks like they were merely logged out.
+   */
+  onAccessRevoked: (reason: string) => Promise<void>;
 }
 
 let authHandlers: AuthHandlers | null = null;
@@ -108,6 +115,21 @@ apiClient.interceptors.response.use(
         original.headers.set('Authorization', `Bearer ${newAccessToken}`);
         return apiClient(original);
       }
+    }
+
+    /**
+     * The admin switched this number's access off (or the account itself).
+     *
+     * No refresh can fix a 403 — the token is fine, the answer is no — so
+     * retrying or leaving the user on a screen full of failed requests
+     * tells them nothing. The session is ended and the reason carried to
+     * the sign-in screen, where it is the only thing on it.
+     */
+    if (status === 403 && code === 'NUMBER_ACCESS_DENIED') {
+      const reason =
+        error.response?.data?.error?.message ??
+        'Your access has been turned off. Please contact your administrator.';
+      await authHandlers?.onAccessRevoked(reason);
     }
 
     return Promise.reject(error);
