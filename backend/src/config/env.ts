@@ -155,12 +155,19 @@ const envSchema = z.object({
     .default('')
     .transform((v) => v.trim().replace(/\/+$/, '')),
   /**
-   * How long a web-chat link keeps working. Long enough that a customer
-   * who comes back to an old WhatsApp thread still lands in their
-   * conversation, short enough that a forwarded link does not outlive the
-   * business relationship.
+   * How long a web-chat link keeps working.
+   *
+   * 0 means it never expires. That is a real trade, not a free win: a
+   * link pasted into a WhatsApp thread can be forwarded, and one that
+   * never expires can be opened by whoever ends up holding it, for as
+   * long as they hold it. Revoking a link (from the chat) still works and
+   * is the answer when that matters.
+   *
+   * Anything above 0 is a number of days, capped at ten years — long
+   * enough to be "practically never" for a business that would still
+   * rather have an outer bound.
    */
-  GUEST_SESSION_TTL_DAYS: z.coerce.number().int().positive().max(365).default(30),
+  GUEST_SESSION_TTL_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),

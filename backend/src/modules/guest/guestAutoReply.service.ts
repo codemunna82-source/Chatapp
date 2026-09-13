@@ -7,6 +7,7 @@ import {
 } from '../tenants/tenant.model';
 import { sendOutboundMessage } from '../messages/message.service';
 import { setAwaitingWebChat } from '../conversations/conversation.repository';
+import { guestSessionExpiresAt } from './guestSessionExpiry';
 import { findContactByIdAndTenant } from '../contacts/contact.repository';
 import {
   createGuestSession,
@@ -103,7 +104,7 @@ export async function maybeSendGuestLinkAutoReply(input: {
       if (!reissued) return;
       token = reissued;
     } else {
-      const expiresAt = new Date(Date.now() + env.GUEST_SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
+      const expiresAt = guestSessionExpiresAt();
       const created = await createGuestSession({
         tenantId: input.tenantId,
         conversationId: input.conversationId,

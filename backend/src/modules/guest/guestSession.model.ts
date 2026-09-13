@@ -31,6 +31,25 @@ const guestSessionSchema = new Schema(
     whatsappPhoneNumberId: { type: Schema.Types.ObjectId, ref: 'WhatsAppPhoneNumber', required: true },
     /** SHA-256 hex of the token. The token itself is returned once, at creation, and never stored. */
     tokenHash: { type: String, required: true },
+    /**
+     * Every token ever issued for this session, as hashes — the newest
+     * last.
+     *
+     * A session used to hold exactly one hash, and re-sending the
+     * invitation OVERWROTE it. The code even said it was re-sending the
+     * same link; it was not. Every copy already sitting in the customer's
+     * WhatsApp thread became a dead link the moment a new one went out,
+     * and tapping one showed "This chat link has expired" for a link
+     * minted minutes earlier.
+     *
+     * The hash-only storage is what forced it: the token itself is
+     * returned once and never kept, so the old URL cannot be re-sent —
+     * only a new one can be minted. Keeping every hash valid resolves
+     * that without giving the property up: a database dump is still a
+     * list of useless hashes, and every link the customer was ever sent
+     * still opens their conversation.
+     */
+    tokenHashes: { type: [String], default: undefined },
     /** Who generated the link — an audit trail for "who gave this out". */
     createdByUserId: { type: Schema.Types.ObjectId, ref: 'User' },
     expiresAt: { type: Date, required: true },
@@ -77,6 +96,11 @@ const guestSessionSchema = new Schema(
 // The lookup every single guest request makes, on a value that must
 // identify exactly one session.
 guestSessionSchema.index({ tokenHash: 1 }, { unique: true });
+// The lookup path for every guest request. Not unique: a hash appears in
+// exactly one session's array anyway (the tokens are 256-bit random), and
+// declaring uniqueness on a multikey index would reject a session whose
+// array happened to be built in two steps.
+guestSessionSchema.index({ tokenHashes: 1 });
 // Finding the live link for a conversation, so re-sending "Open private
 // chat" hands out the link the customer may already have rather than
 // silently invalidating the one sitting in their WhatsApp thread.

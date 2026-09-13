@@ -44,6 +44,7 @@ import { pushGuestMessage } from './guestPush.service';
 import type { GuestReportLean, GuestReportReason } from './guestReport.model';
 import { resolveBusinessName, resolveBusinessNameForConversation } from './businessName';
 import { hasMovedToWebChat } from './webChatRouting';
+import { guestSessionExpiresAt } from './guestSessionExpiry';
 import { findCustomerFacingNameForPhoneNumber } from '../users/user.repository';
 
 /**
@@ -309,7 +310,7 @@ export async function issueGuestLinkForConversation(
     );
   }
 
-  const expiresAt = new Date(Date.now() + env.GUEST_SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
+  const expiresAt = guestSessionExpiresAt();
   const { token } = await createGuestSession({
     tenantId: auth.tenantId,
     conversationId,

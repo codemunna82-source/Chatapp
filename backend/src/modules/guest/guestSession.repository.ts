@@ -29,7 +29,10 @@ export async function createGuestSession(
   input: CreateGuestSessionInput,
 ): Promise<{ session: GuestSessionDoc; token: string }> {
   const token = generateGuestToken();
-  const session = await GuestSession.create({ ...input, tokenHash: hashGuestToken(token) });
+  const hash = hashGuestToken(token);
+  // Seeded into the array too, so a session created today and re-invited
+  // tomorrow keeps its first link working.
+  const session = await GuestSession.create({ ...input, tokenHash: hash, tokenHashes: [hash] });
   return { session, token };
 }
 
@@ -61,8 +64,13 @@ export async function findActiveSessionForConversation(
  */
 export async function findSessionByToken(token: string): Promise<GuestSessionDoc | null> {
   if (!token) return null;
+  const hash = hashGuestToken(token);
   return GuestSession.findOne({
-    tokenHash: hashGuestToken(token),
+    // Any token this session has ever issued opens it. `tokenHash` is
+    // still matched for sessions created before tokenHashes existed —
+    // dropping it would invalidate every link already in a customer's
+    // thread, which is the exact failure this change exists to fix.
+    $or: [{ tokenHashes: hash }, { tokenHash: hash }],
     revokedAt: { $exists: false },
     expiresAt: { $gt: new Date() },
   });
@@ -155,9 +163,18 @@ export async function reissueGuestSessionToken(
 ): Promise<string | null> {
   if (!Types.ObjectId.isValid(sessionId)) return null;
   const token = generateGuestToken();
+  const hash = hashGuestToken(token);
   const updated = await GuestSession.findOneAndUpdate(
     { _id: sessionId, tenantId, revokedAt: { $exists: false } },
-    { $set: { tokenHash: hashGuestToken(token) } },
+    {
+      // The new token is ADDED, not swapped in. $set on tokenHash alone
+      // is what killed every link already sitting in the customer's
+      // WhatsApp thread — they tapped one and were told it had expired.
+      // tokenHash still moves to the newest so the unique index and the
+      // legacy lookup both stay correct.
+      $set: { tokenHash: hash },
+      $addToSet: { tokenHashes: hash },
+    },
     { new: true },
   );
   return updated ? token : null;
