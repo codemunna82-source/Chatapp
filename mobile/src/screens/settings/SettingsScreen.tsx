@@ -9,6 +9,7 @@ import { Button } from '../../components/Button';
 import { Badge } from '../../components/Badge';
 import { Avatar } from '../../components/Avatar';
 import { useAuthStore } from '../../store/authStore';
+import { useWhatsAppConnection } from '../../queries/useWhatsAppConnection';
 import { useThemePreferenceStore, type ThemePreference } from '../../store/themePreferenceStore';
 import {
   useChatWallpaperStore,
@@ -346,6 +347,12 @@ function AlertsSection() {
 export function SettingsScreen({ navigation }: Props) {
   const { colors, spacing, radius, typography } = useTheme();
   const user = useAuthStore((s) => s.user);
+  // Either kind: one they connected themselves, or one an admin assigned
+  // them. From the app's side those are the same question — "which number
+  // do my messages leave from" — so they are read as one value here.
+  const connection = useWhatsAppConnection();
+  const whatsappNumber =
+    connection.data?.displayPhoneNumber ?? connection.data?.assignedPhoneNumber;
   const logout = useLogout();
   const isMasterAdmin = user?.role === 'MASTER_ADMIN';
 
@@ -377,6 +384,21 @@ export function SettingsScreen({ navigation }: Props) {
           {user?.displayName ?? user?.email}
         </Text>
         <Text style={[typography.caption, { color: colors.textSecondary }]}>{user?.email}</Text>
+        {/* The number they sign in with. Absent on accounts made before
+            phone sign-in existed, so it is only printed when there is
+            one — a blank line under the email reads as a bug. */}
+        {user?.phone ? (
+          <Text style={[typography.caption, { color: colors.textSecondary }]}>{user.phone}</Text>
+        ) : null}
+        {/* And the WhatsApp number their messages actually go out from,
+            which was visible nowhere in the app. An agent could work all
+            day without being able to answer "which number is this
+            customer seeing me as?". */}
+        {whatsappNumber ? (
+          <Text style={[typography.caption, { color: colors.textSecondary, marginTop: spacing.xs }]}>
+            Sends from {whatsappNumber}
+          </Text>
+        ) : null}
         <Text style={[typography.caption, { color: colors.textSecondary, marginTop: spacing.xs }]}>
           {user?.role === 'MASTER_ADMIN' ? 'Master Admin' : 'Team member'}
         </Text>

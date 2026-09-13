@@ -5,6 +5,16 @@ import type { ApiSuccess } from '../types';
 export interface WhatsAppConnection {
   connected: boolean;
   displayPhoneNumber?: string;
+  /**
+   * The number an admin assigned this user, when they have not connected
+   * one themselves — which is the ordinary case for a team member.
+   *
+   * Separate from `connected` on purpose: an assigned number is not
+   * something the member can connect or disconnect, so it says which
+   * number their messages go out from without claiming they own the
+   * connection.
+   */
+  assignedPhoneNumber?: string;
   verifiedName?: string;
   phoneNumberId?: string;
   wabaId?: string;

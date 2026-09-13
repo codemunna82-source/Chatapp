@@ -15,9 +15,44 @@ import { WhatsAppPhoneNumber } from './whatsappPhoneNumber.model';
 import { User } from '../users/user.model';
 import { invalidateAuthContext } from '../auth/authContext.service';
 
+/**
+ * The display number an admin assigned this user, if any.
+ *
+ * Tenant-scoped on both hops: the user is read within the tenant, and the
+ * number is looked up within it too — an id on a user document is not by
+ * itself proof the number belongs to the same workspace.
+ */
+async function assignedNumberFor(tenantId: string, userId: string): Promise<string | undefined> {
+  const user = await User.findOne({ _id: userId, tenantId }).select('whatsappPhoneNumberId').lean();
+  if (!user?.whatsappPhoneNumberId) return undefined;
+  const number = await WhatsAppPhoneNumber.findOne({
+    _id: user.whatsappPhoneNumberId,
+    tenantId,
+  })
+    .select('displayPhoneNumber')
+    .lean();
+  return number?.displayPhoneNumber ?? undefined;
+}
+
 export interface ConnectionStatus {
   connected: boolean;
   displayPhoneNumber?: string;
+  /**
+   * The number an ADMIN assigned this user, when they have not connected
+   * one themselves.
+   *
+   * Everything else here describes a connection the user made through
+   * Embedded Signup, keyed on ownerUserId — so a member whose admin
+   * assigned them a number matched nothing and was told, in effect, that
+   * they had no WhatsApp number at all. They send from one every day.
+   *
+   * Reported as its own field rather than by widening `connected`: that
+   * flag decides whether the app offers Embedded Signup, and an assigned
+   * number is not something the member can connect, reconnect or
+   * disconnect. Saying which number they send from is information;
+   * claiming they own the connection would not be.
+   */
+  assignedPhoneNumber?: string;
   verifiedName?: string;
   phoneNumberId?: string;
   wabaId?: string;
@@ -56,7 +91,12 @@ export async function getConnectionStatus(tenantId: string, userId: string): Pro
     ownerUserId: userId,
     status: { $in: ['CONNECTED', 'EXPIRED'] },
   });
-  if (!account) return { connected: false };
+  if (!account) {
+    // No self-connected account. They may still have been assigned one,
+    // which is the ordinary case for a team member.
+    const assigned = await assignedNumberFor(tenantId, userId);
+    return { connected: false, assignedPhoneNumber: assigned };
+  }
 
   const number = await WhatsAppPhoneNumber.findOne({ tenantId, ownerUserId: userId }).sort({ createdAt: -1 });
   const expiresAt = account.tokenExpiresAt ?? undefined;
