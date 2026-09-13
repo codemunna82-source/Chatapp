@@ -49,6 +49,12 @@ export function useDeleteContact() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['contacts'] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+      // And the single-conversation queries, by prefix. The chat header
+      // reads the contact's avatarUpdatedAt from THAT query, not from the
+      // list — so without this a photo set from the header uploaded fine
+      // and then did not appear until the screen was reopened, which
+      // looks exactly like a failed upload.
+      void queryClient.invalidateQueries({ queryKey: ['conversation'] });
     },
   });
 }

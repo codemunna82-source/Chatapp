@@ -24,7 +24,9 @@ import { Composer } from './Composer';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { MessageActionSheet } from './MessageActionSheet';
 import { TemplatePickerSheet } from './TemplatePickerSheet';
+import * as ImagePicker from 'expo-image-picker';
 import { ChatHeaderTitle } from './ChatHeaderTitle';
+import { useUploadContactAvatar } from '../../queries/useContacts';
 import { useGuestPresenceStore } from '../../store/guestPresenceStore';
 import { MessageInfoSheet } from './MessageInfoSheet';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
@@ -342,6 +344,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   );
 
   const guestLinkQuery = useGuestLinkStatus(conversationId);
+  const uploadContactAvatar = useUploadContactAvatar();
   const issueGuestLink = useIssueGuestLink(conversationId);
   const revokeGuestLink = useRevokeGuestLink(conversationId);
 
@@ -357,17 +360,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const withinWhatsAppWindow =
     (conversationQuery.data?.isDemo ?? false) ||
     (conversationQuery.data?.withinCustomerServiceWindow ?? false);
-  /**
-   * Where the server will deliver this reply — a label, not a decision.
-   *
-   * Once the customer has actually used the private window, that is where
-   * the conversation is, so that is where every reply goes; the server
-   * routes it there whichever endpoint is called. This used to be decided
-   * here instead, which is how a customer with the window open received
-   * every reply twice — once in the window, once in WhatsApp.
-   */
-  const replyingViaWeb = guestLinkQuery.data?.openedByCustomer ?? false;
-
   const shareGuestLink = useCallback(
     async (url: string) => {
       const name = conversationQuery.data?.contact?.name || 'there';
@@ -392,6 +384,42 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     }
     if (contactId) placeCall(contactId);
   }, [guestActive, conversationId, contactId, placeCall, conversationQuery.data]);
+
+  /**
+   * Setting the customer's photo from the chat itself.
+   *
+   * The upload endpoint and the picker both already existed — the only
+   * way to reach them was the contact form inside Manage contacts, a
+   * screen most people never open, so a DP could be set but effectively
+   * never was. The chat header is where anyone looks for a photo, so it
+   * is where setting one belongs.
+   */
+  const pickContactPhoto = useCallback(async () => {
+    if (!contactId || uploadContactAvatar.isPending) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      // Square, because that is how it is rendered everywhere it appears.
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset) return;
+
+    uploadContactAvatar.mutate(
+      {
+        id: contactId,
+        file: {
+          uri: asset.uri,
+          // The picker can return a uri with no filename at all; multipart
+          // still requires one, and the mime type does the real work.
+          name: asset.fileName ?? 'avatar.jpg',
+          mimeType: asset.mimeType ?? 'image/jpeg',
+        },
+      },
+      { onError: (err) => Alert.alert('Could not update the photo', getApiErrorMessage(err)) },
+    );
+  }, [contactId, uploadContactAvatar]);
 
   const handleGuestLink = useCallback(() => {
     if (issueGuestLink.isPending || revokeGuestLink.isPending) return;
@@ -581,6 +609,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       headerTitle: () => (
         <ChatHeaderTitle
           name={contactLabel}
+          contactId={contactId}
+          avatarUpdatedAt={conversationQuery.data?.contact?.avatarUpdatedAt}
+          onPressAvatar={pickContactPhoto}
           windowExpiresAt={conversationQuery.data?.conversationWindowExpiresAt}
           withinWindow={conversationQuery.data?.withinCustomerServiceWindow ?? true}
           isDemo={conversationQuery.data?.isDemo ?? false}
@@ -673,6 +704,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     guestOnline,
     handleGuestLink,
     handleCall,
+    // Without this the header keeps the first callback it was built with,
+    // which closes over a stale contactId — so tapping the photo on a
+    // chat opened second would upload to the first one's contact.
+    pickContactPhoto,
   ]);
   const handleOpenImage = useCallback((localUri: string) => setViewerUri(localUri), []);
 
@@ -768,17 +803,13 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
                 <InlineBanner message={callError} />
               </View>
             ) : null}
-            {/* Deliberately not a warning any more. Routing a reply through
-                the customer's own chat window is normal operation, not a
-                degraded state — and a yellow banner on top of every
-                conversation taught users to read a working system as a
-                broken one. Where the reply is going is worth saying once,
-                quietly; that it is not going to WhatsApp is not a problem. */}
-            {replyingViaWeb ? (
-              <View style={styles.callErrorWrap}>
-                <InlineBanner message="Replies go to the customer's private chat window." />
-              </View>
-            ) : null}
+            {/* No banner for this. It sat across the top of every
+                conversation with an open private window — which is now the
+                normal state, not an exceptional one — and a coloured strip
+                that never goes away stops being read within a day.
+                The header subtitle already says "Private chat open · reply
+                anytime", in the one place someone looks to see who they
+                are talking to. */}
             <FlashList
               ref={listRef}
               data={renderItems}

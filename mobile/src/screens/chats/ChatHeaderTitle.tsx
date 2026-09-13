@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Avatar } from '../../components/Avatar';
 import { formatWindowRemaining } from '../../utils/formatTime';
 
 interface ChatHeaderTitleProps {
@@ -22,6 +23,12 @@ interface ChatHeaderTitleProps {
    * apply is just anxiety on the header of every chat.
    */
   guestActive?: boolean;
+  /** Whose photo to show. Absent on a conversation with no contact yet. */
+  contactId?: string;
+  /** The contact's avatarUpdatedAt — busts the image cache after an upload. */
+  avatarUpdatedAt?: string;
+  /** Tapping the photo sets a new one. Omitted makes it a plain image. */
+  onPressAvatar?: () => void;
 }
 
 /** Re-checked once a minute — enough to keep an hours/minutes label honest
@@ -46,6 +53,9 @@ export function ChatHeaderTitle({
   isDemo = false,
   guestOnline = false,
   guestActive = false,
+  contactId,
+  avatarUpdatedAt,
+  onPressAvatar,
 }: ChatHeaderTitleProps) {
   const [, setTick] = useState(0);
 
@@ -62,7 +72,29 @@ export function ChatHeaderTitle({
   const urgent = remaining !== null && remaining.endsWith('m left');
 
   return (
-    <View style={styles.wrap}>
+    <View style={styles.row}>
+      {/* The customer's photo, and the place to set one.
+          The chat header had no picture at all, so a DP uploaded from
+          Manage contacts never appeared anywhere anyone looked — and the
+          only way to set one was a screen most people never open. Putting
+          it here makes both true at once: you see whose chat this is, and
+          tapping it is how the photo gets there.
+          Falls back to initials, which is what Avatar already does when
+          there is no photo or it cannot be fetched. */}
+      {contactId ? (
+        <Pressable
+          onPress={onPressAvatar}
+          disabled={!onPressAvatar}
+          hitSlop={8}
+          accessibilityRole={onPressAvatar ? 'button' : 'image'}
+          accessibilityLabel={onPressAvatar ? `Change ${name}'s photo` : `${name}'s photo`}
+          style={styles.avatar}
+        >
+          <Avatar label={name} contactId={contactId} version={avatarUpdatedAt} size={36} />
+        </Pressable>
+      ) : null}
+
+      <View style={styles.wrap}>
       <Text style={styles.name} numberOfLines={1}>
         {name}
       </Text>
@@ -98,12 +130,17 @@ export function ChatHeaderTitle({
           {remaining} to reply freely
         </Text>
       ) : null}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { justifyContent: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center' },
+  avatar: { marginRight: 10 },
+  // Shrinks rather than pushing the avatar off: a long name should
+  // ellipsize, not shove the photo out of the header.
+  wrap: { justifyContent: 'center', flexShrink: 1 },
   // The header is a fixed navy in both schemes (see chatHeaderBackground),
   // so these colors are fixed against it rather than theme tokens.
   name: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },

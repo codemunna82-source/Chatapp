@@ -61,6 +61,12 @@ export interface SendOutboundMessageInput {
   replyToMessageId?: string; // our Message._id — quotes another message when sending text/media
   reactToMessageId?: string; // our Message._id — the target of a `type: 'reaction'` send
   emoji?: string; // '' removes a previously-sent reaction (real, documented Meta behavior)
+  /**
+   * Sent by the system, and kept out of the workspace's own view of the
+   * thread. Only the automatic private-chat invitation sets it — see
+   * message.model.ts for why it is hidden rather than not stored.
+   */
+  internal?: boolean;
 }
 
 /**
@@ -198,6 +204,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     mediaId: input.mediaId,
     replyToMessageId: input.type === 'reaction' ? input.reactToMessageId : input.replyToMessageId,
     status: 'QUEUED',
+    internal: input.internal,
   });
 
   // Declared outside the try so the catch can name the connection that
@@ -226,23 +233,36 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     );
 
     const sentMessage = await attachMetaMessageId(String(localMessage._id), input.tenantId, metaMessageId);
-    const updatedConversation = await recordOutboundActivity(
-      input.conversationId,
-      input.tenantId,
-      input.text ?? input.caption ?? `[${input.type}]`,
-      new Date(),
-      // SENT, matching the message row attachMetaMessageId just wrote — a
-      // status webhook advances both from here.
-      'SENT',
-      String(localMessage._id),
-    );
+    /**
+     * The chat row and the socket both skip a system message.
+     *
+     * Hiding the bubble but leaving the invitation as the row's "last
+     * message" — and pushing it live into an open thread — would show the
+     * agent the very thing the bubble was hidden to spare them, in two
+     * more places. The conversation's own timestamps are unaffected
+     * either way; what is skipped is the preview text and the push.
+     */
+    const updatedConversation = input.internal
+      ? null
+      : await recordOutboundActivity(
+          input.conversationId,
+          input.tenantId,
+          input.text ?? input.caption ?? `[${input.type}]`,
+          new Date(),
+          // SENT, matching the message row attachMetaMessageId just wrote
+          // — a status webhook advances both from here.
+          'SENT',
+          String(localMessage._id),
+        );
 
     const realtime = getRealtimeEmitter();
-    realtime.emitMessageNew(
-      input.tenantId,
-      toRealtimeMessage(sentMessage ?? localMessage),
-      String(conversation.whatsappPhoneNumberId),
-    );
+    if (!input.internal) {
+      realtime.emitMessageNew(
+        input.tenantId,
+        toRealtimeMessage(sentMessage ?? localMessage),
+        String(conversation.whatsappPhoneNumberId),
+      );
+    }
     if (updatedConversation) {
       realtime.emitConversationUpdated(input.tenantId, toRealtimeConversation(updatedConversation));
     }
@@ -301,6 +321,7 @@ async function deliverToWebChat(
     mediaId: input.mediaId,
     replyToMessageId: input.type === 'reaction' ? input.reactToMessageId : input.replyToMessageId,
     status: 'SENT',
+    internal: input.internal,
   });
 
   const updatedConversation = await recordOutboundActivity(

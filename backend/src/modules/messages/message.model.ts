@@ -97,6 +97,22 @@ const messageSchema = new Schema(
      */
     deletedAt: { type: Date },
     /**
+     * Sent by the system, not by a person, and not worth showing to the
+     * workspace.
+     *
+     * The automatic private-chat invitation is the only thing that sets
+     * it. That message is FOR the customer — it carries their own link —
+     * and an agent opening the chat gained nothing from a bubble full of
+     * a URL they cannot use, sitting between the customer's message and
+     * their own reply.
+     *
+     * Hidden rather than not stored: it genuinely went out on WhatsApp,
+     * and a thread that omits a message the customer received would make
+     * every support question about "what did you send me" unanswerable.
+     * It stays in the record and out of the way.
+     */
+    internal: { type: Boolean, default: false },
+    /**
      * Workspace-wide, not per-user: this is a shared business inbox, and
      * "the message with the customer's delivery address" is important to
      * whoever picks the conversation up next, not just to whoever starred

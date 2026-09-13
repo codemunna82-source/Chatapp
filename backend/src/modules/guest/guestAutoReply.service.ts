@@ -133,6 +133,12 @@ export async function maybeSendGuestLinkAutoReply(input: {
         conversationId: input.conversationId,
         type: 'text',
         text: renderAutoGuestLinkText(config.message ?? undefined, url),
+        // Kept out of the agent's thread. It is addressed to the customer
+        // and carries their own link; an agent gained nothing from a
+        // bubble full of a URL they cannot use, sitting between the
+        // customer's message and their reply. It still went out on
+        // WhatsApp and is still in the record.
+        internal: true,
       });
     } else {
       // Resolved before building so the builder itself stays pure and
@@ -151,6 +157,9 @@ export async function maybeSendGuestLinkAutoReply(input: {
         templateName: config.templateName ?? undefined,
         languageCode: config.templateLanguage ?? undefined,
         templateComponents: components,
+        // Same as the text mode above: the invitation is the customer's,
+        // not the agent's.
+        internal: true,
       });
     }
 

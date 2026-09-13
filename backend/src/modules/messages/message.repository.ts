@@ -22,6 +22,8 @@ export interface CreateMessageInput {
   status?: MessageStatus;
   /** Only for `type: 'location'` — see the schema for why it is not parsed out of `text`. */
   location?: { latitude: number; longitude: number; name?: string; address?: string };
+  /** System-sent and hidden from the workspace's thread — see the schema. */
+  internal?: boolean;
 }
 
 export async function createMessage(input: CreateMessageInput): Promise<MessageDoc> {
@@ -203,8 +205,17 @@ export async function listMessagesByConversation(
   opts: ListMessagesOptions = {},
 ): Promise<{ items: MessageLean[]; nextCursor: string | null }> {
   const limit = Math.min(opts.limit ?? 30, 100);
-  // Soft-deleted messages never come back down the wire.
-  const filter: Record<string, unknown> = { tenantId, conversationId, deletedAt: { $exists: false } };
+  // Soft-deleted messages never come back, and neither do the system's
+  // own — the automatic invitation is addressed to the customer, not to
+  // the agent reading this thread. `$ne: true` rather than `false`,
+  // because every message written before the field existed has no value
+  // at all and must keep showing.
+  const filter: Record<string, unknown> = {
+    tenantId,
+    conversationId,
+    deletedAt: { $exists: false },
+    internal: { $ne: true },
+  };
   if (opts.excludeReactions) {
     filter.type = { $ne: 'reaction' };
   }
