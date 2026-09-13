@@ -113,6 +113,11 @@ const messageSchema = new Schema(
      */
     internal: { type: Boolean, default: false },
     /**
+     * The sending client's own id for this message, stable across its
+     * retries — see the unique index below for what it prevents.
+     */
+    clientMessageId: { type: String },
+    /**
      * Workspace-wide, not per-user: this is a shared business inbox, and
      * "the message with the customer's delivery address" is important to
      * whoever picks the conversation up next, not just to whoever starred
@@ -154,6 +159,27 @@ messageSchema.index(
 // in O(1) and must be scoped correctly (sparse: most rows get one eventually,
 // but IN messages/failed sends may briefly lack it).
 messageSchema.index({ metaMessageId: 1 }, { unique: true, sparse: true });
+
+/**
+ * One send, one message — however many times the client retries it.
+ *
+ * The app's outbox retries a send it never got a response to, and it
+ * cannot tell "never arrived" from "arrived, response lost". Without a
+ * unique index the second attempt simply creates another row, and the
+ * customer receives the same message twice.
+ *
+ * `partialFilterExpression` rather than `sparse`: older clients send no
+ * clientMessageId at all, and a sparse unique index across a compound
+ * key would still index those as null and collide on the second one.
+ * This indexes only the documents that actually have the field.
+ */
+messageSchema.index(
+  { tenantId: 1, clientMessageId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { clientMessageId: { $type: 'string' } },
+  },
+);
 
 type MessageAttrs = InferSchemaType<typeof messageSchema> & Timestamps;
 /**

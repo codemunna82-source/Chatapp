@@ -4,6 +4,7 @@ import { findContactByIdAndTenant } from '../contacts/contact.repository';
 import {
   createMessage,
   findMessageByIdAndTenant,
+  findMessageByClientId,
   attachMetaMessageId,
   markMessageFailed,
   softDeleteMessage,
@@ -67,6 +68,14 @@ export interface SendOutboundMessageInput {
    * message.model.ts for why it is hidden rather than not stored.
    */
   internal?: boolean;
+  /**
+   * The client's own id for this send, stable across its retries.
+   *
+   * Turns a retry into a lookup: without it, a send that succeeded and
+   * whose response was lost comes back as a second message the customer
+   * has already received.
+   */
+  clientMessageId?: string;
 }
 
 /**
@@ -129,6 +138,26 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
   const contact = await findContactByIdAndTenant(String(conversation.contactId), input.tenantId);
   if (!contact) {
     throw ApiError.notFound('CONTACT_NOT_FOUND', 'Contact not found');
+  }
+
+  /**
+   * Already sent under this id — hand back what was stored rather than
+   * sending it again.
+   *
+   * This is the retry case, not the double-tap case: the app's outbox
+   * retries a send it never got a response to, and it cannot tell that
+   * apart from one that never arrived. Returning the existing message
+   * makes the retry a no-op the client can treat as success, which is
+   * exactly what it is.
+   *
+   * The unique index on (tenantId, clientMessageId) is what makes this
+   * airtight — this lookup handles the common case cheaply, and the index
+   * catches two retries arriving at the same instant, where both would
+   * pass this check.
+   */
+  if (input.clientMessageId) {
+    const already = await findMessageByClientId(input.tenantId, input.clientMessageId);
+    if (already) return already;
   }
 
   // A demo contact is a local sandbox: the number is not on WhatsApp, so
@@ -205,6 +234,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     replyToMessageId: input.type === 'reaction' ? input.reactToMessageId : input.replyToMessageId,
     status: 'QUEUED',
     internal: input.internal,
+    clientMessageId: input.clientMessageId,
   });
 
   // Declared outside the try so the catch can name the connection that
@@ -322,6 +352,7 @@ async function deliverToWebChat(
     replyToMessageId: input.type === 'reaction' ? input.reactToMessageId : input.replyToMessageId,
     status: 'SENT',
     internal: input.internal,
+    clientMessageId: input.clientMessageId,
   });
 
   const updatedConversation = await recordOutboundActivity(

@@ -223,6 +223,24 @@ export function useSendMessage(conversationId: string) {
     mutationFn: (body: SendMessageBody) => messagesApi.sendMessage(conversationId, body),
     onMutate: (body: SendMessageBody) => {
       const tempId = makeTempId();
+
+      /**
+       * The optimistic bubble's id is also this send's id on the wire.
+       *
+       * Stamped onto the body object itself, which React Query hands to
+       * mutationFn and to onError unchanged — so the outbox stores a body
+       * that already carries it, and every retry of that body presents
+       * the SAME id. The server returns the message it already has rather
+       * than creating a second one, which is what stops a send whose
+       * response was lost from reaching the customer twice.
+       *
+       * Assigning to the caller's object rather than copying is
+       * deliberate: a copy would leave the outbox holding the original,
+       * un-stamped body, and the retry — the one case this exists for —
+       * would be the one without protection.
+       */
+      body.clientMessageId = tempId;
+
       const optimistic: Message = {
         id: tempId,
         conversationId,

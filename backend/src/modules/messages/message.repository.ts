@@ -24,6 +24,23 @@ export interface CreateMessageInput {
   location?: { latitude: number; longitude: number; name?: string; address?: string };
   /** System-sent and hidden from the workspace's thread — see the schema. */
   internal?: boolean;
+  /** The client's own id for this send, stable across its retries. */
+  clientMessageId?: string;
+}
+
+/**
+ * The message a client has already sent under this id, if any.
+ *
+ * The retry half of duplicate protection: the app cannot tell a send that
+ * never arrived from one whose response was lost, so it retries, and this
+ * is what turns the second attempt into a lookup instead of a second
+ * message.
+ */
+export async function findMessageByClientId(
+  tenantId: string,
+  clientMessageId: string,
+): Promise<MessageDoc | null> {
+  return Message.findOne({ tenantId, clientMessageId });
 }
 
 export async function createMessage(input: CreateMessageInput): Promise<MessageDoc> {

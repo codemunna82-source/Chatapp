@@ -2,6 +2,20 @@ import { z } from 'zod';
 
 const base = {
   replyToMessageId: z.string().optional(),
+  /**
+   * The client's own id for this send, stable across its retries.
+   *
+   * What it protects against is not a user tapping twice — it is the
+   * send that SUCCEEDED and whose response never came back. The app's
+   * outbox cannot tell that apart from a send that never arrived, so it
+   * retries, and without this the retry creates a second copy of a
+   * message the customer has already received.
+   *
+   * Optional, because older builds do not send one and refusing them
+   * would break every installed app. A send without it keeps the old
+   * behaviour: no protection, same as before.
+   */
+  clientMessageId: z.string().trim().min(1).max(128).optional(),
 };
 
 const textMessage = z.object({ type: z.literal('text'), text: z.string().trim().min(1).max(4096), ...base });
@@ -26,6 +40,7 @@ const reactionMessage = z.object({
   type: z.literal('reaction'),
   reactToMessageId: z.string().min(1),
   emoji: z.string().max(8),
+  clientMessageId: base.clientMessageId,
 });
 
 export const sendMessageSchema = z

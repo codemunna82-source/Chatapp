@@ -18,18 +18,34 @@ export async function listMessages(
 }
 
 /** Mirrors the backend's discriminated union exactly (backend/src/modules/messages/message.validation.ts). */
+/**
+ * This send's own id, stable across every retry of it.
+ *
+ * The outbox retries a send it never got a response to — and it cannot
+ * tell that apart from a send that arrived and whose response was lost.
+ * The server stores this id under a unique index and hands back the
+ * message it already has, so the retry becomes a lookup instead of a
+ * second copy in the customer's WhatsApp.
+ */
+type WithClientId = { clientMessageId?: string };
+
 export type SendMessageBody =
-  | { type: 'text'; text: string; replyToMessageId?: string }
-  | { type: 'template'; templateName: string; languageCode: string; templateComponents?: unknown[] }
-  | {
+  | ({ type: 'text'; text: string; replyToMessageId?: string } & WithClientId)
+  | ({
+      type: 'template';
+      templateName: string;
+      languageCode: string;
+      templateComponents?: unknown[];
+    } & WithClientId)
+  | ({
       type: 'image' | 'video' | 'audio' | 'document';
       mediaId?: string;
       mediaLink?: string;
       caption?: string;
       filename?: string;
       replyToMessageId?: string;
-    }
-  | { type: 'reaction'; reactToMessageId: string; emoji: string };
+    } & WithClientId)
+  | ({ type: 'reaction'; reactToMessageId: string; emoji: string } & WithClientId);
 
 export async function sendMessage(conversationId: string, body: SendMessageBody): Promise<Message> {
   const res = await apiClient.post<ApiSuccess<Message>>(`/conversations/${conversationId}/messages`, body);
