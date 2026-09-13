@@ -57,7 +57,9 @@ export function BusinessProfileScreen() {
   }
 
   const data = settings.data;
-  const source = SOURCE_COPY[data.customerFacingNameSource];
+  // Indexed defensively: a source this build has no copy for — one added
+  // to the server later — must not take the screen down.
+  const source = SOURCE_COPY[data.customerFacingNameSource] ?? SOURCE_COPY.fallback;
   const displayName = draft ?? data.displayName;
   const dirty = displayName.trim() !== data.displayName;
 

@@ -23,9 +23,31 @@ export interface TenantSettings {
   whatsappVerifiedName: string;
 }
 
+/**
+ * Fills in fields an older server does not send yet.
+ *
+ * The app and the API ship separately, so a phone can always be running a
+ * build newer than the server answering it. Reading
+ * `customerFacingName.slice(...)` off such a response throws, and a throw
+ * during render takes the whole screen down rather than one row of it.
+ */
+function normalize(s: Partial<TenantSettings>): TenantSettings {
+  const displayName = s.displayName ?? '';
+  const name = s.name ?? '';
+  return {
+    name,
+    displayName,
+    // Falls back the same way the server does, so the preview shows
+    // something true rather than an empty header.
+    customerFacingName: s.customerFacingName || displayName || name || 'Support',
+    customerFacingNameSource: s.customerFacingNameSource ?? 'fallback',
+    whatsappVerifiedName: s.whatsappVerifiedName ?? '',
+  };
+}
+
 export async function getTenantSettings(): Promise<TenantSettings> {
-  const res = await apiClient.get<ApiSuccess<TenantSettings>>('/tenant/settings');
-  return res.data.data;
+  const res = await apiClient.get<ApiSuccess<Partial<TenantSettings>>>('/tenant/settings');
+  return normalize(res.data.data);
 }
 
 /**
@@ -38,13 +60,10 @@ export async function updateBusinessProfile(body: { displayName: string }): Prom
   customerFacingNameSource: BusinessNameSource;
   whatsappVerifiedName: string;
 }> {
-  const res = await apiClient.patch<
-    ApiSuccess<{
-      displayName: string;
-      customerFacingName: string;
-      customerFacingNameSource: BusinessNameSource;
-      whatsappVerifiedName: string;
-    }>
-  >('/tenant/settings/profile', body);
-  return res.data.data;
+  const res = await apiClient.patch<ApiSuccess<Partial<TenantSettings>>>(
+    '/tenant/settings/profile',
+    body,
+  );
+  const { name: _name, ...profile } = normalize(res.data.data);
+  return profile;
 }
