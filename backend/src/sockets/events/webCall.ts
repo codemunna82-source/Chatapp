@@ -235,6 +235,15 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
       contactId: String(conversation.contactId),
       whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
       direction: 'OUTBOUND',
+      // Kept, so the ring can be REPLAYED to a customer who opens their
+      // window after the call was placed. The emit below reaches whoever
+      // is in the room right now; without the offer stored, someone who
+      // arrives a second later has nothing to answer and the agent waits
+      // out the full ring timeout for a customer who is right there.
+      //
+      // Cleared the moment the call is answered or ends — see
+      // callLog.repository, which $unsets it on both paths.
+      sdpOffer: payload.sdp,
     });
     // Recorded against the agent who placed it, because that is the one
     // device the customer's answer and candidates have to reach — but the
@@ -350,4 +359,37 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
     });
     logger.debug({ callId: String(ended._id) }, 'Web call ended by agent');
   });
+}
+
+/**
+ * Rings a customer who arrived after the call was placed.
+ *
+ * The invite is emitted once, into the conversation's room. A customer
+ * who opens their link a moment later was never in that room, so the ring
+ * never reached them and the agent sat watching "Calling…" until the
+ * timeout — for someone who was, by then, looking right at the page.
+ *
+ * Only RINGING calls, and only ones that still hold their offer: an
+ * answered call has a peer connection already and its offer has been
+ * cleared, so there is nothing here to replay and nothing that should be.
+ *
+ * Emitted to this one socket rather than the room. The room may hold the
+ * agent and the customer's other tabs, all of which either placed this
+ * call or already heard it.
+ */
+export async function replayRingingWebCall(socket: AppSocket, conversationId: string): Promise<void> {
+  try {
+    const call = await findLiveWebCallForConversation(conversationId);
+    if (!call || call.status !== 'RINGING' || call.direction !== 'OUTBOUND' || !call.sdpOffer) return;
+
+    socket.emit('web:call:incoming', {
+      callId: String(call._id),
+      conversationId,
+      sdp: call.sdpOffer,
+    });
+  } catch (err) {
+    // A ring that cannot be replayed is a missed call, not a broken
+    // connection — the window itself must still open.
+    logger.warn({ err, conversationId }, 'Could not replay a ringing web call to a joining guest');
+  }
 }

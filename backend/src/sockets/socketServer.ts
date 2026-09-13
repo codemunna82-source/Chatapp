@@ -18,7 +18,7 @@ import {
 import { visibleWhatsAppPhoneNumberId } from '../modules/conversations/conversation.access';
 import { registerConversationHandlers } from './events/conversation';
 import { registerTypingHandlers } from './events/typing';
-import { registerGuestCallHandlers, registerAgentWebCallHandlers } from './events/webCall';
+import { registerGuestCallHandlers, replayRingingWebCall, registerAgentWebCallHandlers } from './events/webCall';
 import { hasTurnConfigured } from '../modules/calls/webCall.service';
 import { registerGuestTypingHandlers } from './events/guestTyping';
 import { createSocketRealtimeEmitter } from './realtimeEmitterImpl';
@@ -129,6 +129,12 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
       logger.debug({ conversationId: guest.conversationId, socketId: socket.id }, 'Guest socket connected');
 
       registerGuestCallHandlers(io as AppServer, socket, guest);
+      // A call placed before this window was open is still ringing, and
+      // the invite that carried it was emitted once, into a room this
+      // socket was not yet in. Replayed here so opening the link is what
+      // makes the phone ring — which is exactly what an agent watching
+      // "Calling…" expects to happen the moment the customer arrives.
+      void replayRingingWebCall(socket, guest.conversationId);
       registerGuestTypingHandlers(socket, guest);
 
       // Answer the question the page opens with, rather than leaving it

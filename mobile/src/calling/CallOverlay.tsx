@@ -3,6 +3,7 @@ import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'reac
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallStore } from './callStore';
+import { useGuestPresenceStore } from '../store/guestPresenceStore';
 import { useRinger } from './useRinger';
 import { impactMedium, notifyError } from '../utils/haptics';
 
@@ -123,6 +124,19 @@ export function CallOverlay() {
   const muted = useCallStore((s) => s.muted);
   const connectedAt = useCallStore((s) => s.connectedAt);
   const message = useCallStore((s) => s.message);
+  const callConversationId = useCallStore((s) => s.conversationId);
+  /**
+   * Live, not the word chosen when the call was placed.
+   *
+   * "Ringing" claims a device is audibly ringing at the other end, which
+   * for a web call is only true while the customer has their window
+   * open. They very often open it BECAUSE the call went out — and at
+   * that moment the server replays the ring to them, so the overlay has
+   * to stop saying "Calling…" in the same breath.
+   */
+  const guestPresent = useGuestPresenceStore((s) =>
+    callConversationId ? Boolean(s.open[callConversationId]) : false,
+  );
   const answer = useCallStore((s) => s.answer);
   const reject = useCallStore((s) => s.reject);
   const hangUp = useCallStore((s) => s.hangUp);
@@ -168,7 +182,11 @@ export function CallOverlay() {
               A WhatsApp call sets nothing, and falls through to the
               generic word, which is all that can be said about a call
               handed to Meta to deliver. */}
-          {phase === 'connecting' ? <Text style={styles.status}>{message ?? 'Connecting…'}</Text> : null}
+          {phase === 'connecting' ? (
+            <Text style={styles.status}>
+              {callConversationId ? (guestPresent ? 'Ringing…' : 'Calling…') : (message ?? 'Connecting…')}
+            </Text>
+          ) : null}
           {phase === 'active' && connectedAt ? <CallDuration connectedAt={connectedAt} /> : null}
           {phase === 'ended' || phase === 'failed' ? (
             <Text style={[styles.status, phase === 'failed' && styles.statusError]}>{message ?? 'Call ended'}</Text>

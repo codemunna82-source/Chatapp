@@ -71,6 +71,13 @@ interface CallState {
    */
   channel: 'meta' | 'web';
   callId: string | null;
+  /**
+   * The conversation an OUTGOING web call is ringing in, so the overlay
+   * can watch that customer's presence and stop saying "Calling…" the
+   * moment they open their window. Null for a WhatsApp call, which has
+   * no window to watch.
+   */
+  conversationId: string | null;
   contactName: string | null;
   fromPhone: string | null;
   sdpOffer: string | null;
@@ -159,6 +166,7 @@ const IDLE = {
   phase: 'idle' as CallPhase,
   channel: 'meta' as const,
   callId: null,
+  conversationId: null,
   contactName: null,
   fromPhone: null,
   sdpOffer: null,
@@ -242,7 +250,12 @@ export const useCallStore = create<CallState>((set, get) => ({
       ...IDLE,
       phase: 'connecting',
       channel: 'web',
+      conversationId,
       contactName,
+      // The starting word only. Once the call is up the overlay follows
+      // the customer's live presence instead — someone who opens their
+      // window mid-call turns this from Calling into Ringing, and the
+      // server replays the ring to them at the same moment.
       message: present ? 'Ringing…' : 'Calling…',
     });
 
