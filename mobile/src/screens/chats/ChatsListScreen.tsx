@@ -30,6 +30,9 @@ import type { Conversation } from '../../api/types';
 
 type Props = NativeStackScreenProps<ChatsStackParamList, 'ChatsList'>;
 
+/** Module scope: a stable identity FlashList can rely on across renders. */
+const keyExtractor = (item: Conversation) => item.id;
+
 export function ChatsListScreen({ navigation }: Props) {
   const { colors, spacing, radius, typography, shadow } = useTheme();
   const [search, setSearch] = useState('');
@@ -198,6 +201,32 @@ export function ChatsListScreen({ navigation }: Props) {
     [handleOpen, handleLongPress, selectionMode, selectedIds],
   );
 
+  // Stable identities for everything handed to FlashList. Each of these
+  // was an inline literal, which meant a new prop value on every render
+  // and a list that could not skip any of the work it had already done.
+  const Separator = useCallback(
+    () => (
+      <View
+        style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginLeft: 84 }}
+      />
+    ),
+    [colors.divider],
+  );
+  const handleEndReached = useCallback(() => {
+    if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
+  }, [query]);
+  const refreshControl = useMemo(
+    () => (
+      <RefreshControl
+        refreshing={query.isRefetching}
+        onRefresh={() => void query.refetch()}
+        tintColor={colors.primary}
+      />
+    ),
+    [query, colors.primary],
+  );
+  const listContentStyle = useMemo(() => ({ paddingBottom: spacing.lg }), [spacing.lg]);
+
   const showSkeleton = query.isLoading;
   const showEmpty = !showSkeleton && conversations.length === 0;
 
@@ -278,21 +307,18 @@ export function ChatsListScreen({ navigation }: Props) {
       ) : (
         <FlashList
           data={conversations}
-          keyExtractor={(item: Conversation) => item.id}
+          keyExtractor={keyExtractor}
           renderItem={renderItem}
-          ItemSeparatorComponent={() => (
-            <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.divider, marginLeft: 84 }} />
-          )}
-          refreshControl={
-            <RefreshControl refreshing={query.isRefetching} onRefresh={() => query.refetch()} tintColor={colors.primary} />
-          }
-          onEndReached={() => {
-            if (query.hasNextPage && !query.isFetchingNextPage) {
-              query.fetchNextPage();
-            }
-          }}
+          // Memoized, not an inline arrow. An arrow here is a NEW COMPONENT
+          // TYPE on every render of this screen, so React threw away and
+          // rebuilt every separator in the list each time anything changed
+          // — a search keystroke, a selection, an incoming message. That is
+          // a full unmount/remount cycle per row, for a hairline.
+          ItemSeparatorComponent={Separator}
+          refreshControl={refreshControl}
+          onEndReached={handleEndReached}
           onEndReachedThreshold={0.5}
-          contentContainerStyle={{ paddingBottom: spacing.lg }}
+          contentContainerStyle={listContentStyle}
         />
       )}
 

@@ -32,6 +32,9 @@ interface MessageSearchPanelProps {
  * second place to look. Toggling Starred keeps whatever is typed, so
  * "starred messages mentioning invoice" works without a separate filter UI.
  */
+/** Module scope: a stable identity the list can rely on across renders. */
+const keyExtractor = (m: Message) => m.id;
+
 export function MessageSearchPanel({
   search,
   onChangeSearch,
@@ -44,6 +47,11 @@ export function MessageSearchPanel({
   onEndReached,
 }: MessageSearchPanelProps) {
   const { colors, spacing, radius, typography } = useTheme();
+
+  const Separator = React.useCallback(
+    () => <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.divider }} />,
+    [colors.divider],
+  );
 
   const renderItem = ({ item }: { item: Message }) => (
     <Pressable
@@ -127,14 +135,15 @@ export function MessageSearchPanel({
       ) : (
         <FlashList
           data={results}
-          keyExtractor={(m: Message) => m.id}
+          keyExtractor={keyExtractor}
           renderItem={renderItem}
           keyboardShouldPersistTaps="handled"
           onEndReached={onEndReached}
           onEndReachedThreshold={0.5}
-          ItemSeparatorComponent={() => (
-            <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.divider }} />
-          )}
+          // Memoized rather than inline: this list re-renders on every
+          // keystroke, and an arrow here is a new component type each
+          // time, so React rebuilt every separator per character typed.
+          ItemSeparatorComponent={Separator}
         />
       )}
     </View>

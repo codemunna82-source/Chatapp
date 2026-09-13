@@ -17,6 +17,7 @@ export function SettingsStackNavigator() {
   return (
     <Stack.Navigator
       screenOptions={{
+        freezeOnBlur: true,
         headerStyle: { backgroundColor: colors.surface },
         headerTintColor: colors.textPrimary,
       }}

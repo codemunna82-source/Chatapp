@@ -14,6 +14,11 @@ export function ChatsStackNavigator() {
       screenOptions={{
         headerStyle: { backgroundColor: colors.surface },
         headerTintColor: colors.textPrimary,
+        // The chat list keeps re-rendering behind an open conversation
+        // otherwise — it is subscribed to the same conversation cache the
+        // open chat is patching, so every message repainted a list that
+        // was completely covered.
+        freezeOnBlur: true,
       }}
     >
       <Stack.Screen name="ChatsList" component={ChatsListScreen} options={{ title: 'Chats' }} />

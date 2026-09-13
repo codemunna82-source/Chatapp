@@ -18,6 +18,26 @@ export function useMessages(conversationId: string | undefined) {
     initialPageParam: undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: Boolean(conversationId),
+    /**
+     * A thread is kept fresh by the socket, not by refetching it.
+     *
+     * Every new message, status change and read receipt is pushed and
+     * merged straight into this cache (see RealtimeSync), and a dropped
+     * socket invalidates messagesAll on reconnect — so the 30s default
+     * was spending a request on data that was already correct every time
+     * a chat was reopened or the app came back to the foreground.
+     */
+    staleTime: 5 * 60_000,
+    /**
+     * Reopening a recent chat should be instant.
+     *
+     * The 5-minute default meant a conversation you left ten minutes ago
+     * came back as a full-screen skeleton and a round trip, even though
+     * nothing in it had changed. Half an hour covers the way people
+     * actually use an inbox — in and out of the same few threads — at the
+     * cost of some text held in memory.
+     */
+    gcTime: 30 * 60_000,
   });
 }
 

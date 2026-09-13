@@ -49,6 +49,15 @@ export function MainTabNavigator() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        // A tab you cannot see stops rendering entirely.
+        //
+        // Without this, all four tabs stayed live: every cache patch —
+        // and RealtimeSync makes one per incoming message — re-rendered
+        // the Dashboard's charts and the call log behind whatever the
+        // user was actually looking at. On a busy inbox that is a steady
+        // drip of work for pixels nobody can see, and it comes out of the
+        // same frame budget as the chat they ARE looking at.
+        freezeOnBlur: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
