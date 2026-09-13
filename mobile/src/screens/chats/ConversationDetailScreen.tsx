@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Keyboard, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   KeyboardState,
   useAnimatedKeyboard,
   useAnimatedStyle,
+  useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
@@ -167,10 +168,40 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // the pad falls back to the navigation bar inset.
   const keyboard = useAnimatedKeyboard();
   const insets = useSafeAreaInsets();
+
+  /**
+   * 1 once JS has seen the keyboard go away, 0 once it comes back.
+   *
+   * The state check above was not enough on its own. Dismissing the IME
+   * with the Android back button does not always move useAnimatedKeyboard
+   * out of OPEN — it is left holding both the state and the last height,
+   * so the composer stayed padded up by a keyboard that was no longer on
+   * screen, and the gap survived until the screen was left and reopened.
+   * That is exactly the "press back and the space stays" report.
+   *
+   * keyboardDidHide is the reliable half of RN's JS keyboard events under
+   * edge-to-edge — the heights it reports are not trustworthy there, but
+   * "it went away" is — so it is used for that one bit and nothing else.
+   */
+  const keyboardGone = useSharedValue(1);
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', () => {
+      keyboardGone.value = 0;
+    });
+    const hidden = Keyboard.addListener('keyboardDidHide', () => {
+      keyboardGone.value = 1;
+    });
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, [keyboardGone]);
+
   const keyboardPadStyle = useAnimatedStyle(() => {
     const up =
-      keyboard.state.value === KeyboardState.OPEN ||
-      keyboard.state.value === KeyboardState.OPENING;
+      keyboardGone.value === 0 &&
+      (keyboard.state.value === KeyboardState.OPEN ||
+        keyboard.state.value === KeyboardState.OPENING);
     return { paddingBottom: up ? Math.max(keyboard.height.value, insets.bottom) : insets.bottom };
   });
 
@@ -594,18 +625,26 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               />
             )}
           </Pressable>
-          {contactId ? (
+          {/* Only while the customer is actually in the private window.
+              The button used to show whenever the chat had a contact, so
+              it offered a call to someone with nothing to ring: the web
+              call needs the customer's page open to answer on, and a live
+              LINK is not the same as a live window — a link sits in a
+              WhatsApp thread for a month whether or not anyone opened it.
+              An icon that places a call nobody can pick up is worse than
+              an icon that appears when the call will connect. */}
+          {contactId && guestOnline ? (
           <Pressable
             onPress={handleCall}
             disabled={callPending}
             style={styles.headerAction}
             accessibilityRole="button"
             accessibilityState={{ disabled: callPending }}
-            accessibilityLabel="Call this contact"
+            accessibilityLabel="Call this customer in the private chat"
           >
             {({ pressed }) => (
               <Ionicons
-                name="call-outline"
+                name="call"
                 size={22}
                 color={callPending ? 'rgba(255,255,255,0.5)' : '#FFFFFF'}
                 style={{ opacity: pressed ? 0.5 : 1 }}

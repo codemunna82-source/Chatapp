@@ -16,7 +16,19 @@ let socket: Socket | null = null;
 function createSocket(): Socket {
   return io(socketUrl, {
     autoConnect: false,
-    transports: ['websocket'],
+    // WebSocket first, but not WebSocket only — and this is what fixed a
+    // permanent "Reconnecting" banner. Plenty of mobile networks, captive
+    // portals and corporate proxies pass ordinary HTTP and quietly refuse
+    // the WebSocket upgrade. With a single transport there is nothing to
+    // fall back to, so the socket retried forever, the banner never left,
+    // and REST polling carried the messages — the app looked permanently
+    // broken while working.
+    //
+    // tryAllTransports is what actually makes the list a list: without it
+    // socket.io gives up after the first entry fails instead of trying
+    // the next one.
+    transports: ['websocket', 'polling'],
+    tryAllTransports: true,
     auth: (cb) => cb({ token: useAuthStore.getState().accessToken }),
     // Explicit reconnection policy rather than socket.io's defaults, which
     // assume a desktop browser. A phone drops the socket constantly moving
@@ -39,6 +51,13 @@ function createSocket(): Socket {
 export function getSocket(): Socket {
   if (!socket) {
     socket = createSocket();
+    // Nothing else surfaces a handshake failure. A rejected token or a
+    // blocked transport looked exactly like a slow network from the
+    // outside: the banner said "Reconnecting" and no reason for it
+    // existed anywhere. In dev this is the first thing worth seeing.
+    socket.on('connect_error', (err) => {
+      if (__DEV__) console.warn('[socket] connect_error', err.message);
+    });
   }
   return socket;
 }
