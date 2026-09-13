@@ -21,6 +21,22 @@ export function toRealtimeMessage(doc: MessageLean): RealtimeMessagePayload {
     sentAt: doc.sentAt ? doc.sentAt.toISOString() : undefined,
     deliveredAt: doc.deliveredAt ? doc.deliveredAt.toISOString() : undefined,
     readAt: doc.readAt ? doc.readAt.toISOString() : undefined,
+    // Only when the coordinates are actually there. A location stored
+    // before this field existed has its text line and nothing else, which
+    // renders as an ordinary message rather than as a pin at (0, 0) off
+    // the coast of Ghana.
+    location:
+      doc.type === 'location' &&
+      doc.location &&
+      typeof doc.location.latitude === 'number' &&
+      typeof doc.location.longitude === 'number'
+        ? {
+            latitude: doc.location.latitude,
+            longitude: doc.location.longitude,
+            name: doc.location.name ?? undefined,
+            address: doc.location.address ?? undefined,
+          }
+        : undefined,
     createdAt: doc.createdAt.toISOString(),
   };
 }

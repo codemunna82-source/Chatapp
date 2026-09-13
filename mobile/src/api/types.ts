@@ -153,6 +153,8 @@ export interface Message {
    * people see just before they force-quit the app and send it again.
    */
   uploadProgress?: number;
+  /** Where a `type: 'location'` message points. Absent on older rows. */
+  location?: { latitude: number; longitude: number; name?: string; address?: string };
   replyToMessageId?: string;
   status: MessageStatus;
   senderId?: string;

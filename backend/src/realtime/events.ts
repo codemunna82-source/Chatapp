@@ -27,6 +27,16 @@ export interface RealtimeMessagePayload {
   sentAt?: string;
   deliveredAt?: string;
   readAt?: string;
+  /**
+   * Where a `type: 'location'` message points.
+   *
+   * It was missing here, so the app received the coordinates only as the
+   * one-line `text` the server builds for previews — and rendered that
+   * literally: "Location (22.594133, 88.393396)" in a text bubble, where
+   * every other client draws a map card. The data was in the database the
+   * whole time; this is the hop it never made.
+   */
+  location?: { latitude: number; longitude: number; name?: string; address?: string };
   createdAt: string;
 }
 

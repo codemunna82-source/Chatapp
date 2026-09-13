@@ -7,6 +7,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { formatMessageTime } from '../../utils/formatTime';
 import { MessageStatusIcon } from './MessageStatusIcon';
 import { MediaImage } from './MediaImage';
+import { LocationBubble } from './LocationBubble';
 import { MediaFileChip } from './MediaFileChip';
 import { VideoMessageBubble } from './VideoMessageBubble';
 import { AudioMessageBubble } from './AudioMessageBubble';
@@ -56,13 +57,29 @@ const BLEED_FRAME = 3;
 function isEdgeToEdgeMedia(message: Message): boolean {
   if (message.type === 'image') return Boolean(message.mediaId || message.localUri);
   if (message.type === 'video') return Boolean(message.mediaId || message.localUri);
+  // The location card is a full-width card like a photo: inset by the
+  // bubble's padding it would sit in a frame of background colour.
+  if (message.type === 'location') return Boolean(message.location);
   return false;
+}
+
+/**
+ * Whether the rendered content already prints the message's own text.
+ *
+ * The location card prints the place name and the coordinates inside
+ * itself. Without this, the text block below ALSO printed the server's
+ * one-line preview — "Location (22.594133, 88.393396)" — so the card came
+ * with a copy of itself stapled underneath.
+ */
+function rendersOwnText(message: Message): boolean {
+  return message.type === 'location' && Boolean(message.location);
 }
 
 /** Whether MessageContent will render something for this message, as opposed to falling through to a type label. */
 function hasRenderableMedia(message: Message): boolean {
   if (message.type === 'image' || message.type === 'video') return Boolean(message.mediaId || message.localUri);
   if (message.type === 'audio' || message.type === 'document') return Boolean(message.mediaId);
+  if (message.type === 'location') return Boolean(message.location);
   return false;
 }
 
@@ -118,6 +135,13 @@ function MessageContent({
         onLongPress={onLongPress}
       />
     );
+  }
+  // Only when the coordinates actually came through. A location stored
+  // before the server sent this field has its text line and nothing else,
+  // which renders as an ordinary message below rather than as a pin at
+  // (0, 0) off the coast of Ghana.
+  if (message.type === 'location' && message.location) {
+    return <LocationBubble place={message.location} onLongPress={onLongPress} />;
   }
   if (message.type === 'document' && message.mediaId) {
     return <MediaFileChip mediaId={message.mediaId} type={message.type} onLongPress={onLongPress} />;
@@ -329,7 +353,7 @@ function MessageBubbleImpl({
             captioned photo read as one undifferentiated smudge. For a
             plain text message this IS the message, and the branch is the
             same either way. */}
-        {message.text ? (
+        {message.text && !rendersOwnText(message) ? (
           <View style={insetWhenBleeding}>
             <Text style={[typography.body, { color: textColor }]}>{message.text}</Text>
           </View>

@@ -9,7 +9,7 @@ import type { ExpoConfig, ConfigContext } from 'expo/config';
 // every build so far — bumping it here since an unchanged versionCode on a
 // same-package/same-signature reinstall can make Android's installer treat
 // a new APK as a no-op if the previous copy isn't uninstalled first.
-const ANDROID_VERSION_CODE = 8;
+const ANDROID_VERSION_CODE = 9;
 
 // Resolved from this file's own directory rather than the working
 // directory, so the config behaves the same whether Expo is invoked from
