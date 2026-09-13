@@ -58,7 +58,18 @@ const RECORDER_POLL_MS = 100;
 const MAX_IMAGES_PER_SEND = 10;
 const INPUT_MIN_HEIGHT = 22;
 const INPUT_MAX_HEIGHT = 120;
-const BAR_FACTORS = [0.45, 0.75, 1, 0.75, 0.45];
+/**
+ * The waveform's shape, one entry per bar.
+ *
+ * Five bars read as a status icon; this many read as a recording, which
+ * is what the row is for. The pattern is fixed and the AMPLITUDE is
+ * live — so the trail keeps a recognisable silhouette and still rises
+ * and falls with the voice, instead of every bar moving as one block.
+ */
+const BAR_FACTORS = [
+  0.25, 0.45, 0.7, 0.95, 0.6, 0.35, 0.8, 1, 0.55, 0.3, 0.65, 0.9, 0.45, 0.75, 1, 0.5, 0.3, 0.6,
+  0.85, 0.4, 0.7, 0.95, 0.55, 0.35, 0.8, 0.6, 0.3, 0.5,
+];
 // expo-audio reports metering in dBFS — roughly -60 (near silence) up to 0
 // (peak). There's no fixed noise floor across devices, so this is a
 // reasonable approximation for turning it into a 0..1 bar height, not a
@@ -85,7 +96,9 @@ function WaveformBar({ level, color }: { level: number; color: string }) {
 
 function RecordingWaveform({ metering, color }: { metering: number | undefined; color: string }) {
   return (
-    <View style={styles.waveform}>
+    // flex, so the trail runs the width of the panel between the timer and
+    // its edge rather than sitting as a small fixed clump.
+    <View style={[styles.waveform, styles.waveformFill]}>
       {BAR_FACTORS.map((factor, i) => (
         <WaveformBar key={i} level={normalizeMetering(metering) * factor} color={color} />
       ))}
@@ -126,7 +139,12 @@ function RecordingReadout({
   return (
     <View style={styles.recordingRow}>
       <View style={[styles.recordingDot, { backgroundColor: dotColor }]} />
-      <Text style={[textStyle, { color: textColor, marginRight: gap }]}>{formatDuration(state.durationMillis / 1000)}</Text>
+      {/* tabular-nums equivalent: a fixed width, because the timer is
+          beside a waveform and a digit changing width would shunt the
+          whole trail sideways once a second. */}
+      <Text style={[textStyle, styles.recordingTime, { color: textColor, marginRight: gap }]}>
+        {formatDuration(state.durationMillis / 1000)}
+      </Text>
       <RecordingWaveform metering={paused ? 0 : state.metering} color={waveColor} />
     </View>
   );
@@ -337,7 +355,6 @@ export function Composer({
   const [isPaused, setIsPaused] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [recordedMs, setRecordedMs] = useState(0);
 
   const previewPlayer = useAudioPlayer(previewUri ?? undefined);
   const previewStatus = useAudioPlayerStatus(previewPlayer);
@@ -411,11 +428,15 @@ export function Composer({
     }
   };
 
-  /** Stops the recorder and moves to the preview state — the mic is released here. */
-  const stopRecording = async () => {
-    // Read straight from the recorder rather than the (up to 100ms stale)
-    // polled snapshot.
-    const duration = recorder.getStatus().durationMillis;
+  /**
+   * The green button on the recording panel: stop, and send.
+   *
+   * One tap, as the messenger has it. Stopping into a preview and making
+   * the user tap send again is a second decision for something they have
+   * already decided.
+   */
+  const stopAndSend = async () => {
+    if (sendingRef.current) return;
     try {
       await recorder.stop();
     } catch {
@@ -423,16 +444,14 @@ export function Composer({
     }
     setIsRecording(false);
     setIsPaused(false);
-    // Back out of record mode so playback routes to the speaker rather than
-    // the earpiece, and the mic indicator clears.
     await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
+
     const uri = recorder.uri;
     if (!uri) {
       setVoiceError('That recording came back empty — try again.');
       return;
     }
-    setRecordedMs(duration);
-    setPreviewUri(uri);
+    await sendRecording({ uri });
   };
 
   const togglePauseResume = () => {
@@ -467,7 +486,6 @@ export function Composer({
     setVoiceError(null);
     const uri = previewUri ?? recorder.uri;
     setPreviewUri(null);
-    setRecordedMs(0);
     if (uri) await deleteFile(uri);
   };
 
@@ -486,14 +504,22 @@ export function Composer({
    * until the upload succeeds — it is what the pending bubble plays from,
    * and it is the only copy if the send fails.
    */
-  const sendRecording = async () => {
-    if (!previewUri || sendingRef.current) return;
+  /**
+   * @param take the file to send, when the caller already has it.
+   *
+   * Sending straight from the recording panel stops the recorder and has
+   * the uri in hand immediately; waiting for setPreviewUri to land first
+   * would put a React render between the tap and the send, and on a slow
+   * frame that reads as the button having done nothing.
+   */
+  const sendRecording = async (take?: { uri: string }) => {
+    const uri = take?.uri ?? previewUri;
+    if (!uri || sendingRef.current) return;
     if (!whatsappPhoneNumberId) {
       setVoiceError('This conversation has no connected WhatsApp number yet.');
       return;
     }
     sendingRef.current = true;
-    const uri = previewUri;
     const tempId = `local-voice-${Date.now()}`;
 
     // Straight into the chat, before the upload even starts.
@@ -504,7 +530,6 @@ export function Composer({
       replyToMessageId,
     });
     setPreviewUri(null);
-    setRecordedMs(0);
     setVoiceError(null);
     onSent();
 
@@ -572,18 +597,11 @@ export function Composer({
     return (
       <View style={shellStyle}>
         {errorText ? <Text style={[typography.caption, { color: colors.danger, marginBottom: 4 }]}>{errorText}</Text> : null}
-        <View style={styles.row}>
-          <Pressable
-            onPress={discardRecording}
-            style={styles.iconButton}
-            accessibilityRole="button"
-            accessibilityLabel="Discard recording"
-          >
-            {({ pressed }) => (
-              <Ionicons name="trash-outline" size={22} color={colors.danger} style={{ opacity: pressed ? 0.5 : 1 }} />
-            )}
-          </Pressable>
-
+        {/* Two rows, as the messenger has it. Everything used to be on
+            one, which left the waveform a stub between four controls and
+            made the three actions compete for the same glance. Above:
+            what is being recorded. Below: what can be done about it. */}
+        <View style={styles.recordTop}>
           <RecordingReadout
             recorder={recorder}
             paused={isPaused}
@@ -593,32 +611,58 @@ export function Composer({
             textStyle={typography.bodyMedium}
             gap={spacing.sm}
           />
+        </View>
 
+        <View style={[styles.recordBottom, { marginTop: spacing.sm }]}>
+          <Pressable
+            onPress={discardRecording}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Discard recording"
+          >
+            {({ pressed }) => (
+              // A pale disc behind it, so discarding reads as its own
+              // deliberate action rather than as one more grey glyph in
+              // a row of them.
+              <View style={[styles.recordChip, { backgroundColor: colors.dangerMuted, opacity: pressed ? 0.6 : 1 }]}>
+                <Ionicons name="trash-outline" size={20} color={colors.danger} />
+              </View>
+            )}
+          </Pressable>
+
+          {/* Labelled, and in the middle. Pause is the control someone
+              reaches for mid-sentence, and an unlabelled glyph between a
+              bin and a send button is the one moment to be sure which is
+              which. */}
           <Pressable
             onPress={togglePauseResume}
-            style={styles.iconButton}
+            hitSlop={8}
+            style={styles.recordPause}
             accessibilityRole="button"
             accessibilityLabel={isPaused ? 'Resume recording' : 'Pause recording'}
           >
             {({ pressed }) => (
-              <Ionicons
-                name={isPaused ? 'play' : 'pause'}
-                size={20}
-                color={colors.textSecondary}
-                style={{ opacity: pressed ? 0.5 : 1 }}
-              />
+              <View style={[styles.recordPauseInner, { opacity: pressed ? 0.5 : 1 }]}>
+                <Ionicons name={isPaused ? 'play' : 'pause'} size={18} color={colors.textSecondary} />
+                <Text style={[typography.bodyMedium, { color: colors.textSecondary, marginLeft: spacing.xs }]}>
+                  {isPaused ? 'Resume' : 'Pause'}
+                </Text>
+              </View>
             )}
           </Pressable>
 
+          {/* Stop AND send, in one tap. The old red stop button dropped
+              the take into a preview and asked for a second tap to send
+              it — a second decision about something already decided. */}
           <Pressable
-            onPress={stopRecording}
-            style={styles.actionTouch}
+            onPress={() => void stopAndSend()}
+            hitSlop={8}
             accessibilityRole="button"
-            accessibilityLabel="Stop recording"
+            accessibilityLabel="Send voice message"
           >
             {({ pressed }) => (
-              <View style={[styles.actionCircle, { backgroundColor: colors.danger, opacity: pressed ? 0.6 : 1 }]}>
-                <Ionicons name="stop" size={18} color={colors.textOnPrimary} />
+              <View style={[styles.recordChip, { backgroundColor: colors.primary, opacity: pressed ? 0.6 : 1 }]}>
+                <Ionicons name="send" size={18} color={colors.textOnPrimary} />
               </View>
             )}
           </Pressable>
@@ -666,17 +710,23 @@ export function Composer({
               )}
             </Pressable>
             <Text style={[typography.bodyMedium, { color: colors.textPrimary }]}>
+              {/* The player is the only thing that knows how long this
+                  take is now. It used to fall back to a duration captured
+                  when the recorder stopped — but the only route left to
+                  this screen is a send that failed, where the file is
+                  already on disk and the player loads it. A fallback that
+                  can only ever read zero is worse than none. */}
               {formatDuration(
-                (previewStatus.isLoaded && previewStatus.duration > 0
+                previewStatus.isLoaded && previewStatus.duration > 0
                   ? previewStatus.duration - previewStatus.currentTime
-                  : recordedMs / 1000) || 0,
+                  : 0,
               )}
             </Text>
             <Text style={[typography.caption, { color: colors.textTertiary, marginLeft: spacing.sm }]}>Voice message</Text>
           </View>
 
           <Pressable
-            onPress={sendRecording}
+            onPress={() => void sendRecording()}
             style={styles.actionTouch}
             accessibilityRole="button"
             accessibilityLabel="Send voice message"
@@ -833,5 +883,12 @@ const styles = StyleSheet.create({
   recordingRow: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4 },
   recordingDot: { width: 9, height: 9, borderRadius: 5, marginRight: 8 },
   waveform: { flexDirection: 'row', alignItems: 'center' },
+  recordTop: { flexDirection: 'row', alignItems: 'center' },
+  recordBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  recordChip: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  recordPause: { flex: 1, alignItems: 'center' },
+  recordPauseInner: { flexDirection: 'row', alignItems: 'center' },
+  recordingTime: { minWidth: 46 },
+  waveformFill: { flex: 1 },
   waveformBar: { width: 3, borderRadius: 2, marginHorizontal: 2 },
 });
