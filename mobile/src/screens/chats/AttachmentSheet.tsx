@@ -158,10 +158,14 @@ export function AttachmentSheet({
    * `submit` handles one attachment and is simply called for each — it was
    * just never asked for more than one.
    *
-   * Sequential rather than parallel, so the bubbles land in the order they
-   * were picked. Ten at a time matches the composer's own limit, and the
-   * point of a limit at all is that fifty photos over mobile data is not
-   * a thing anyone meant to do.
+   * Ten at a time matches the composer's own limit, and the point of a
+   * limit at all is that fifty photos over mobile data is not a thing
+   * anyone meant to do.
+   *
+   * Every bubble goes on screen first, then the uploads race. They ran one
+   * after another — five photos meant five round trips end to end, with
+   * the connection idle for four of them. Only the SENDS have to stay in
+   * picked order, which is why those are still sequential.
    */
   const pickFromLibrary = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -170,19 +174,65 @@ export function AttachmentSheet({
       selectionLimit: MAX_ATTACHMENTS_PER_PICK,
       quality: 0.8,
     });
-    if (result.canceled) return;
+    if (result.canceled || !whatsappPhoneNumberId) {
+      if (!result.canceled) setError('This conversation has no connected WhatsApp number yet.');
+      return;
+    }
 
-    for (const asset of result.assets) {
+    const batch = Date.now();
+    const pending = result.assets.map((asset, i) => {
       const type: SendableMediaType = asset.type === 'video' ? 'video' : 'image';
-      await submit(
-        {
+      return {
+        type,
+        tempId: `local-attach-${batch}-${i}`,
+        file: {
           uri: asset.uri,
-          name: asset.fileName ?? `attachment.${type === 'video' ? 'mp4' : 'jpg'}`,
+          name: asset.fileName ?? `attachment-${batch}-${i}.${type === 'video' ? 'mp4' : 'jpg'}`,
           mimeType: asset.mimeType ?? (type === 'video' ? 'video/mp4' : 'image/jpeg'),
         },
+      };
+    });
+
+    setError(null);
+    for (const { type, tempId, file } of pending) {
+      insertPendingMediaMessage(queryClient, conversationId, {
+        tempId,
         type,
-      );
+        localUri: file.uri,
+        replyToMessageId,
+      });
     }
+    onSent();
+    sheetRef.current?.dismiss();
+
+    // allSettled, not all: one file the server rejects must not take the
+    // rest down with it.
+    const results = await Promise.allSettled(
+      pending.map(({ tempId, file }) =>
+        uploadMedia.mutateAsync({
+          whatsappPhoneNumberId,
+          file,
+          onProgress: (fraction) =>
+            patchUploadProgressInCache(queryClient, conversationId, tempId, fraction),
+        }),
+      ),
+    );
+
+    let failure: unknown = null;
+    for (let i = 0; i < results.length; i++) {
+      const outcome = results[i]!;
+      const { tempId, type } = pending[i]!;
+      removeMessageFromCache(queryClient, conversationId, tempId);
+      if (outcome.status === 'fulfilled') {
+        sendMessage.mutate({ type, mediaId: outcome.value.id, replyToMessageId });
+      } else if (!failure) {
+        failure = outcome.reason;
+      }
+    }
+
+    // One message however many failed, and to the screen rather than the
+    // sheet — the sheet is already gone by now.
+    if (failure) onUploadFailed?.(getApiErrorMessage(failure, 'Could not send that.'));
   };
 
   const pickFromCamera = async () => {

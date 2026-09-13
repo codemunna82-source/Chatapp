@@ -208,26 +208,39 @@ export function Composer({
       }
       setMediaError(null);
 
-      // Sequential so the bubbles land in the order they were picked.
-      for (let i = 0; i < assets.length; i++) {
-        const asset = assets[i];
-        if (!asset) continue;
-        const tempId = `local-${Date.now()}-${i}`;
+      const batch = Date.now();
 
-        // Straight into the chat, before the upload even starts.
+      // Every bubble on screen first, then every upload at once.
+      //
+      // These used to run one after another, each waiting for the last to
+      // finish — so picking five photos meant five round trips end to end
+      // and four of the connection sitting idle. They are independent
+      // requests; the only thing that has to stay ordered is the SENDS,
+      // which is why the uploads race and the sends do not.
+      const pending = assets.filter(Boolean).map((asset, i) => ({
+        asset,
+        tempId: `local-${batch}-${i}`,
+      }));
+
+      for (const { asset, tempId } of pending) {
         insertPendingMediaMessage(queryClient, conversationId, {
           tempId,
           type: 'image',
           localUri: asset.uri,
           replyToMessageId,
         });
+      }
 
-        try {
-          const uploaded = await uploadMedia.mutateAsync({
+      // allSettled, not all: one photo the server rejects must not take
+      // the other four down with it. Each result is paired with its own
+      // bubble so a failure removes exactly that one.
+      const results = await Promise.allSettled(
+        pending.map(({ asset, tempId }, i) =>
+          uploadMedia.mutateAsync({
             whatsappPhoneNumberId,
             file: {
               uri: asset.uri,
-              name: asset.fileName ?? `image-${Date.now()}-${i}.jpg`,
+              name: asset.fileName ?? `image-${batch}-${i}.jpg`,
               mimeType: asset.mimeType ?? 'image/jpeg',
             },
             // Onto the bubble already on screen, so a big photo on a slow
@@ -235,17 +248,30 @@ export function Composer({
             // be told apart from a stall.
             onProgress: (fraction) =>
               patchUploadProgressInCache(queryClient, conversationId, tempId, fraction),
-          });
-          // The real send replaces the placeholder with its own optimistic
-          // entry, so drop ours first to avoid a duplicate bubble.
-          removeMessageFromCache(queryClient, conversationId, tempId);
-          sendMessage.mutate({ type: 'image', mediaId: uploaded.id, replyToMessageId });
-        } catch (err) {
-          removeMessageFromCache(queryClient, conversationId, tempId);
-          setMediaError(getApiErrorMessage(err, 'Could not send that photo.'));
-          break;
+          }),
+        ),
+      );
+
+      // In picked order, whatever order the uploads finished in — the
+      // server timestamps each send as it arrives, and out-of-order sends
+      // would shuffle the album.
+      let failure: unknown = null;
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]!;
+        const tempId = pending[i]!.tempId;
+        // The real send replaces the placeholder with its own optimistic
+        // entry, so drop ours first to avoid a duplicate bubble.
+        removeMessageFromCache(queryClient, conversationId, tempId);
+        if (result.status === 'fulfilled') {
+          sendMessage.mutate({ type: 'image', mediaId: result.value.id, replyToMessageId });
+        } else if (!failure) {
+          failure = result.reason;
         }
       }
+
+      // One message however many failed: five identical errors stacked up
+      // says nothing the first one did not.
+      if (failure) setMediaError(getApiErrorMessage(failure, 'Could not send that photo.'));
       onSent();
     },
     [whatsappPhoneNumberId, queryClient, conversationId, replyToMessageId, uploadMedia, sendMessage, onSent],

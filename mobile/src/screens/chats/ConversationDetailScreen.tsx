@@ -26,6 +26,7 @@ import { MessageActionSheet } from './MessageActionSheet';
 import { TemplatePickerSheet } from './TemplatePickerSheet';
 import * as ImagePicker from 'expo-image-picker';
 import { ChatHeaderTitle } from './ChatHeaderTitle';
+import { AlbumBubble } from './AlbumBubble';
 import { useUploadContactAvatar } from '../../queries/useContacts';
 import { useGuestPresenceStore } from '../../store/guestPresenceStore';
 import { MessageInfoSheet } from './MessageInfoSheet';
@@ -71,20 +72,89 @@ import type { SendMessageBody } from '../../api/endpoints/messages';
 
 type Props = NativeStackScreenProps<ChatsStackParamList, 'ConversationDetail'>;
 
-type RenderItem = { kind: 'message'; id: string; message: Message } | { kind: 'separator'; id: string; iso: string };
+type RenderItem =
+  | { kind: 'message'; id: string; message: Message }
+  | { kind: 'album'; id: string; messages: Message[] }
+  | { kind: 'separator'; id: string; iso: string };
+
+/**
+ * How far apart two photos can be and still be one album.
+ *
+ * Generous, because a batch of five uploads over mobile data does not
+ * land in the same second — and a batch that half-grouped, into a grid
+ * plus two loose bubbles, would look more broken than no grouping at all.
+ */
+const ALBUM_WINDOW_MS = 5 * 60_000;
+
+/**
+ * Whether a message can be a tile in a grid.
+ *
+ * A caption disqualifies it: the words belong to that one picture, and a
+ * grid has nowhere to put them. Such a photo stays its own bubble, which
+ * also ends any album being collected — otherwise the caption would end
+ * up describing the tile above it.
+ */
+function isAlbumTile(m: Message): boolean {
+  if (m.type !== 'image' && m.type !== 'video') return false;
+  if (m.text) return false;
+  if (m.replyToMessageId) return false;
+  return Boolean(m.mediaId || m.localUri);
+}
+
+function sameAlbum(a: Message, b: Message): boolean {
+  return (
+    a.direction === b.direction &&
+    Math.abs(Date.parse(b.createdAt) - Date.parse(a.createdAt)) <= ALBUM_WINDOW_MS
+  );
+}
 
 function buildRenderItems(renderableNewestFirst: Message[]): RenderItem[] {
   const chronological = [...renderableNewestFirst].reverse();
   const items: RenderItem[] = [];
   let lastDay: string | null = null;
+
+  /**
+   * Photos waiting to be emitted, so a run can be judged only once it
+   * ends. A run of one is emitted as an ordinary bubble — a "grid" of a
+   * single photo would be a smaller photo for no reason.
+   */
+  let run: Message[] = [];
+  const flush = () => {
+    if (run.length === 0) return;
+    if (run.length === 1) {
+      const only = run[0]!;
+      items.push({ kind: 'message', id: only.id, message: only });
+    } else {
+      // Keyed on the first tile's id: stable across re-renders, and it
+      // changes when the run does, which is what tells FlashList the row
+      // is a different thing rather than the same one rearranged.
+      items.push({ kind: 'album', id: `album-${run[0]!.id}`, messages: run });
+    }
+    run = [];
+  };
+
   for (const m of chronological) {
     const day = dayKey(m.createdAt);
     if (day !== lastDay) {
+      // A day separator splits an album too: a grid spanning midnight
+      // would sit on one side of a date it half belongs to.
+      flush();
       items.push({ kind: 'separator', id: `sep-${day}`, iso: m.createdAt });
       lastDay = day;
     }
+
+    if (isAlbumTile(m)) {
+      const prev = run[run.length - 1];
+      if (prev && !sameAlbum(prev, m)) flush();
+      run.push(m);
+      continue;
+    }
+
+    flush();
     items.push({ kind: 'message', id: m.id, message: m });
   }
+  flush();
+
   return items.reverse();
 }
 
@@ -737,6 +807,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     ({ item }: { item: RenderItem }) =>
       item.kind === 'separator' ? (
         <DateSeparator iso={item.iso} />
+      ) : item.kind === 'album' ? (
+        <AlbumBubble
+          messages={item.messages}
+          onOpenImage={selectionMode ? undefined : handleOpenImage}
+          onLongPress={handleLongPress}
+        />
       ) : (
         <MessageBubble
           message={item.message}

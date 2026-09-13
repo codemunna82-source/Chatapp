@@ -23,6 +23,7 @@ function MediaImageImpl({
   mediaId,
   localUri: providedUri,
   uploadProgress,
+  size,
   onOpen,
   onLongPress,
 }: {
@@ -31,6 +32,12 @@ function MediaImageImpl({
   localUri?: string;
   /** 0-1 while this photo's bytes are still going up; absent once sent. */
   uploadProgress?: number;
+  /**
+   * An exact square side, for a caller that has already decided the
+   * layout — an album cell. Absent means the standalone bubble sizing
+   * below, which is what a single photo wants.
+   */
+  size?: number;
   onOpen?: (localUri: string) => void;
   /** The bubble's action sheet. Handled here because this Pressable would
    *  otherwise swallow the long press before the bubble ever sees it. */
@@ -45,7 +52,7 @@ function MediaImageImpl({
   // Sized from the live window rather than a fixed square: the enclosing
   // bubble is maxWidth 80%, so a hardcoded size overflowed on a 320dp phone
   // and left dead space on a 430dp one.
-  const side = Math.round(Math.min(Math.max(width * 0.58, 160), 280));
+  const side = size ?? Math.round(Math.min(Math.max(width * 0.58, 160), 280));
   const box = { width: side, height: side };
 
   useEffect(() => {
