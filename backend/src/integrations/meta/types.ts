@@ -47,6 +47,22 @@ export interface SendMediaMessageParams {
   replyToMetaMessageId?: string;
 }
 
+/**
+ * A pin on a map, as Meta takes it.
+ *
+ * name and address are optional and purely cosmetic — WhatsApp draws the
+ * pin from the coordinates and captions it with whatever is given. A
+ * share from a phone's GPS has neither, which is fine.
+ */
+export interface SendLocationParams {
+  to: string;
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
+  replyToMetaMessageId?: string;
+}
+
 export interface SendReactionParams {
   to: string;
   /** The Meta wamid of the message being reacted to — not our own Message._id. */

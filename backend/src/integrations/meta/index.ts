@@ -13,6 +13,7 @@ const realMetaGateway: MetaGateway = {
   sendTemplate: messages.sendTemplate,
   sendMedia: messages.sendMedia,
   sendReaction: messages.sendReaction,
+  sendLocation: messages.sendLocation,
   markAsRead: messages.markAsRead,
   uploadMedia: media.uploadMedia,
   retrieveMedia: media.retrieveMedia,

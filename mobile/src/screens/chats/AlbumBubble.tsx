@@ -5,6 +5,7 @@ import { MediaImage } from './MediaImage';
 import { MessageStatusIcon } from './MessageStatusIcon';
 import { formatMessageTime } from '../../utils/formatTime';
 import type { Message } from '../../api/types';
+import type { ReactionSummary } from './deriveConversationView';
 
 /**
  * Past this the album stops adding cells and the last one carries a +N.
@@ -45,11 +46,14 @@ const LEAD_RATIO = 0.62;
  */
 export function AlbumBubble({
   messages,
+  reactionsByTarget,
   onOpenImage,
   onLongPress,
 }: {
   /** Oldest first: the order they were sent, which is the order they are read. */
   messages: Message[];
+  /** Every reaction in the thread, keyed by the message it is on. */
+  reactionsByTarget?: Map<string, ReactionSummary>;
   /** Given the whole album, so the viewer can reach every photo — including the ones behind the +N. */
   onOpenImage?: (localUri: string, mediaId: string | undefined, album?: Message[]) => void;
   onLongPress: (message: Message) => void;
@@ -111,6 +115,7 @@ export function AlbumBubble({
                 width={half}
                 height={half}
                 album={messages}
+                reactions={reactionsByTarget?.get(m.id)}
                 onOpenImage={onOpenImage}
                 onLongPress={onLongPress}
               />
@@ -123,6 +128,7 @@ export function AlbumBubble({
               width={inner}
               height={leadHeight}
               album={messages}
+              reactions={reactionsByTarget?.get(tiles[0]!.id)}
               onOpenImage={onOpenImage}
               onLongPress={onLongPress}
             />
@@ -134,6 +140,7 @@ export function AlbumBubble({
                   width={half}
                   height={half}
                   album={messages}
+                  reactions={reactionsByTarget?.get(m.id)}
                   // The bottom-right cell carries the count. Tapping it
                   // opens the viewer like any other — the rest are in
                   // there.
@@ -175,6 +182,7 @@ function Tile({
   height,
   more = 0,
   album,
+  reactions,
   onOpenImage,
   onLongPress,
 }: {
@@ -184,10 +192,12 @@ function Tile({
   more?: number;
   /** Every photo in this album, forwarded to the viewer on open. */
   album: Message[];
+  reactions?: ReactionSummary;
   onOpenImage?: (localUri: string, mediaId: string | undefined, album?: Message[]) => void;
   onLongPress: (message: Message) => void;
 }) {
   const { typography } = useTheme();
+  const active = reactions ? [reactions.IN, reactions.OUT].filter((e): e is string => Boolean(e)) : [];
   return (
     <Pressable onLongPress={() => onLongPress(message)} style={[styles.cell, { width, height }]}>
       <MediaImage
@@ -202,6 +212,13 @@ function Tile({
       {more > 0 ? (
         <View style={styles.more} pointerEvents="none">
           <Text style={[typography.title, styles.moreText]}>+{more}</Text>
+        </View>
+      ) : null}
+      {/* On the tile itself, bottom-left, because a grid has no bubble
+          edge to hang it off the way a single message does. */}
+      {active.length > 0 ? (
+        <View style={styles.tileReactions} pointerEvents="none">
+          <Text style={styles.tileReactionText}>{active.join(' ')}</Text>
         </View>
       ) : null}
     </Pressable>
@@ -222,6 +239,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   moreText: { color: '#FFFFFF' },
+  tileReactions: {
+    position: 'absolute',
+    left: 4,
+    bottom: 4,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  tileReactionText: { fontSize: 11, color: '#FFFFFF' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', paddingTop: 3, paddingRight: 3 },
   tick: { marginLeft: 4 },
 });

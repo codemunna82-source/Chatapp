@@ -9,7 +9,7 @@ import type { ExpoConfig, ConfigContext } from 'expo/config';
 // every build so far — bumping it here since an unchanged versionCode on a
 // same-package/same-signature reinstall can make Android's installer treat
 // a new APK as a no-op if the previous copy isn't uninstalled first.
-const ANDROID_VERSION_CODE = 24;
+const ANDROID_VERSION_CODE = 25;
 
 // Resolved from this file's own directory rather than the working
 // directory, so the config behaves the same whether Expo is invoked from
@@ -50,6 +50,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'RECORD_AUDIO',
       'MODIFY_AUDIO_SETTINGS',
       'POST_NOTIFICATIONS',
+      // Sharing a pin in a chat. COARSE only: a customer being told where
+      // the shop is does not need the agent's position to the metre, and
+      // the fine permission is a far larger thing to ask for on a screen
+      // that is only sending a map link.
+      'ACCESS_COARSE_LOCATION',
     ],
     /**
      * Firebase config for FCM. Not committed — it identifies one specific
@@ -65,6 +70,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-secure-store',
+    [
+      // The wording Android shows when the app first asks. Without a
+      // plugin entry expo-location writes its own generic sentence, which
+      // reads as an app helping itself to a location for no stated reason.
+      'expo-location',
+      {
+        locationAlwaysAndWhenInUsePermission: 'VOXO uses your location only when you choose to send it in a chat.',
+        locationWhenInUsePermission: 'VOXO uses your location only when you choose to send it in a chat.',
+        isAndroidBackgroundLocationEnabled: false,
+      },
+    ],
     [
       'expo-splash-screen',
       {

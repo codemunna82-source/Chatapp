@@ -345,6 +345,11 @@ export function useSendMessage(conversationId: string) {
         direction: 'OUT',
         type: body.type,
         text: body.type === 'text' ? body.text : body.type === 'reaction' ? body.emoji : undefined,
+        // Carried, so the pin draws in the optimistic bubble too. Without
+        // it the row is a location with no coordinates for the length of
+        // the round trip, which both clients render as the sentence they
+        // fall back to — the map would appear a moment after the bubble.
+        location: body.type === 'location' ? body.location : undefined,
         replyToMessageId:
           body.type === 'text' || body.type === 'image' || body.type === 'video' || body.type === 'audio' || body.type === 'document'
             ? body.replyToMessageId

@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <!-- Sharing a pin in a chat. COARSE only: a customer being told where the
+       shop is does not need the agent's position to the metre, and the fine
+       permission is a far larger thing to ask for on a screen that is only
+       sending a map link. Declared here because the committed android/ tree
+       is what Gradle builds — there is no prebuild step to apply the
+       expo-location plugin's own manifest entries. -->
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>

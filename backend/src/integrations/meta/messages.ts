@@ -6,6 +6,7 @@ import type {
   SendTemplateMessageParams,
   SendMediaMessageParams,
   SendReactionParams,
+  SendLocationParams,
 } from './types';
 
 interface MetaSendResponse {
@@ -81,6 +82,29 @@ export async function sendMedia(creds: MetaCredentials, params: SendMediaMessage
 }
 
 /** Meta's reaction message type — official, documented Cloud API behavior, not an invented endpoint. */
+export async function sendLocation(
+  creds: MetaCredentials,
+  params: SendLocationParams,
+): Promise<MetaSendResult> {
+  const body = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: params.to,
+    type: 'location',
+    location: {
+      latitude: params.latitude,
+      longitude: params.longitude,
+      ...(params.name ? { name: params.name } : {}),
+      ...(params.address ? { address: params.address } : {}),
+    },
+    ...(params.replyToMetaMessageId ? { context: { message_id: params.replyToMetaMessageId } } : {}),
+  };
+  const res = await metaRequest<MetaSendResponse>((client) =>
+    client.post(`/${creds.phoneNumberId}/messages`, body, authConfig(creds.accessToken)),
+  );
+  return extractResult(res);
+}
+
 export async function sendReaction(creds: MetaCredentials, params: SendReactionParams): Promise<MetaSendResult> {
   const body = {
     messaging_product: 'whatsapp',

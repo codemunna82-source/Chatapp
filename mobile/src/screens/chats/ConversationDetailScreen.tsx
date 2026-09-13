@@ -950,6 +950,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       ) : item.kind === 'album' ? (
         <AlbumBubble
           messages={item.messages}
+          // A reaction on a photo inside an album had nowhere to go: only
+          // MessageBubble was ever handed them, so a customer's thumbs-up
+          // on one of five pictures was stored, emitted and then dropped
+          // on the floor by the one screen meant to show it.
+          reactionsByTarget={view.reactionsByTarget}
           onOpenImage={selectionMode ? undefined : handleOpenImage}
           onLongPress={handleLongPress}
         />

@@ -45,6 +45,12 @@ export type SendMessageBody =
       filename?: string;
       replyToMessageId?: string;
     } & WithClientId)
+  | ({
+      type: 'location';
+      /** Nested, matching what the server validates and stores. */
+      location: { latitude: number; longitude: number; name?: string; address?: string };
+      replyToMessageId?: string;
+    } & WithClientId)
   | ({ type: 'reaction'; reactToMessageId: string; emoji: string } & WithClientId);
 
 export async function sendMessage(conversationId: string, body: SendMessageBody): Promise<Message> {

@@ -30,6 +30,11 @@ export const mockMetaGateway: MetaGateway = {
     return { metaMessageId: `mock-wamid-${randomUUID()}` };
   },
 
+  async sendLocation(_creds, params) {
+    logger.debug({ to: params.to, latitude: params.latitude, longitude: params.longitude }, '[MOCK META] sendLocation');
+    return { metaMessageId: `mock-wamid-${randomUUID()}` };
+  },
+
   async markAsRead(_creds, metaMessageId) {
     logger.debug({ metaMessageId }, '[MOCK META] markAsRead');
   },

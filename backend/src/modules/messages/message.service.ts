@@ -35,7 +35,7 @@ import type { ContactDoc } from '../contacts/contact.model';
  * rather than silently mishandled. `reaction` IS included: Meta's Cloud
  * API genuinely supports sending one (spec §51 — Meta's docs win).
  */
-export type SendableMessageType = 'text' | 'template' | 'reaction' | SendableMediaType;
+export type SendableMessageType = 'text' | 'template' | 'reaction' | 'location' | SendableMediaType;
 
 export interface SendOutboundMessageInput {
   tenantId: string;
@@ -62,6 +62,8 @@ export interface SendOutboundMessageInput {
   replyToMessageId?: string; // our Message._id — quotes another message when sending text/media
   reactToMessageId?: string; // our Message._id — the target of a `type: 'reaction'` send
   emoji?: string; // '' removes a previously-sent reaction (real, documented Meta behavior)
+  /** Where a `type: 'location'` send points. name/address are captions Meta draws under the pin. */
+  location?: { latitude: number; longitude: number; name?: string; address?: string };
   /**
    * Sent by the system, and kept out of the workspace's own view of the
    * thread. Only the automatic private-chat invitation sets it — see
@@ -230,6 +232,10 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
         : input.type === 'template'
           ? `Template: ${input.templateName}`
           : input.text,
+    // Stored so the pin survives a reload. Without it the message comes
+    // back as a bare "location" with no coordinates, and both clients
+    // fall through to the sentence they show for one they cannot draw.
+    location: input.location,
     mediaId: input.mediaId,
     replyToMessageId: input.type === 'reaction' ? input.reactToMessageId : input.replyToMessageId,
     status: 'QUEUED',
@@ -348,6 +354,10 @@ async function deliverToWebChat(
         : input.type === 'template'
           ? `Template: ${input.templateName}`
           : input.text,
+    // Stored so the pin survives a reload. Without it the message comes
+    // back as a bare "location" with no coordinates, and both clients
+    // fall through to the sentence they show for one they cannot draw.
+    location: input.location,
     mediaId: input.mediaId,
     replyToMessageId: input.type === 'reaction' ? input.reactToMessageId : input.replyToMessageId,
     status: 'SENT',
@@ -449,6 +459,20 @@ async function dispatch(
         link: input.mediaLink,
         caption: input.caption,
         filename: input.filename,
+        replyToMetaMessageId,
+      });
+      return result.metaMessageId;
+    }
+    case 'location': {
+      if (!input.location) {
+        throw ApiError.badRequest('LOCATION_REQUIRED', 'latitude and longitude are required');
+      }
+      const result = await gateway.sendLocation(credentials, {
+        to: toPhone,
+        latitude: input.location.latitude,
+        longitude: input.location.longitude,
+        name: input.location.name,
+        address: input.location.address,
         replyToMetaMessageId,
       });
       return result.metaMessageId;

@@ -5,6 +5,7 @@ import type {
   SendTemplateMessageParams,
   SendMediaMessageParams,
   SendReactionParams,
+  SendLocationParams,
   UploadMediaParams,
   UploadMediaResult,
   RetrieveMediaResult,
@@ -25,6 +26,7 @@ export interface MetaGateway {
   sendTemplate(creds: MetaCredentials, params: SendTemplateMessageParams): Promise<MetaSendResult>;
   sendMedia(creds: MetaCredentials, params: SendMediaMessageParams): Promise<MetaSendResult>;
   sendReaction(creds: MetaCredentials, params: SendReactionParams): Promise<MetaSendResult>;
+  sendLocation(creds: MetaCredentials, params: SendLocationParams): Promise<MetaSendResult>;
   markAsRead(creds: MetaCredentials, metaMessageId: string): Promise<void>;
   uploadMedia(creds: MetaCredentials, params: UploadMediaParams): Promise<UploadMediaResult>;
   retrieveMedia(creds: MetaCredentials, metaMediaId: string): Promise<RetrieveMediaResult>;

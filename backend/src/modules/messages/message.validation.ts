@@ -43,8 +43,30 @@ const reactionMessage = z.object({
   clientMessageId: base.clientMessageId,
 });
 
+/**
+ * A pin on a map.
+ *
+ * Bounded to the real ranges rather than left as plain numbers: a
+ * latitude of 200 is not a place, and WhatsApp rejects it with an error
+ * that says nothing useful — far better to refuse it here, where the
+ * message names the field.
+ */
+const locationMessage = z.object({
+  type: z.literal('location'),
+  // Nested, matching the shape the message model stores and the service
+  // reads — the controller hands the validated body straight through, so
+  // a flat latitude/longitude here would arrive somewhere nothing looks.
+  location: z.object({
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    name: z.string().max(120).optional(),
+    address: z.string().max(240).optional(),
+  }),
+  ...base,
+});
+
 export const sendMessageSchema = z
-  .discriminatedUnion('type', [textMessage, templateMessage, mediaMessage, reactionMessage])
+  .discriminatedUnion('type', [textMessage, templateMessage, mediaMessage, reactionMessage, locationMessage])
   .refine(
     (data) => (data.type !== 'image' && data.type !== 'video' && data.type !== 'audio' && data.type !== 'document'
       ? true

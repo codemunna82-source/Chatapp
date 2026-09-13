@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Location from 'expo-location';
 import { AppBottomSheet, type AppBottomSheetRef } from '../../components/AppBottomSheet';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useUploadMedia } from '../../queries/useUploadMedia';
@@ -265,11 +266,55 @@ export function AttachmentSheet({
     await submit({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType ?? 'application/octet-stream' }, type);
   };
 
+  /**
+   * Shares where the agent is, as a pin the customer can open in their
+   * own map app.
+   *
+   * COARSE accuracy on purpose — see the manifest. A customer being told
+   * where the shop is does not need a position to the metre, it returns
+   * far faster because it does not wait on a GPS fix, and it is a much
+   * smaller thing to ask permission for.
+   *
+   * No optimistic bubble: unlike a photo there is nothing on screen to
+   * show yet, and the round trip is one small request rather than an
+   * upload — a placeholder would flash and be gone.
+   */
+  const sendLocation = async () => {
+    setError(null);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        setError('Location permission was denied.');
+        return;
+      }
+      setBusy(true);
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      sendMessage.mutate({
+        type: 'location',
+        location: {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        },
+        replyToMessageId,
+      });
+      onSent();
+      sheetRef.current?.dismiss();
+    } catch (err) {
+      // Most often: location services switched off at the system level,
+      // which is a different thing from the permission being refused and
+      // needs saying differently.
+      setError(getApiErrorMessage(err, 'Could not read your location. Check that location is switched on.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const options: { icon: keyof typeof Ionicons.glyphMap; label: string; tint: string; muted: string; onPress: () => void }[] = [
     { icon: 'images-outline', label: 'Gallery', tint: colors.primary, muted: colors.primaryMuted, onPress: pickFromLibrary },
     { icon: 'camera-outline', label: 'Camera', tint: colors.danger, muted: colors.dangerMuted, onPress: pickFromCamera },
     { icon: 'document-outline', label: 'Document', tint: colors.warning, muted: colors.warningMuted, onPress: pickDocument },
     { icon: 'musical-notes-outline', label: 'Audio', tint: colors.success, muted: colors.successMuted, onPress: pickAudioFile },
+    { icon: 'location-outline', label: 'Location', tint: colors.primary, muted: colors.primaryMuted, onPress: sendLocation },
   ];
 
   return (
