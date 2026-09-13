@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
+import { ApiError } from '../lib/ApiError';
 import type { Redis } from 'ioredis';
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
@@ -100,7 +101,14 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
       socket.data.auth = await resolveAuthContextFromToken(token);
       next();
     } catch (err) {
-      next(new Error(err instanceof Error ? err.message : 'INVALID_TOKEN'));
+      // The CODE, not the prose. This message is the only thing that
+      // crosses the handshake, and the client has to be able to tell the
+      // difference between "your token expired, refresh it and try again"
+      // and "this session is over, stop trying" — which it cannot do by
+      // matching English sentences. Falls back to the message for
+      // anything that is not an ApiError.
+      const code = err instanceof ApiError ? err.code : err instanceof Error ? err.message : 'INVALID_TOKEN';
+      next(new Error(code));
     }
   });
 

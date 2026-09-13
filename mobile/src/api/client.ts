@@ -73,7 +73,7 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 // and could tear down the whole session.
 let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+export async function refreshAccessToken(): Promise<string | null> {
   if (!authHandlers) return null;
   const refreshToken = authHandlers.getRefreshToken();
   if (!refreshToken) return null;

@@ -2,6 +2,7 @@ import { AppState } from 'react-native';
 import { io, Socket } from 'socket.io-client';
 import { socketUrl } from '../utils/env';
 import { useAuthStore } from '../store/authStore';
+import { refreshAccessToken } from '../api/client';
 
 /**
  * A single shared socket for the whole app (spec §22) — screens subscribe
@@ -48,6 +49,54 @@ function createSocket(): Socket {
   });
 }
 
+/**
+ * Handshake failures that no amount of retrying will fix, because the
+ * session itself is over. The REST client already ends the session on
+ * these; the socket has to agree rather than sit in a retry loop behind
+ * a "Reconnecting" banner that will never clear.
+ */
+const TERMINAL_AUTH_CODES = new Set([
+  'SESSION_REPLACED',
+  'ACCOUNT_DISABLED',
+  'SUBSCRIPTION_EXPIRED',
+  'NUMBER_ACCESS_DENIED',
+]);
+
+/** Handshake failures that a fresh access token would fix. */
+const STALE_TOKEN_CODES = new Set(['AUTH_REQUIRED', 'INVALID_TOKEN']);
+
+/**
+ * At most one token refresh per handshake failure burst.
+ *
+ * socket.io retries every half second at first, and every one of those
+ * attempts fails the same way while the token is stale. Refreshing per
+ * attempt would be a request storm, and a failed refresh signs the user
+ * out — so a flaky network must not be able to trigger it repeatedly.
+ */
+const REFRESH_COOLDOWN_MS = 20_000;
+let lastRefreshAt = 0;
+
+function handleHandshakeFailure(message: string): void {
+  if (TERMINAL_AUTH_CODES.has(message)) {
+    void useAuthStore.getState().clearSession(message);
+    return;
+  }
+  if (!STALE_TOKEN_CODES.has(message)) return;
+  if (useAuthStore.getState().status !== 'signedIn') return;
+
+  const now = Date.now();
+  if (now - lastRefreshAt < REFRESH_COOLDOWN_MS) return;
+  lastRefreshAt = now;
+
+  // The socket's auth callback reads the current token on every attempt,
+  // so there is nothing to tell it: refreshing is enough, and its next
+  // retry carries the new one. This is the case that stranded people
+  // behind a permanent banner — the token went stale, every retry was
+  // rejected with the same stale token, and the only escape was doing
+  // something else in the app that happened to refresh it.
+  void refreshAccessToken();
+}
+
 export function getSocket(): Socket {
   if (!socket) {
     socket = createSocket();
@@ -57,6 +106,18 @@ export function getSocket(): Socket {
     // existed anywhere. In dev this is the first thing worth seeing.
     socket.on('connect_error', (err) => {
       if (__DEV__) console.warn('[socket] connect_error', err.message);
+      handleHandshakeFailure(err.message);
+    });
+
+    socket.on('disconnect', (reason) => {
+      if (__DEV__) console.warn('[socket] disconnect', reason);
+      // socket.io reconnects itself after a transport drop, but NOT when
+      // the server disconnected us deliberately or the client asked to
+      // close. `active` is how it says which, and when it is false the
+      // socket is DORMANT: not connected, not trying, and nothing in it
+      // will ever change that. The banner then says "Reconnecting" about
+      // a socket that is doing no such thing, forever.
+      if (!socket?.active) syncSocketConnection();
     });
   }
   return socket;
@@ -94,6 +155,25 @@ export function syncSocketConnection(): void {
 // credentials without touching status, and the socket's auth callback reads
 // the current token on its next attempt.
 useAuthStore.subscribe(() => syncSocketConnection());
+
+/**
+ * The last resort, and the reason it exists: a socket that is neither
+ * connected nor trying has no way back on its own.
+ *
+ * Everything above reacts to something — a disconnect event, a store
+ * change, the app coming to the foreground. A user sitting in a chat
+ * watching the banner is none of those: the app is already foregrounded,
+ * nothing is signing in, and if the dormant state was reached by a path
+ * not anticipated here, nothing fires at all. That is exactly the report
+ * this is for — the banner staying until the screen was left and
+ * re-entered, which only worked because it happened to provoke a request
+ * that refreshed the token.
+ *
+ * Cheap by construction: syncSocketConnection does nothing at all when
+ * the socket is connected or already retrying, which is almost always.
+ */
+const WATCHDOG_INTERVAL_MS = 5_000;
+setInterval(syncSocketConnection, WATCHDOG_INTERVAL_MS);
 
 // And once now, for the session that was already hydrated before this
 // module was imported — the case the transition-only listener missed.
