@@ -30,6 +30,9 @@ interface AttachmentSheetProps {
 
 type SendableMediaType = 'image' | 'video' | 'document' | 'audio';
 
+/** Matches the composer's own cap; see pickFromLibrary for why there is one. */
+const MAX_ATTACHMENTS_PER_PICK = 10;
+
 /**
  * Pick → upload (POST /api/media/upload) → send (POST .../messages with the
  * returned mediaId). Every step is a real network call — no placeholder
@@ -55,6 +58,8 @@ export function AttachmentSheet({
   const sendMessage = useSendMessage(conversationId);
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
+  /** Makes each optimistic bubble's id unique within one multi-pick. */
+  const attachSeq = useRef(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -94,7 +99,11 @@ export function AttachmentSheet({
     setError(null);
 
     const optimistic = type === 'image' || type === 'video';
-    const tempId = `local-attach-${Date.now()}`;
+    // A counter, not Date.now() alone: picking several photos calls this
+    // in a tight loop, and two bubbles created in the same millisecond
+    // would share an id — so the cache would treat them as one message
+    // and only the last photo would appear.
+    const tempId = `local-attach-${Date.now()}-${attachSeq.current++}`;
 
     if (optimistic) {
       insertPendingMediaMessage(queryClient, conversationId, {
@@ -140,15 +149,40 @@ export function AttachmentSheet({
     }
   };
 
+  /**
+   * Pick as many as you like, not one at a time.
+   *
+   * This took `result.assets[0]` and threw the rest away, so sending five
+   * photos meant opening the sheet, opening the gallery, picking, waiting,
+   * and doing it four more times. Nothing downstream needed the limit —
+   * `submit` handles one attachment and is simply called for each — it was
+   * just never asked for more than one.
+   *
+   * Sequential rather than parallel, so the bubbles land in the order they
+   * were picked. Ten at a time matches the composer's own limit, and the
+   * point of a limit at all is that fifty photos over mobile data is not
+   * a thing anyone meant to do.
+   */
   const pickFromLibrary = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 0.8 });
-    const asset = result.canceled ? undefined : result.assets[0];
-    if (!asset) return;
-    const type: SendableMediaType = asset.type === 'video' ? 'video' : 'image';
-    await submit(
-      { uri: asset.uri, name: asset.fileName ?? `attachment.${type === 'video' ? 'mp4' : 'jpg'}`, mimeType: asset.mimeType ?? (type === 'video' ? 'video/mp4' : 'image/jpeg') },
-      type,
-    );
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images', 'videos'],
+      allowsMultipleSelection: true,
+      selectionLimit: MAX_ATTACHMENTS_PER_PICK,
+      quality: 0.8,
+    });
+    if (result.canceled) return;
+
+    for (const asset of result.assets) {
+      const type: SendableMediaType = asset.type === 'video' ? 'video' : 'image';
+      await submit(
+        {
+          uri: asset.uri,
+          name: asset.fileName ?? `attachment.${type === 'video' ? 'mp4' : 'jpg'}`,
+          mimeType: asset.mimeType ?? (type === 'video' ? 'video/mp4' : 'image/jpeg'),
+        },
+        type,
+      );
+    }
   };
 
   const pickFromCamera = async () => {

@@ -28,7 +28,7 @@ const loginSchema = z.object({
   identifier: z
     .string()
     .trim()
-    .min(1, 'Enter your phone number')
+    .min(1, 'Enter your email or phone number')
     /**
      * Caught here because nothing downstream can catch it.
      *
@@ -116,21 +116,25 @@ export function LoginScreen() {
             name="identifier"
             render={({ field: { onChange, onBlur, value } }) => (
               <TextField
-                label="Phone number"
-                // The country code is what makes the number unambiguous,
-                // and the placeholder is the only place that gets said
-                // before someone types the wrong thing and is told no.
-                placeholder="+91 98765 43210"
+                // The field has always accepted either — the schema below
+                // lets an email through, and the server tries phone then
+                // email — but it said "Phone number" and opened a phone
+                // keypad, so someone whose account is an email had no way
+                // to type it and no reason to think they could.
+                label="Email or phone number"
+                placeholder="you@company.com or +91 98765 43210"
                 value={value}
                 onChangeText={onChange}
                 onBlur={onBlur}
                 error={errors.identifier?.message}
                 autoCapitalize="none"
-                // phone-pad, not numeric: it has the + and the country
-                // code cannot be typed without it.
-                keyboardType="phone-pad"
-                autoComplete="tel"
-                textContentType="telephoneNumber"
+                autoCorrect={false}
+                // email-address rather than phone-pad: it carries letters,
+                // the @ and the digits, so BOTH kinds of identifier can be
+                // typed. A phone keypad made the email half unreachable.
+                keyboardType="email-address"
+                autoComplete="username"
+                textContentType="username"
                 // Enter moves to the password instead of dismissing the
                 // keyboard and leaving the user to aim at the next field.
                 returnKeyType="next"
