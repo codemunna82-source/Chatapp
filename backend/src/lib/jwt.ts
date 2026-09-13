@@ -8,6 +8,18 @@ export interface AccessTokenClaims {
   sub: string; // userId
   tenantId: string;
   role: UserRole;
+  /**
+   * Which sign-in this token belongs to.
+   *
+   * The same value the refresh-token family carries, and it survives
+   * rotation — so it identifies a DEVICE's session rather than one token.
+   * The auth context compares it against the user's current family, which
+   * is what limits an account to one device at a time.
+   *
+   * Optional because tokens minted before this existed have no such
+   * claim; see resolveAuthContextFromToken for how those are treated.
+   */
+  family?: string;
   type: 'access';
 }
 

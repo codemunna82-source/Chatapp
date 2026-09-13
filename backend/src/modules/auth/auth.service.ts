@@ -4,6 +4,8 @@ import { WhatsAppPhoneNumber } from '../whatsapp/whatsappPhoneNumber.model';
 import { findUserByPhone } from '../users/user.repository';
 import { normalizePhone } from '../../lib/phone';
 import { RefreshToken } from './refreshToken.model';
+import { invalidateAuthContext } from './authContext.service';
+import { isSessionReplaced } from './singleDevice';
 import { hashPassword, verifyPassword } from '../../lib/password';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../lib/jwt';
 import { ApiError } from '../../lib/ApiError';
@@ -60,7 +62,7 @@ async function issueTokenPair(
   family: string,
   meta: RequestMeta,
 ): Promise<{ accessToken: string; refreshToken: string }> {
-  const accessToken = signAccessToken({ sub: userId, tenantId, role });
+  const accessToken = signAccessToken({ sub: userId, tenantId, role, family });
 
   const jti = randomUUID();
   const refreshToken = signRefreshToken({ sub: userId, tenantId, jti });
@@ -194,8 +196,27 @@ export async function login(identifier: string, password: string, meta: RequestM
     meta,
   );
 
+  /**
+   * One device at a time: this sign-in takes the account.
+   *
+   * Every refresh token the account already had is revoked, and the
+   * user's active family becomes this one — so the previous device is
+   * refused on its very next request (see authContext.service.ts) and
+   * cannot refresh its way back in either.
+   *
+   * Done BEFORE lastLoginAt is saved so a crash between the two leaves
+   * the account signed out rather than signed in twice.
+   */
+  await RefreshToken.updateMany(
+    { userId: user._id, revokedAt: null },
+    { $set: { revokedAt: new Date() } },
+  );
+  user.activeSessionFamily = family;
   user.lastLoginAt = new Date();
   await user.save();
+  // The old device's context is cached for up to ten seconds; drop it so
+  // it is refused now rather than at the end of that window.
+  invalidateAuthContext(String(user._id), String(user.tenantId));
 
   await recordAudit({
     tenantId: user.tenantId,
@@ -266,6 +287,22 @@ export async function refresh(refreshTokenRaw: string, meta: RequestMeta): Promi
   const subscriptionStatus = computeSubscriptionStatus(user.validFrom, user.validUntil, user.status);
   if (subscriptionStatus === 'EXPIRED') {
     throw ApiError.forbidden('SUBSCRIPTION_EXPIRED', 'Subscription/validity window has expired');
+  }
+
+  /**
+   * A device that has been replaced cannot refresh its way back in.
+   *
+   * Login revokes the old refresh tokens, so this is belt and braces —
+   * but the revocation is a separate write, and a refresh racing it would
+   * otherwise mint a fresh pair for a device the account no longer
+   * belongs to. Absent activeSessionFamily means nobody has signed in
+   * since the field existed, which is treated as "allow".
+   */
+  if (isSessionReplaced(user.activeSessionFamily, record.family)) {
+    throw ApiError.unauthorized(
+      'SESSION_REPLACED',
+      'Your account was signed in on another device. Sign in again to use it here.',
+    );
   }
 
   const { accessToken, refreshToken: newRefreshToken } = await issueTokenPair(

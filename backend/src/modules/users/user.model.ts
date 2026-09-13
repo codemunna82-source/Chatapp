@@ -40,6 +40,21 @@ const userSchema = new Schema(
     validFrom: { type: Date, required: true, default: () => new Date() },
     validUntil: { type: Date, required: true },
     lastLoginAt: { type: Date },
+    /**
+     * The sign-in that currently owns this account — one device at a time.
+     *
+     * Set on every login to that login's refresh-token family, which
+     * survives rotation, so it names a DEVICE's session rather than one
+     * token. Every request checks the family in its access token against
+     * this (see authContext.service.ts), so signing in somewhere else
+     * takes the account with it: the previous device's next request is
+     * refused and its refresh cannot revive it.
+     *
+     * Absent means nobody has signed in since this existed, and absent is
+     * treated as "allow" — otherwise the deploy that shipped this field
+     * would have signed out every user at once for no reason.
+     */
+    activeSessionFamily: { type: String },
     displayName: { type: String, trim: true },
     /**
      * Which of the tenant's WhatsApp numbers this user sends from.

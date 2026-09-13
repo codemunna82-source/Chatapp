@@ -3,6 +3,7 @@ import { ApiError } from '../../lib/ApiError';
 import { createTtlCache } from '../../lib/ttlCache';
 import { User, computeSubscriptionStatus } from '../users/user.model';
 import { WhatsAppPhoneNumber } from '../whatsapp/whatsappPhoneNumber.model';
+import { isSessionReplaced } from './singleDevice';
 import type { Permission } from '../users/permission';
 import type { AuthContext } from '../../types/express';
 
@@ -72,13 +73,35 @@ export async function resolveAuthContextFromToken(token: string): Promise<AuthCo
   // this runs on every cache miss, and pulling the whole document to
   // examine five fields is bytes off the wire for nothing.
   const user = await User.findOne({ _id: claims.sub, tenantId: claims.tenantId })
-    .select('status role permissions validFrom validUntil tenantId whatsappPhoneNumberId')
+    .select('status role permissions validFrom validUntil tenantId whatsappPhoneNumberId activeSessionFamily')
     .lean();
   if (!user) {
     throw ApiError.unauthorized('INVALID_TOKEN', 'Account no longer exists');
   }
   if (user.status === 'DISABLED') {
     throw ApiError.forbidden('ACCOUNT_DISABLED', 'This account has been disabled');
+  }
+
+  /**
+   * One device at a time.
+   *
+   * The token carries the family of the sign-in that minted it, and that
+   * family survives refresh rotation — so this compares SESSIONS, not
+   * tokens. Signing in somewhere else moves the account's active family,
+   * and every request from the device left behind lands here.
+   *
+   * Both absences mean "allow", and each for its own reason. A user with
+   * no activeSessionFamily has not signed in since the field existed, and
+   * signing everyone out on the deploy that added it would be a fault of
+   * this change rather than a feature. A token with no family claim is
+   * from before the claim existed, and it stops working the moment its
+   * owner signs in anywhere — which is exactly when it should.
+   */
+  if (isSessionReplaced(user.activeSessionFamily, claims.family)) {
+    throw ApiError.unauthorized(
+      'SESSION_REPLACED',
+      'Your account was signed in on another device. Sign in again to use it here.',
+    );
   }
 
   const subscriptionStatus = computeSubscriptionStatus(user.validFrom, user.validUntil, user.status);

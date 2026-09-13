@@ -108,7 +108,17 @@ apiClient.interceptors.response.use(
     // Never attempt a refresh-and-retry loop on the refresh call itself, or
     // more than once per original request.
     const isAuthEndpoint = original?.url?.includes('/auth/');
-    if (status === 401 && code !== 'RATE_LIMITED' && !isAuthEndpoint && original && !original._retried) {
+    if (
+      status === 401 &&
+      code !== 'RATE_LIMITED' &&
+      // Refreshing cannot fix a replaced session — the refresh is refused
+      // for the same reason — and trying turns a clear answer into a
+      // silent one.
+      code !== 'SESSION_REPLACED' &&
+      !isAuthEndpoint &&
+      original &&
+      !original._retried
+    ) {
       original._retried = true;
       const newAccessToken = await refreshAccessToken();
       if (newAccessToken) {
@@ -129,6 +139,24 @@ apiClient.interceptors.response.use(
       const reason =
         error.response?.data?.error?.message ??
         'Your access has been turned off. Please contact your administrator.';
+      await authHandlers?.onAccessRevoked(reason);
+    }
+
+    /**
+     * The account was signed in on another device, and accounts are one
+     * device at a time.
+     *
+     * Handled before the refresh branch above can even be reached on a
+     * 401, because refreshing is exactly what must NOT happen: the
+     * refresh would be refused for the same reason, and retrying it just
+     * turns a clear answer into a silent failure. The reason is carried
+     * to the sign-in screen instead, so the person learns what happened
+     * rather than finding themselves logged out for no stated cause.
+     */
+    if (status === 401 && code === 'SESSION_REPLACED') {
+      const reason =
+        error.response?.data?.error?.message ??
+        'Your account was signed in on another device. Sign in again to use it here.';
       await authHandlers?.onAccessRevoked(reason);
     }
 
