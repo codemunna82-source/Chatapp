@@ -5,6 +5,7 @@ import { setAuthHandlers } from '../api/client';
 import * as authApi from '../api/endpoints/auth';
 import type { AuthTokens, AuthUser } from '../api/types';
 import { setSentryUser } from '../lib/sentry';
+import { clearChatCache } from '../storage/chatCache';
 
 const CACHED_USER_KEY = 'voxo.cachedUser';
 
@@ -55,6 +56,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // treated as signed out — never guess at a session.
       await clearStoredTokens();
       removeCached(CACHED_USER_KEY);
+      clearChatCache();
       setSentryUser(null);
       set({ status: 'signedOut', accessToken: null, refreshToken: null, user: null });
     }
@@ -76,6 +78,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   clearSession: async (reason?: string) => {
     await clearStoredTokens();
     removeCached(CACHED_USER_KEY);
+    // The on-disk chat cache holds customer message content. Leaving it
+    // for whoever signs in next — on a shared phone, or after an admin
+    // revokes access — is not a cache, it is a leak.
+    clearChatCache();
     // Cleared on the way out so a crash after signing out is not still
     // attributed to the person who just left.
     setSentryUser(null);

@@ -6,13 +6,49 @@ import {
   useQueryClient,
   type InfiniteData,
 } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef } from 'react';
 import * as conversationsApi from '../api/endpoints/conversations';
 import type { ListConversationsParams } from '../api/endpoints/conversations';
 import type { Conversation, ConversationStatus } from '../api/types';
 import { queryKeys } from './keys';
+import { dropCachedMessages, readCachedConversations, writeCachedConversations } from '../storage/chatCache';
+
+type ConversationsPage = { items: Conversation[]; nextCursor: string | null };
+type ConversationsData = InfiniteData<ConversationsPage, string | undefined>;
+
+/**
+ * Whether this particular view is the one kept on disk.
+ *
+ * Exactly one list is cached — the open chats, unfiltered, at the default
+ * page size — because that is the screen a cold start lands on. A
+ * search's results are not the list, an archived view is not the list,
+ * and seeding either from the other would put rows on screen that do not
+ * belong to the query that asked for them. The page size is part of it
+ * for the same reason: one store, so one shape may claim it.
+ */
+function isCacheableList(params: Omit<ListConversationsParams, 'cursor'>): boolean {
+  return !params.search && !params.pinnedOnly && params.limit === undefined && params.status === 'OPEN';
+}
 
 export function useConversations(params: Omit<ListConversationsParams, 'cursor'> = {}) {
-  return useInfiniteQuery({
+  const queryClient = useQueryClient();
+  const cacheable = isCacheableList(params);
+  const key = queryKeys.conversations(params);
+  const cached = useMemo<ConversationsData | undefined>(() => {
+    if (!cacheable) return undefined;
+    // In memory already — initialData would be thrown away, so reading
+    // and parsing the list off disk would buy nothing.
+    if (queryClient.getQueryData(key)) return undefined;
+    const stored = readCachedConversations();
+    if (!stored || stored.items.length === 0) return undefined;
+    return { pages: [{ items: stored.items, nextCursor: stored.nextCursor }], pageParams: [undefined] };
+    // `key` is a fresh array every render, so it cannot be a dependency.
+    // It does not need to be: only one params shape is ever cacheable
+    // (see isCacheableList), so `cacheable` being true pins the key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryClient, cacheable]);
+
+  const query = useInfiniteQuery({
     queryKey: queryKeys.conversations(params),
     queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
       conversationsApi.listConversations({ ...params, cursor: pageParam }),
@@ -25,7 +61,46 @@ export function useConversations(params: Omit<ListConversationsParams, 'cursor'>
     // loads: the same data arrives at the same time, but the screen stops
     // flashing between them.
     placeholderData: keepPreviousData,
+    /**
+     * The inbox is on screen before the first request finishes.
+     *
+     * Same contract as useMessages: the disk copy is what gets drawn on a
+     * cold start, and the refetch that initialDataUpdatedAt: 0 forces is
+     * what corrects it. Only the default view is seeded — see
+     * isCacheableList.
+     */
+    initialData: cached,
+    initialDataUpdatedAt: cached ? 0 : undefined,
   });
+
+  usePersistConversations(cacheable, query.data as ConversationsData | undefined);
+
+  return query;
+}
+
+const PERSIST_DEBOUNCE_MS = 800;
+
+/**
+ * Keeps the cached inbox in step with the list on screen.
+ *
+ * Only the first page is stored — see writeCachedConversations for why
+ * the whole scroll cannot be.
+ */
+function usePersistConversations(cacheable: boolean, data: ConversationsData | undefined): void {
+  const latest = useRef<ConversationsData | undefined>(undefined);
+
+  useEffect(() => {
+    latest.current = data;
+  }, [data]);
+
+  useEffect(() => {
+    if (!cacheable || !data) return;
+    const timer = setTimeout(() => {
+      const first = latest.current?.pages[0];
+      if (first) writeCachedConversations(first.items, first.nextCursor);
+    }, PERSIST_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [cacheable, data]);
 }
 
 /** Flattens the infinite-query pages into one list for FlashList. */
@@ -34,10 +109,29 @@ export function flattenConversations(data: ReturnType<typeof useConversations>['
 }
 
 export function useConversation(id: string | undefined) {
+  /**
+   * The header comes off the cached list, so the chat screen is not held
+   * behind a skeleton waiting for a name it already knows.
+   *
+   * Safe to mix the two sources: the list endpoint and the single-
+   * conversation endpoint run the SAME serializer server-side
+   * (toPublicConversation), so a row taken from the list is the identical
+   * object the detail request is about to return — and it is replaced by
+   * that response a moment later regardless.
+   */
+  const queryClient = useQueryClient();
+  const cached = useMemo(() => {
+    if (!id) return undefined;
+    if (queryClient.getQueryData(queryKeys.conversation(id))) return undefined;
+    return readCachedConversations()?.items.find((c) => c.id === id);
+  }, [queryClient, id]);
+
   return useQuery({
     queryKey: queryKeys.conversation(id ?? ''),
     queryFn: () => conversationsApi.getConversation(id as string),
     enabled: Boolean(id),
+    initialData: cached,
+    initialDataUpdatedAt: cached ? 0 : undefined,
   });
 }
 
@@ -62,6 +156,8 @@ export function useDeleteConversation() {
     mutationFn: (id: string) => conversationsApi.deleteConversation(id),
     onSuccess: (_result, id) => {
       queryClient.removeQueries({ queryKey: queryKeys.conversation(id) });
+      queryClient.removeQueries({ queryKey: queryKeys.messages(id) });
+      dropCachedMessages([id]);
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
     },
   });
@@ -190,7 +286,11 @@ export function useBulkConversations() {
   return useMutation({
     mutationFn: (vars: { ids: string[]; action: conversationsApi.BulkConversationAction }) =>
       conversationsApi.bulkUpdateConversations(vars.ids, vars.action),
-    onSuccess: () => {
+    onSuccess: (_result, vars) => {
+      if (vars.action === 'delete') {
+        for (const id of vars.ids) queryClient.removeQueries({ queryKey: queryKeys.messages(id) });
+        dropCachedMessages(vars.ids);
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
     },
   });

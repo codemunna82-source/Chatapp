@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import * as messagesApi from '../api/endpoints/messages';
 import type { SendMessageBody } from '../api/endpoints/messages';
@@ -7,12 +8,43 @@ import { playSentSound } from '../sockets/useMessageAlert';
 import { isOfflineError } from '../api/client';
 import { useOutboxStore, isQueueableBody } from '../store/outboxStore';
 import { captureHandledError } from '../lib/sentry';
+import { readCachedMessages, writeCachedMessages } from '../storage/chatCache';
 
 type MessagesPage = { items: Message[]; nextCursor: string | null };
 type MessagesData = InfiniteData<MessagesPage, string | undefined>;
 
+/**
+ * The thread as it was left on disk, shaped into the one page React Query
+ * can start from.
+ *
+ * Read once per mount, not per render: MMKV is synchronous, so a read on
+ * every render would be a JSON.parse of fifty messages in the render pass
+ * of a list that is trying to be smooth.
+ */
+function useCachedFirstPage(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string | undefined,
+): MessagesData | undefined {
+  return useMemo(() => {
+    if (!conversationId) return undefined;
+    // Already in memory: React Query would discard initialData, so the
+    // read and the parse would be pure cost on the very frame that opens
+    // the chat — which is the frame this whole cache exists to protect.
+    if (queryClient.getQueryData(queryKeys.messages(conversationId))) return undefined;
+    const cached = readCachedMessages(conversationId);
+    if (!cached || cached.items.length === 0) return undefined;
+    return {
+      pages: [{ items: cached.items, nextCursor: cached.nextCursor }],
+      pageParams: [undefined],
+    };
+  }, [queryClient, conversationId]);
+}
+
 export function useMessages(conversationId: string | undefined) {
-  return useInfiniteQuery<MessagesPage, Error, MessagesData, ReturnType<typeof queryKeys.messages>, string | undefined>({
+  const queryClient = useQueryClient();
+  const cached = useCachedFirstPage(queryClient, conversationId);
+
+  const query = useInfiniteQuery<MessagesPage, Error, MessagesData, ReturnType<typeof queryKeys.messages>, string | undefined>({
     queryKey: queryKeys.messages(conversationId ?? ''),
     queryFn: ({ pageParam }) => messagesApi.listMessages(conversationId as string, { cursor: pageParam }),
     initialPageParam: undefined,
@@ -38,7 +70,73 @@ export function useMessages(conversationId: string | undefined) {
      * cost of some text held in memory.
      */
     gcTime: 30 * 60_000,
+    /**
+     * Open the chat, see the chat (spec §3).
+     *
+     * The last page of this conversation is on disk, so the screen is
+     * painted with real messages in its first render pass instead of a
+     * skeleton and a round trip. This only ever applies on a COLD start:
+     * once the query exists in memory React Query ignores initialData
+     * entirely, so moving in and out of a thread within a session still
+     * takes the in-memory cache and the staleTime above.
+     */
+    initialData: cached,
+    /**
+     * Stale the moment it is restored, deliberately.
+     *
+     * Dating it by when it was written would let a cache under five
+     * minutes old skip the refetch — and on a cold start that refetch is
+     * the only thing that closes the gap, since the socket replays
+     * nothing and RealtimeSync's resync deliberately skips the first
+     * connect. So the disk copy is what gets DRAWN, and the network is
+     * still what it gets CORRECTED by, every launch.
+     */
+    initialDataUpdatedAt: cached ? 0 : undefined,
   });
+
+  usePersistMessages(conversationId, query.data);
+
+  return query;
+}
+
+/**
+ * Writes the thread back to disk as it changes.
+ *
+ * Debounced, because this data moves for reasons that are not worth a
+ * write each: a delivery receipt, a read receipt and an upload's progress
+ * all land as separate patches, and serialising fifty messages on every
+ * one of them would spend the frame budget this cache exists to save. The
+ * pending write is flushed on unmount so leaving a chat always leaves the
+ * newest copy behind.
+ */
+const PERSIST_DEBOUNCE_MS = 800;
+
+function usePersistMessages(conversationId: string | undefined, data: MessagesData | undefined): void {
+  const latest = useRef<MessagesData | undefined>(undefined);
+
+  useEffect(() => {
+    latest.current = data;
+  }, [data]);
+
+  useEffect(() => {
+    if (!conversationId || !data) return;
+    const timer = setTimeout(() => persist(conversationId, latest.current), PERSIST_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [conversationId, data]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    return () => persist(conversationId, latest.current);
+  }, [conversationId]);
+}
+
+function persist(conversationId: string, data: MessagesData | undefined): void {
+  if (!data || data.pages.length === 0) return;
+  writeCachedMessages(
+    conversationId,
+    flattenMessages(data),
+    data.pages[data.pages.length - 1]?.nextCursor ?? null,
+  );
 }
 
 /**
