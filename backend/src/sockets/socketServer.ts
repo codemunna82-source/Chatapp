@@ -137,6 +137,25 @@ export function startSocketServer(httpServer: HttpServer): AppServer {
       void replayRingingWebCall(socket, guest.conversationId);
       registerGuestTypingHandlers(socket, guest);
 
+      /**
+       * A round trip, so the window can time one on its own clock.
+       *
+       * The agent socket has had this for a while, to prove a link is
+       * still alive after a doze. The window needs it for a different
+       * reason: telling a slow NETWORK apart from slow delivery is
+       * otherwise impossible from either end alone. A server timestamp
+       * compared against the browser's would answer it — and would be
+       * wrong, because the two clocks disagree by an unknown amount. An
+       * ack measured start-to-finish in the browser uses one clock and
+       * cannot lie.
+       *
+       * Deliberately does nothing else: no state, no broadcast, no log.
+       * It exists to put one packet on the wire in each direction.
+       */
+      socket.on('ping:check', (ack?: () => void) => {
+        if (typeof ack === 'function') ack();
+      });
+
       // Answer the question the page opens with, rather than leaving it
       // showing "offline" until an agent happens to connect or leave.
       void countOnlineAgents(io as AppServer, guest.tenantId).then((count) => {
