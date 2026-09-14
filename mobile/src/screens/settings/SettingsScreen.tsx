@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import {
   registerForPushNotifications,
   getPushStatus,
@@ -400,6 +401,16 @@ function AlertsSection() {
               : 'Background alerts: tap to check.'}
         </Text>
       </Pressable>
+
+      {/* Which APK this actually is.
+          Two builds minutes apart differed only in whether they carried
+          the Firebase config, and there was no way to tell from the phone
+          which one was installed — so a fixed build and an unfixed one
+          looked identical, and the wrong one got tested. */}
+      <Text style={[typography.caption, { color: colors.textTertiary, marginTop: spacing.xs }]}>
+        VOXO {Constants.expoConfig?.version ?? '—'} · build{' '}
+        {Constants.expoConfig?.android?.versionCode ?? '—'}
+      </Text>
     </View>
   );
 }

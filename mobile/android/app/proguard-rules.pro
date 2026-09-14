@@ -33,6 +33,28 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 
+# Firebase Cloud Messaging.
+#
+# This is the rule whose absence broke push in RELEASE builds only, while
+# every check said it should work: the config file was in the APK, the
+# google-services Gradle plugin ran, and the app still could not get a
+# token — so registration reported "no push configuration" for a build
+# that had one.
+#
+# Firebase does not wire itself up by direct reference. It discovers its
+# components at startup through ComponentRegistrar classes named as
+# strings in AndroidManifest metadata, and reaches its services the same
+# way. R8 sees no caller for any of them, so it renames or removes them,
+# and initialisation then finds nothing to initialise. Debug builds are
+# unaffected because they are not minified, which is exactly what makes
+# this the kind of bug that only appears in the build people install.
+-keep class com.google.firebase.** { *; }
+-keep class * implements com.google.firebase.components.ComponentRegistrar { *; }
+-keep class com.google.android.gms.common.** { *; }
+-keep class com.google.android.gms.tasks.** { *; }
+-dontwarn com.google.firebase.**
+-dontwarn com.google.android.gms.**
+
 # Hermes/JSC entry points.
 -keep class com.facebook.hermes.** { *; }
 -keep class com.facebook.react.bridge.** { *; }
