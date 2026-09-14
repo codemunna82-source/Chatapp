@@ -620,6 +620,18 @@ export async function postGuestMessage(
     status: 'DELIVERED',
   });
 
+  /**
+   * The socket, the moment the message exists.
+   *
+   * It used to come after the activation write, the welcome message and
+   * the conversation-row update — three more round trips to a database on
+   * another continent, with the agent's app showing nothing for the whole
+   * of it. None of them changes this message or decides whether it is
+   * delivered, so none of them belongs in front of it.
+   */
+  const realtime = getRealtimeEmitter();
+  realtime.emitMessageNew(guest.tenantId, toRealtimeMessage(message), guest.whatsappPhoneNumberId);
+
   // The customer has moved over. This is the moment three things stop or
   // start, and all three must happen exactly once — which is what
   // activateGuestSession's filter guarantees when two messages are sent
@@ -630,27 +642,28 @@ export async function postGuestMessage(
     // clearing the flag is the whole of it. The agent's app finds the full
     // thread the first time it opens the conversation.
     await setAwaitingWebChat(guest.conversationId, guest.tenantId, false);
+    // After the customer's own message is on the wire, so the greeting
+    // lands under it rather than ahead of it.
     await postWelcomeMessage(guest);
   }
 
   const updated = await recordGuestInboundActivity(guest.conversationId, guest.tenantId, text);
-
-  const realtime = getRealtimeEmitter();
-  realtime.emitMessageNew(guest.tenantId, toRealtimeMessage(message), guest.whatsappPhoneNumberId);
   if (updated) {
     realtime.emitConversationUpdated(guest.tenantId, toRealtimeConversation(updated));
   }
 
-  // Last, and never allowed to fail the request: the message is already
-  // stored and already on every open agent app over the socket.
-  await pushIncomingMessage({
+  // Never allowed to fail the request, and never waited on: the message is
+  // already stored and already on every open agent app over the socket, so
+  // a round trip to Google is time the customer spends watching a pending
+  // tick for a message that has arrived.
+  void pushIncomingMessage({
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
     contactName: contact?.name || contact?.phone || 'Web chat',
     messageType: 'text',
     text,
-  });
+  }).catch(() => {});
 
   const view = toGuestMessage(message as unknown as MessageLean);
   if (quoted) {
@@ -847,6 +860,12 @@ export async function postGuestMediaMessage(
     status: 'DELIVERED',
   });
 
+  // The socket first — see postGuestMessage for why the two writes that
+  // used to precede it do not belong in front of a message that is
+  // already stored and final.
+  const realtime = getRealtimeEmitter();
+  realtime.emitMessageNew(guest.tenantId, toRealtimeMessage(message), guest.whatsappPhoneNumberId);
+
   // The chat list has one line per conversation and can show neither a
   // picture nor a recording, so it gets the same placeholder the WhatsApp
   // ingestion path uses for the same message types.
@@ -855,20 +874,17 @@ export async function postGuestMediaMessage(
     guest.tenantId,
     kind === 'image' ? '[image]' : '[voice message]',
   );
-
-  const realtime = getRealtimeEmitter();
-  realtime.emitMessageNew(guest.tenantId, toRealtimeMessage(message), guest.whatsappPhoneNumberId);
   if (updated) {
     realtime.emitConversationUpdated(guest.tenantId, toRealtimeConversation(updated));
   }
 
-  await pushIncomingMessage({
+  void pushIncomingMessage({
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
     contactName: contact?.name || contact?.phone || 'Web chat',
     messageType: kind,
-  });
+  }).catch(() => {});
 
   return toGuestMessage(message as unknown as MessageLean);
 }
@@ -920,22 +936,23 @@ export async function postGuestLocationMessage(
     status: 'DELIVERED',
   });
 
-  const updated = await recordGuestInboundActivity(guest.conversationId, guest.tenantId, text);
-
+  // The socket first, as on every other guest write path.
   const realtime = getRealtimeEmitter();
   realtime.emitMessageNew(guest.tenantId, toRealtimeMessage(message), guest.whatsappPhoneNumberId);
+
+  const updated = await recordGuestInboundActivity(guest.conversationId, guest.tenantId, text);
   if (updated) {
     realtime.emitConversationUpdated(guest.tenantId, toRealtimeConversation(updated));
   }
 
-  await pushIncomingMessage({
+  void pushIncomingMessage({
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
     contactName: contact?.name || contact?.phone || 'Web chat',
     messageType: 'location',
     text,
-  });
+  }).catch(() => {});
 
   const view = toGuestMessage(message as unknown as MessageLean);
   if (quoted) {

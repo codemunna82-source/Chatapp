@@ -78,6 +78,16 @@ export interface SendOutboundMessageInput {
    * has already received.
    */
   clientMessageId?: string;
+  /**
+   * The conversation, when the caller already has it.
+   *
+   * Every HTTP send arrives through requireVisibleConversation, which has
+   * just loaded this exact document to decide the caller may see it.
+   * Re-reading it here was a round trip to Mumbai for something already
+   * in memory. Optional so the non-HTTP callers (the auto-reply, the
+   * tests) stay unchanged — they simply pay the read.
+   */
+  conversation?: ConversationDoc;
 }
 
 /**
@@ -132,12 +142,38 @@ export async function setMessageStarredForTenant(
 }
 
 export async function sendOutboundMessage(input: SendOutboundMessageInput): Promise<MessageDoc> {
-  const conversation = await findConversationByIdAndTenant(input.conversationId, input.tenantId);
+  const conversation =
+    input.conversation ?? (await findConversationByIdAndTenant(input.conversationId, input.tenantId));
   if (!conversation) {
     throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
   }
 
-  const contact = await findContactByIdAndTenant(String(conversation.contactId), input.tenantId);
+  /**
+   * Four independent reads, one round trip.
+   *
+   * They used to run one after another, each awaited before the next was
+   * issued, and none of them needs anything the others return — only the
+   * contact needs the conversation, which is already in hand. Against a
+   * database ~235 ms away that ordering alone cost most of a second
+   * before the message was even written, and the customer's window was
+   * waiting on all of it: measured in production, a reply took 2.1 s to
+   * leave the server, on a socket that then delivered it in milliseconds.
+   *
+   * The reply target is fetched here too. It is only read on the WhatsApp
+   * path, but a query that runs beside three others adds no wall time,
+   * where the same query in sequence adds a full round trip.
+   */
+  const [contact, alreadySent, session, replyTarget] = await Promise.all([
+    findContactByIdAndTenant(String(conversation.contactId), input.tenantId),
+    input.clientMessageId
+      ? findMessageByClientId(input.tenantId, input.clientMessageId)
+      : Promise.resolve(null),
+    findActiveSessionForConversation(input.conversationId, input.tenantId),
+    input.replyToMessageId
+      ? findMessageByIdAndTenant(input.replyToMessageId, input.tenantId)
+      : Promise.resolve(null),
+  ]);
+
   if (!contact) {
     throw ApiError.notFound('CONTACT_NOT_FOUND', 'Contact not found');
   }
@@ -156,11 +192,12 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * airtight — this lookup handles the common case cheaply, and the index
    * catches two retries arriving at the same instant, where both would
    * pass this check.
+   *
+   * Checked after the batch above rather than before it: the other three
+   * reads are harmless on a duplicate, and they are free here because
+   * they ran alongside this one.
    */
-  if (input.clientMessageId) {
-    const already = await findMessageByClientId(input.tenantId, input.clientMessageId);
-    if (already) return already;
-  }
+  if (alreadySent) return alreadySent;
 
   // A demo contact is a local sandbox: the number is not on WhatsApp, so
   // neither the window rule nor a real send means anything on it. Both are
@@ -187,7 +224,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
   const channel = resolveReplyChannel({
     messageType: input.type,
     isDemoContact,
-    session: await findActiveSessionForConversation(input.conversationId, input.tenantId),
+    session,
   });
 
   // Delivered into the window the customer is actually reading, and not
@@ -208,11 +245,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     );
   }
 
-  let replyToMetaMessageId: string | undefined;
-  if (input.replyToMessageId) {
-    const replyTarget = await findMessageByIdAndTenant(input.replyToMessageId, input.tenantId);
-    replyToMetaMessageId = replyTarget?.metaMessageId ?? undefined;
-  }
+  const replyToMetaMessageId = replyTarget?.metaMessageId ?? undefined;
 
   // Our own row is created before calling Meta (status QUEUED) so a
   // mid-flight crash never loses the attempt — see markMessageFailed below.
@@ -269,6 +302,8 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     );
 
     const sentMessage = await attachMetaMessageId(String(localMessage._id), input.tenantId, metaMessageId);
+
+    const realtime = getRealtimeEmitter();
     /**
      * The chat row and the socket both skip a system message.
      *
@@ -278,29 +313,30 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
      * more places. The conversation's own timestamps are unaffected
      * either way; what is skipped is the preview text and the push.
      */
-    const updatedConversation = input.internal
-      ? null
-      : await recordOutboundActivity(
-          input.conversationId,
-          input.tenantId,
-          input.text ?? input.caption ?? `[${input.type}]`,
-          new Date(),
-          // SENT, matching the message row attachMetaMessageId just wrote
-          // — a status webhook advances both from here.
-          'SENT',
-          String(localMessage._id),
-        );
-
-    const realtime = getRealtimeEmitter();
     if (!input.internal) {
+      // Before the conversation row is touched, not after. Nobody is
+      // waiting on a preview string; the people on this thread are
+      // waiting on the message, and putting a write in front of the emit
+      // held it back by a full round trip for no one's benefit.
       realtime.emitMessageNew(
         input.tenantId,
         toRealtimeMessage(sentMessage ?? localMessage),
         String(conversation.whatsappPhoneNumberId),
       );
-    }
-    if (updatedConversation) {
-      realtime.emitConversationUpdated(input.tenantId, toRealtimeConversation(updatedConversation));
+
+      const updatedConversation = await recordOutboundActivity(
+        input.conversationId,
+        input.tenantId,
+        input.text ?? input.caption ?? `[${input.type}]`,
+        new Date(),
+        // SENT, matching the message row attachMetaMessageId just wrote
+        // — a status webhook advances both from here.
+        'SENT',
+        String(localMessage._id),
+      );
+      if (updatedConversation) {
+        realtime.emitConversationUpdated(input.tenantId, toRealtimeConversation(updatedConversation));
+      }
     }
 
     return sentMessage ?? localMessage;
@@ -365,6 +401,27 @@ async function deliverToWebChat(
     clientMessageId: input.clientMessageId,
   });
 
+  /**
+   * The socket, first, and nothing before it.
+   *
+   * This is the whole point of the web channel: the customer's window is
+   * already connected and the event reaches it in milliseconds. Every
+   * await placed above this line is time that window spends showing
+   * nothing — and the two that used to sit here (the conversation row,
+   * then the push) added the better part of a second to a message that
+   * was already written and final.
+   *
+   * Nothing below needs to happen first. The row's preview is for the
+   * agent's own chat list, and the push is for a window that is NOT open;
+   * neither is a precondition for delivering to one that is.
+   */
+  const realtime = getRealtimeEmitter();
+  realtime.emitMessageNew(
+    input.tenantId,
+    toRealtimeMessage(message),
+    String(conversation.whatsappPhoneNumberId),
+  );
+
   const updatedConversation = await recordOutboundActivity(
     input.conversationId,
     input.tenantId,
@@ -372,13 +429,6 @@ async function deliverToWebChat(
     new Date(),
     'SENT',
     String(message._id),
-  );
-
-  const realtime = getRealtimeEmitter();
-  realtime.emitMessageNew(
-    input.tenantId,
-    toRealtimeMessage(message),
-    String(conversation.whatsappPhoneNumberId),
   );
   if (updatedConversation) {
     realtime.emitConversationUpdated(input.tenantId, toRealtimeConversation(updatedConversation));
@@ -389,9 +439,12 @@ async function deliverToWebChat(
   // backgrounded the window would simply never learn a reply had arrived,
   // and WhatsApp is no longer carrying it for them.
   //
-  // Never allowed to fail the send — the message is stored and already on
-  // the socket, and an FCM hiccup must not surface as "message not sent".
-  try {
+  // Not awaited, and never allowed to fail the send. It is a notification
+  // for a window that is not watching, so nothing — not the customer's
+  // socket, not the agent's response — has any reason to wait on a name
+  // lookup and a round trip to Google before it completes. The catch is
+  // what keeps an FCM hiccup from surfacing as "message not sent".
+  void (async () => {
     const businessName = (
       await resolveBusinessNameForConversation(
         input.tenantId,
@@ -405,9 +458,9 @@ async function deliverToWebChat(
       messageType: input.type === 'text' ? 'text' : 'media',
       text: input.text,
     });
-  } catch {
+  })().catch(() => {
     // Deliberately swallowed; see above.
-  }
+  });
 
   return message;
 }

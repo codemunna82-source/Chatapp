@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ApiError } from '../../lib/ApiError';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
-import { conversationVisibleTo } from './conversation.repository';
+import { findVisibleConversation } from './conversation.repository';
 import { visibleWhatsAppPhoneNumberId } from './conversation.access';
 
 /**
@@ -14,6 +14,11 @@ import { visibleWhatsAppPhoneNumberId } from './conversation.access';
  *
  * 404 rather than 403 — see loadVisibleConversation in conversation.service
  * for why a scoped user is not told that a colleague's chat exists.
+ *
+ * The document it loaded is left on the request. Every handler below it
+ * needs the same conversation, and fetching it again is a second round
+ * trip to the database for a document already in memory — see
+ * findVisibleConversation for what that cost on the send path.
  */
 export async function requireVisibleConversation(
   req: Request,
@@ -23,14 +28,15 @@ export async function requireVisibleConversation(
   try {
     const auth = getTenantContext(req);
     const conversationId = req.params.conversationId as string;
-    const visible = await conversationVisibleTo(
+    const conversation = await findVisibleConversation(
       conversationId,
       auth.tenantId,
       visibleWhatsAppPhoneNumberId(auth),
     );
-    if (!visible) {
+    if (!conversation) {
       throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
     }
+    req.visibleConversation = conversation;
     next();
   } catch (err) {
     next(err);

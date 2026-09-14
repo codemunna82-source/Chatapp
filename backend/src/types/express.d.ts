@@ -1,6 +1,7 @@
 import type { UserRole } from '../lib/jwt';
 import type { Permission } from '../modules/users/permission';
 import type { GuestContext } from '../modules/guest/guest.service';
+import type { ConversationDoc } from '../modules/conversations/conversation.model';
 
 export interface AuthContext {
   userId: string;
@@ -27,6 +28,13 @@ declare global {
        * so no route that expects a logged-in user can be satisfied by one.
        */
       guest?: GuestContext;
+      /**
+       * The conversation requireVisibleConversation already proved this
+       * caller may see. Present on every route under
+       * /conversations/:conversationId so the handler does not pay a
+       * second round trip for a document the guard has in hand.
+       */
+      visibleConversation?: ConversationDoc;
       /** Raw request body bytes, captured by express.json()'s `verify` hook in app.ts — needed for HMAC signature verification (Meta webhooks), which must hash the exact wire bytes. */
       rawBody?: Buffer;
     }

@@ -77,6 +77,11 @@ export const sendMessageHandler = asyncHandler(async (req: Request, res: Respons
     conversationId,
     senderId: auth.userId,
     ...body,
+    // requireVisibleConversation loaded this a moment ago to decide the
+    // caller may see it. Handing it on saves the service a second read of
+    // the same document — a full round trip on the path the customer's
+    // window is waiting at the end of.
+    conversation: req.visibleConversation,
   } as never);
 
   res.status(201).json({ success: true, data: toRealtimeMessage(message) });

@@ -90,11 +90,34 @@ export async function conversationVisibleTo(
   tenantId: string,
   whatsappPhoneNumberId?: string,
 ): Promise<boolean> {
-  if (!Types.ObjectId.isValid(id)) return false;
+  return (await findVisibleConversation(id, tenantId, whatsappPhoneNumberId)) !== null;
+}
+
+/**
+ * The visibility check and the document, in one round trip.
+ *
+ * This used to be `Conversation.exists()` — a projection to `_id`, on the
+ * grounds that a caller who only wants to tell "not found" from "empty"
+ * should not pull a whole document. That was right about the bytes and
+ * wrong about the cost that matters: every write route under
+ * /conversations/:id then ran this check and IMMEDIATELY loaded the same
+ * document again, so the saving was a few hundred bytes and the price was
+ * a second round trip to a database on another continent. On the send
+ * path that was ~235 ms of the ~2.1 s a message took to reach the
+ * customer, paid for nothing.
+ *
+ * So the middleware keeps the document it proved exists (see
+ * requireVisibleConversation.middleware.ts) and the handler reuses it.
+ */
+export async function findVisibleConversation(
+  id: string,
+  tenantId: string,
+  whatsappPhoneNumberId?: string,
+): Promise<ConversationDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
   const filter: Record<string, unknown> = { _id: id, tenantId };
   if (whatsappPhoneNumberId) filter.whatsappPhoneNumberId = whatsappPhoneNumberId;
-  const found = await Conversation.exists(filter);
-  return found !== null;
+  return Conversation.findOne(filter);
 }
 
 export async function conversationExistsForTenant(id: string, tenantId: string): Promise<boolean> {
