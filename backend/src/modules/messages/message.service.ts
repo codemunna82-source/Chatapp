@@ -16,6 +16,7 @@ import { markConnectionExpired } from '../whatsapp/embeddedSignup.service';
 import { getMetaGateway, toMetaApiError, MetaApiError, type SendableMediaType } from '../../integrations/meta';
 import { mockMetaGateway } from '../../integrations/meta/mock/mockMetaGateway';
 import { getRealtimeEmitter } from '../../realtime/events';
+import { trace, type PerfTrace } from '../../lib/perfTrace';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
 import type { MessageDoc } from './message.model';
 import { toWhatsAppId } from '../../lib/phone';
@@ -142,8 +143,14 @@ export async function setMessageStarredForTenant(
 }
 
 export async function sendOutboundMessage(input: SendOutboundMessageInput): Promise<MessageDoc> {
+  // SERVER_RECEIVED. Everything after this is ours to account for; what
+  // came before it is the client and the network, which the app's own
+  // marks cover. See lib/perfTrace.ts — off unless PERF_TRACE=true.
+  const perf = trace('message.send', { conversationId: input.conversationId, type: input.type });
+
   const conversation =
     input.conversation ?? (await findConversationByIdAndTenant(input.conversationId, input.tenantId));
+  perf.mark(input.conversation ? 'conversation_reused' : 'conversation_read');
   if (!conversation) {
     throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
   }
@@ -173,6 +180,9 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
       ? findMessageByIdAndTenant(input.replyToMessageId, input.tenantId)
       : Promise.resolve(null),
   ]);
+  // One mark for all four: they ran together, so four numbers would be
+  // four readings of the same round trip.
+  perf.mark('parallel_reads');
 
   if (!contact) {
     throw ApiError.notFound('CONTACT_NOT_FOUND', 'Contact not found');
@@ -233,7 +243,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
   // window to enforce — that rule is Meta's, and this message never
   // reaches them.
   if (channel === 'web') {
-    return deliverToWebChat(input, conversation, contact);
+    return deliverToWebChat(input, conversation, contact, perf);
   }
 
   // Server-side 24h window enforcement — never trust an Android countdown.
@@ -252,7 +262,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
   // A reaction's row links to its target via replyToMessageId (same field
   // a reply uses) — see realtime/serializers.ts / the mobile client for how
   // that's read back to attach the reaction badge to the right bubble.
-  const localMessage = await createMessage({
+  const localMessage = await createMessageTraced(perf, {
     tenantId: input.tenantId,
     conversationId: input.conversationId,
     senderId: input.senderId,
@@ -300,6 +310,10 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
       input,
       replyToMetaMessageId,
     );
+    // The Meta round trip, which is why the WhatsApp path can never be as
+    // quick as the web one: this is a call to someone else's servers, and
+    // the message does not exist for them until it returns.
+    perf.mark('meta_dispatch');
 
     const sentMessage = await attachMetaMessageId(String(localMessage._id), input.tenantId, metaMessageId);
 
@@ -323,6 +337,11 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
         toRealtimeMessage(sentMessage ?? localMessage),
         String(conversation.whatsappPhoneNumberId),
       );
+      // SOCKET_EMIT_RECEIVER. The receiver's device has the message from
+      // here; everything below is bookkeeping, and the trace ends now so
+      // the total is the number that matters.
+      perf.mark('emit');
+      perf.end({ messageId: String(localMessage._id), channel: 'whatsapp' });
 
       const updatedConversation = await recordOutboundActivity(
         input.conversationId,
@@ -372,12 +391,30 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
  * exist on Meta's side, and inventing an id for it would make every
  * later status lookup lie.
  */
+/**
+ * The insert, timed on its own.
+ *
+ * Its own function because it is the one database call the delivery
+ * genuinely cannot start without, so it is the floor every other
+ * optimisation is measured against — worth being able to read straight
+ * off the log line rather than inferring it from a total.
+ */
+async function createMessageTraced(
+  perf: PerfTrace,
+  input: Parameters<typeof createMessage>[0],
+): Promise<MessageDoc> {
+  const message = await createMessage(input);
+  perf.mark('db_insert');
+  return message;
+}
+
 async function deliverToWebChat(
   input: SendOutboundMessageInput,
   conversation: ConversationDoc,
   contact: ContactDoc,
+  perf: PerfTrace,
 ): Promise<MessageDoc> {
-  const message = await createMessage({
+  const message = await createMessageTraced(perf, {
     tenantId: input.tenantId,
     conversationId: input.conversationId,
     senderId: input.senderId,
@@ -421,6 +458,9 @@ async function deliverToWebChat(
     toRealtimeMessage(message),
     String(conversation.whatsappPhoneNumberId),
   );
+  // SOCKET_EMIT_RECEIVER — the customer's window has it from here.
+  perf.mark('emit');
+  perf.end({ messageId: String(message._id), channel: 'web' });
 
   const updatedConversation = await recordOutboundActivity(
     input.conversationId,

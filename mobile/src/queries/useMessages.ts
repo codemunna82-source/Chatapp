@@ -4,6 +4,7 @@ import * as messagesApi from '../api/endpoints/messages';
 import type { SendMessageBody } from '../api/endpoints/messages';
 import type { Message } from '../api/types';
 import { queryKeys } from './keys';
+import { perfStart, perfMark, perfEnd } from '../utils/perfTrace';
 import { playSentSound } from '../sockets/useMessageAlert';
 import { isOfflineError } from '../api/client';
 import { useOutboxStore, isQueueableBody } from '../store/outboxStore';
@@ -339,6 +340,11 @@ export function useSendMessage(conversationId: string) {
        */
       body.clientMessageId = tempId;
 
+      // SEND_CLICK. The id doubles as the trace key because it is already
+      // the one thing that follows this message all the way through: the
+      // optimistic bubble, the wire, the server's dedupe, and back.
+      perfStart(tempId, 'send');
+
       const optimistic: Message = {
         id: tempId,
         conversationId,
@@ -360,6 +366,10 @@ export function useSendMessage(conversationId: string) {
         createdAt: new Date().toISOString(),
       };
       upsertMessageInCache(queryClient, conversationId, optimistic);
+      // UI_RENDERED for the SENDER. The bubble is on screen from here —
+      // which is the point of the optimistic write, and the reason the
+      // sender's own experience was never the thing that felt slow.
+      perfMark(tempId, 'optimistic_render');
       return { tempId };
     },
     onSuccess: (message, _body, context) => {
@@ -370,6 +380,12 @@ export function useSendMessage(conversationId: string) {
         })),
       );
       upsertMessageInCache(queryClient, conversationId, message);
+      // SERVER_ACK. One clock, both ends: this is the full round trip —
+      // network out, everything the server did, network back. Compare it
+      // against the server's own `perf message.send` total to split the
+      // network from the backend without trusting two clocks to agree.
+      perfMark(context.tempId, 'server_ack');
+      perfEnd(context.tempId, 'send');
       // On success only. A sound for a send that then fails would be a
       // false confirmation — the FAILED bubble is the honest signal there.
       playSentSound();

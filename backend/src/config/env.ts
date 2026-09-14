@@ -174,6 +174,24 @@ const envSchema = z.object({
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
+  /**
+   * Stage-by-stage timing for the realtime send path (see lib/perfTrace.ts).
+   *
+   * Off by default and read once at boot, so a production instance that
+   * has not opted in does no work at all — the tracer's own calls become
+   * a single boolean test. On, every send logs where its milliseconds
+   * went, which is the only way to tell backend time from database time
+   * from network time without guessing.
+   *
+   * A string enum rather than z.coerce.boolean(), which reads the string
+   * "false" as TRUE and would leave this permanently on for anyone who
+   * set it to the obvious value.
+   */
+  PERF_TRACE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
   SEED_TENANT_NAME: z.string().default('Demo Tenant'),
   SEED_MASTER_ADMIN_EMAIL: z.string().email().default('admin@example.com'),
   /**

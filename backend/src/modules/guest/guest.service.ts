@@ -1,6 +1,7 @@
 import { env } from '../../config/env';
 import { ApiError } from '../../lib/ApiError';
 import { logger } from '../../lib/logger';
+import { trace } from '../../lib/perfTrace';
 import type { AuthContext } from '../../types/express';
 import { Tenant } from '../tenants/tenant.model';
 import { findContactByIdAndTenant, findOrCreateContactByPhone } from '../contacts/contact.repository';
@@ -592,11 +593,16 @@ export async function postGuestMessage(
 ): Promise<GuestMessageView> {
   assertGuestNotBlocked(guest);
 
+  // SERVER_RECEIVED for the customer -> agent direction. Off unless
+  // PERF_TRACE=true; see lib/perfTrace.ts.
+  const perf = trace('guest.send', { conversationId: guest.conversationId, type: 'text' });
+
   const [conversation, phoneNumber, contact] = await Promise.all([
     findConversationByIdAndTenant(guest.conversationId, guest.tenantId),
     findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId),
     findContactByIdAndTenant(guest.contactId, guest.tenantId),
   ]);
+  perf.mark('parallel_reads');
   if (!conversation) {
     throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'This conversation no longer exists');
   }
@@ -606,6 +612,7 @@ export async function postGuestMessage(
   // reply pointing at someone else's message would put a line of their
   // thread on this customer's screen.
   const quoted = await resolveQuotedMessage(guest, replyToMessageId);
+  if (replyToMessageId) perf.mark('quoted_read');
 
   const message = await createMessage({
     tenantId: guest.tenantId,
@@ -629,8 +636,13 @@ export async function postGuestMessage(
    * of it. None of them changes this message or decides whether it is
    * delivered, so none of them belongs in front of it.
    */
+  perf.mark('db_insert');
+
   const realtime = getRealtimeEmitter();
   realtime.emitMessageNew(guest.tenantId, toRealtimeMessage(message), guest.whatsappPhoneNumberId);
+  // SOCKET_EMIT_RECEIVER — every open agent app has it from here.
+  perf.mark('emit');
+  perf.end({ messageId: String(message._id) });
 
   // The customer has moved over. This is the moment three things stop or
   // start, and all three must happen exactly once — which is what

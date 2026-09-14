@@ -15,6 +15,7 @@ import {
 } from '../calling/callStore';
 import { upsertMessageInCache, patchMessageStatusInCache } from '../queries/useMessages';
 import { queryKeys } from '../queries/keys';
+import { perfSpan } from '../utils/perfTrace';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import type { Message, Conversation, MessageStatus } from '../api/types';
 
@@ -122,7 +123,17 @@ export function RealtimeSync({
   useSocketEvent<Message>(
     'message:new',
     (message) => {
-      upsertMessageInCache(queryClient, message.conversationId, message);
+      // ANDROID_RECEIVED -> UI_RENDERED, on one clock.
+      //
+      // The cache write is what puts the bubble on screen: every screen
+      // showing this conversation is subscribed to that query, so React
+      // re-renders from here with no network in between. If this span
+      // reads a few milliseconds and the message still felt slow, the
+      // time was spent before the device ever heard about it — which is
+      // exactly what the server trace then tells you.
+      perfSpan('message:new -> cache', () => {
+        upsertMessageInCache(queryClient, message.conversationId, message);
+      });
       invalidateConversations();
       // No invalidate for the conversation itself. The server emits
       // conversation:updated immediately after every message:new (see
