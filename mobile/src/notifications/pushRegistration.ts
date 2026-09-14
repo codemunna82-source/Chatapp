@@ -37,36 +37,89 @@ async function ensureChannel(): Promise<void> {
  * the app still receives everything live over the socket while it is open,
  * which is exactly how it behaved before push existed.
  */
-export async function registerForPushNotifications(): Promise<boolean> {
+/**
+ * Why push is not working, in the user's words.
+ *
+ * This used to return a bare false from six different places, and say
+ * nothing to anybody — not a log, not a screen, nothing. So "push does
+ * not arrive" had no visible difference between a refused permission, a
+ * build with no Firebase config, and a server that never heard of this
+ * device. It stayed invisible for as long as it did for exactly that
+ * reason. Every path now names itself.
+ */
+export type PushStatus =
+  | 'registered'
+  | 'permission-denied'
+  | 'no-firebase-config'
+  | 'server-rejected'
+  | 'emulator';
+
+export const PUSH_STATUS_TEXT: Record<PushStatus, string> = {
+  registered: 'On — alerts arrive when VOXO is closed',
+  'permission-denied':
+    'Blocked. Turn notifications on for VOXO in your phone settings, then tap to retry.',
+  'no-firebase-config':
+    'This build has no push configuration, so this phone cannot be registered for alerts.',
+  'server-rejected': 'Could not register this phone with the server. Tap to retry.',
+  emulator: 'Not available on an emulator.',
+};
+
+let lastStatus: PushStatus | null = null;
+
+/** What the last registration attempt concluded; null before the first. */
+export function getPushStatus(): PushStatus | null {
+  return lastStatus;
+}
+
+export async function registerForPushNotifications(): Promise<PushStatus> {
   // An emulator has no FCM token to give, and asking produces a confusing
   // error rather than a useful one.
-  if (!Device.isDevice) return false;
+  if (!Device.isDevice) {
+    lastStatus = 'emulator';
+    return lastStatus;
+  }
 
+  await ensureChannel();
+
+  const existing = await Notifications.getPermissionsAsync();
+  let granted = existing.granted;
+  if (!granted && existing.canAskAgain) {
+    const requested = await Notifications.requestPermissionsAsync();
+    granted = requested.granted;
+  }
+  if (!granted) {
+    lastStatus = 'permission-denied';
+    return lastStatus;
+  }
+
+  let token: string | null = null;
   try {
-    await ensureChannel();
-
-    const existing = await Notifications.getPermissionsAsync();
-    let granted = existing.granted;
-    if (!granted && existing.canAskAgain) {
-      const requested = await Notifications.requestPermissionsAsync();
-      granted = requested.granted;
-    }
-    if (!granted) return false;
-
     const devicePushToken = await Notifications.getDevicePushTokenAsync();
     // The native FCM token is a string on Android; the type is a union
     // covering web push, where it is not.
-    const token = typeof devicePushToken.data === 'string' ? devicePushToken.data : null;
-    if (!token) return false;
-
-    await registerDevice(token, Platform.OS === 'ios' ? 'ios' : 'android');
-    currentToken = token;
-    return true;
+    token = typeof devicePushToken.data === 'string' ? devicePushToken.data : null;
   } catch {
-    // Most often: the build has no google-services.json, so there is no
-    // Firebase project to get a token from. Silent by design — see above.
-    return false;
+    // The build has no google-services.json, so there is no Firebase
+    // project to get a token from. Separated from the registration call
+    // below because the two need completely different things done about
+    // them, and telling them apart was impossible before.
+    token = null;
   }
+  if (!token) {
+    lastStatus = 'no-firebase-config';
+    return lastStatus;
+  }
+
+  try {
+    await registerDevice(token, Platform.OS === 'ios' ? 'ios' : 'android');
+  } catch {
+    lastStatus = 'server-rejected';
+    return lastStatus;
+  }
+
+  currentToken = token;
+  lastStatus = 'registered';
+  return lastStatus;
 }
 
 /** Detaches this device from the workspace on sign-out. Best-effort: if the

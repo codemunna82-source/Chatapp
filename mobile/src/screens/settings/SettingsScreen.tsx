@@ -1,6 +1,12 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  registerForPushNotifications,
+  getPushStatus,
+  PUSH_STATUS_TEXT,
+  type PushStatus,
+} from '../../notifications/pushRegistration';
 import * as ImagePicker from 'expo-image-picker';
 import { File, Paths } from 'expo-file-system';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -301,6 +307,25 @@ function ChatWallpaperSection() {
 
 function AlertsSection() {
   const { colors, spacing, radius, typography } = useTheme();
+  /**
+   * Whether this phone is actually registered for push.
+   *
+   * The line under this section used to say push "isn't set up yet",
+   * flatly, forever — it was written before push existed and never
+   * caught up. Meanwhile registration failed silently in half a dozen
+   * ways and no screen anywhere said which, or that it had failed at all.
+   */
+  const [push, setPush] = useState<PushStatus | null>(getPushStatus);
+  const [checking, setChecking] = useState(false);
+
+  const retry = useCallback(async () => {
+    setChecking(true);
+    try {
+      setPush(await registerForPushNotifications());
+    } finally {
+      setChecking(false);
+    }
+  }, []);
   const sound = useAlertPreferenceStore((s) => s.sound);
   const vibrate = useAlertPreferenceStore((s) => s.vibrate);
   const setSound = useAlertPreferenceStore((s) => s.setSound);
@@ -338,8 +363,43 @@ function AlertsSection() {
       {/* Said plainly, because the difference is not obvious and guessing
           wrong means missing customers. */}
       <Text style={[typography.caption, { color: colors.textTertiary, marginTop: spacing.xs }]}>
-        Plays while VOXO is open. Alerts when the app is closed need push notifications, which aren&apos;t set up yet.
+        These play while VOXO is open.
       </Text>
+
+      {/* And the other half: whether anything arrives when it is closed.
+          Tappable on every state except success, because every failing
+          one is either retryable or fixed in phone settings and then
+          retried. */}
+      <Pressable
+        onPress={push === 'registered' || checking ? undefined : retry}
+        style={[styles.pushRow, { marginTop: spacing.sm }]}
+        accessibilityRole={push === 'registered' ? 'text' : 'button'}
+        accessibilityLabel="Push notification status"
+      >
+        <Ionicons
+          name={
+            push === 'registered'
+              ? 'notifications'
+              : push === null
+                ? 'help-circle-outline'
+                : 'notifications-off-outline'
+          }
+          size={16}
+          color={push === 'registered' ? colors.success : colors.warning}
+        />
+        <Text
+          style={[
+            typography.caption,
+            { color: push === 'registered' ? colors.textSecondary : colors.warning, marginLeft: spacing.xs, flex: 1 },
+          ]}
+        >
+          {checking
+            ? 'Checking…'
+            : push
+              ? PUSH_STATUS_TEXT[push]
+              : 'Background alerts: tap to check.'}
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -508,6 +568,7 @@ const styles = StyleSheet.create({
   subscriptionCard: {},
   subscriptionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   statusPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  pushRow: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact },
   alertRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, minHeight: 48 },
   appearanceRow: { flexDirection: 'row' },
   appearanceOption: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: touchTarget.compact },
