@@ -100,6 +100,20 @@ export interface RealtimeEmitter {
     status: string,
     whatsappPhoneNumberId: string,
   ): void;
+  /**
+   * A web call ending, to the customer's own window.
+   *
+   * Its own method because the audience is different from every other
+   * call event here: those go to the workspace's agents by number, and
+   * this one goes to the single conversation the customer holds a link
+   * to. Added so the REST reject can reach them — the socket handler
+   * that used to be the only way in is unavailable to a phone acting on
+   * a notification with the app closed.
+   */
+  emitWebCallEnded(
+    conversationId: string,
+    payload: { callId: string; status: string; durationSeconds: number },
+  ): void;
   emitConversationUpdated(tenantId: string, conversation: RealtimeConversationPayload): void;
   emitConversationRead(tenantId: string, conversationId: string, byUserId: string, whatsappPhoneNumberId: string): void;
   emitNotificationNew(tenantId: string, userId: string, notification: RealtimeNotificationPayload): void;
@@ -111,6 +125,7 @@ const noopEmitter: RealtimeEmitter = {
   emitMessageNew: () => {},
   emitMessageUpdated: () => {},
   emitMessageStatus: () => {},
+  emitWebCallEnded: () => {},
   emitConversationUpdated: () => {},
   emitConversationRead: () => {},
   emitNotificationNew: () => {},

@@ -18,6 +18,14 @@
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+  <!-- Raises the incoming-call UI over the lock screen, which is the one
+       thing a ringing notification has to do that an ordinary one does
+       not: a call the user must unlock to find is a call they miss.
+       Granted by default below Android 14; from 14 it is reserved for
+       calling and alarm apps, which this is. Used by the call
+       notification alone — never for messages, which stay ordinary
+       notifications on their own channel. -->
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WRITE_CONTACTS"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>

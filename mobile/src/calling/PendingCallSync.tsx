@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { fetchPendingCall } from '../api/endpoints/calls';
 import { useCallStore } from './callStore';
+import { takePendingAccept } from './callActions';
+import { cancelIncomingCall } from './callNotification';
 
 /**
  * Picks up a call that started ringing while the app was closed.
@@ -27,7 +29,26 @@ export function PendingCallSync(): null {
       inFlight.current = true;
       try {
         const pending = await fetchPendingCall();
-        if (!pending?.sdpOffer) return;
+
+        /**
+         * Accept was pressed on the notification while the app was closed.
+         *
+         * The press could not answer anything at the time — there was no
+         * session, no socket and no offer, because the push carries none
+         * of them. It recorded the intent and launched the app; this is
+         * where that intent is honoured.
+         *
+         * Read before the early return below, so a stale accept is always
+         * consumed rather than left to fire at the next call.
+         */
+        const accepted = takePendingAccept();
+
+        if (!pending?.sdpOffer) {
+          // The call ended while the app was starting. Take the ring back
+          // rather than leaving a notification for something that is over.
+          if (accepted) void cancelIncomingCall(accepted);
+          return;
+        }
         // Answered down completely different paths, so the store has to be
         // told which this is rather than inferring it from the ids.
         if (pending.channel === 'web') {
@@ -40,6 +61,14 @@ export function PendingCallSync(): null {
           });
         } else {
           useCallStore.getState().ring(pending);
+        }
+
+        // Only when the accept was for THIS call: a stale one must not
+        // pick up a different customer, which is the whole reason it
+        // carries an id rather than a flag.
+        if (accepted && accepted === pending.callId) {
+          void cancelIncomingCall(accepted);
+          void useCallStore.getState().answer();
         }
       } catch {
         // Offline, or the session is being refreshed. There is nothing to

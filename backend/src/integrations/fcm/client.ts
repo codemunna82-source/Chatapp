@@ -138,7 +138,10 @@ export const fcmGateway: PushGateway = {
           {
             message: {
               token,
-              notification: { title: payload.title, body: payload.body },
+              // Omitted entirely for a data-only send — see PushPayload.
+              // An empty object here is NOT the same thing: FCM treats a
+              // present notification block as one to draw.
+              ...(payload.dataOnly ? {} : { notification: { title: payload.title, body: payload.body } }),
               data: payload.data,
               // Both platform blocks travel on every message. FCM applies
               // only the one matching the token's platform, so this costs
@@ -172,7 +175,12 @@ export const fcmGateway: PushGateway = {
               android: {
                 priority: 'high',
                 collapseKey: payload.collapseKey,
-                notification: {
+                // A ring is worthless once it has stopped ringing. Without
+                // this FCM would hold an undelivered call message for four
+                // weeks and hand a phone a notification for a call that
+                // ended long ago.
+                ...(payload.dataOnly ? { ttl: '45s' } : {}),
+                ...(payload.dataOnly ? {} : { notification: {
                   channelId: payload.channelId,
                   tag: payload.collapseKey,
                   // No clickAction on purpose. It names an intent action,
@@ -184,7 +192,7 @@ export const fcmGateway: PushGateway = {
                   // launches the launcher activity, which is what
                   // expo-notifications expects and where the tap handler
                   // reads the data payload.
-                },
+                } }),
               },
             },
           },

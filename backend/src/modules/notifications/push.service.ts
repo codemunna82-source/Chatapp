@@ -127,7 +127,16 @@ async function sendToTenant(
 
     const result: SendResult = { invalidTokens: [], successCount: 0, failureCount: 0 };
     for (const [channelId, tokens] of groups) {
-      const sent = await gateway.send(tokens, { ...payload, channelId });
+      const sent = await gateway.send(tokens, {
+        ...payload,
+        channelId,
+        // Also in `data`, because a call is sent data-only: with no
+        // notification block there is no android.notification.channelId
+        // for FCM to carry, and the app is the one drawing the
+        // notification now. This is how the ringtone the agent picked
+        // reaches the notification they actually hear.
+        data: channelId ? { ...payload.data, channelId } : payload.data,
+      });
       result.invalidTokens.push(...sent.invalidTokens);
       result.successCount += sent.successCount;
       result.failureCount += sent.failureCount;
@@ -253,6 +262,9 @@ export interface IncomingCallPushInput {
   contactId: string;
   contactName: string;
   callId: string;
+  /** Audio today. Carried so the notification can say which, and so the
+   *  day video lands nothing about this payload has to change. */
+  callType?: 'audio' | 'video';
   /**
    * Where the call came from. A call from the web chat window is not a
    * WhatsApp call and must not say it is — the agent decides whether to
@@ -285,12 +297,65 @@ export async function pushIncomingCall(input: IncomingCallPushInput): Promise<vo
       collapseKey: `incoming-call:${input.callId}`,
       // The ringing channel, not the chat one — see CALL_CHANNEL_ID.
       channelId: CALL_CHANNEL_ID,
+      /**
+       * No notification block, so the APP draws this one.
+       *
+       * Android cannot put Accept and Reject on a notification it drew
+       * itself — the system tray owns it and the app's code never runs.
+       * The buttons are the whole point of a call notification, so the
+       * message goes as data and the app builds it. See PushPayload for
+       * what that costs.
+       */
+      dataOnly: true,
       data: {
         type: 'incoming_call',
         callId: input.callId,
         contactId: input.contactId,
+        callerName: input.contactName,
+        callType: input.callType ?? 'audio',
+        // Which signalling path answers it — the app picks a completely
+        // different answer routine for each.
+        channel: input.channel ?? 'whatsapp',
+        // Milliseconds, as a string: FCM rejects non-string data values.
+        // The app drops a ring that arrived after it was already over.
+        ringingSince: String(Date.now()),
       },
     },
     { whatsappPhoneNumberId: input.whatsappPhoneNumberId, perDeviceCallChannel: true },
+  );
+}
+
+export interface CallCancelledPushInput {
+  tenantId: string;
+  whatsappPhoneNumberId: string;
+  callId: string;
+}
+
+/**
+ * Take the ring back.
+ *
+ * Sent when a call stops being answerable — the caller hung up, it timed
+ * out, or another of this agent's devices picked it up. Without it a
+ * phone keeps ringing at a call that no longer exists, and the agent
+ * answers into silence.
+ *
+ * Data-only and carrying nothing but the id: there is no notification to
+ * show here, only one to remove, and the app matches it by callId.
+ *
+ * Deliberately unaddressed by user: EVERY device that may have been rung
+ * has to be told, including the one that just answered — it cancels its
+ * own notification and keeps the call.
+ */
+export async function pushCallCancelled(input: CallCancelledPushInput): Promise<void> {
+  await sendToTenant(
+    input.tenantId,
+    {
+      title: '',
+      body: '',
+      collapseKey: `incoming-call:${input.callId}`,
+      dataOnly: true,
+      data: { type: 'call_cancelled', callId: input.callId },
+    },
+    { whatsappPhoneNumberId: input.whatsappPhoneNumberId },
   );
 }

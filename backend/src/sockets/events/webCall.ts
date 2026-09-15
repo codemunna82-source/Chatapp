@@ -13,7 +13,7 @@ import { visibleWhatsAppPhoneNumberId } from '../../modules/conversations/conver
 import { findContactByIdAndTenant } from '../../modules/contacts/contact.repository';
 import { pushGuestIncomingCall } from '../../modules/guest/guestPush.service';
 import { resolveBusinessNameForConversation } from '../../modules/guest/businessName';
-import { pushIncomingCall } from '../../modules/notifications/push.service';
+import { pushIncomingCall, pushCallCancelled } from '../../modules/notifications/push.service';
 import {
   isConversationBlockedByGuest,
   isSessionBlocked,
@@ -74,6 +74,32 @@ const agentTarget = (
   }
   return io.to(tenantRoom(String(call.tenantId)));
 };
+
+/**
+ * Takes back a ring that was pushed to phones.
+ *
+ * The `web:call:ended` socket event reaches a device with the app awake.
+ * The push reached one that was asleep, and nothing retracts it — so that
+ * phone keeps ringing at a call which no longer exists, and its owner
+ * answers into silence.
+ *
+ * Never awaited and never allowed to throw: by the time this runs the
+ * call has already ended correctly, and a failed push must not turn a
+ * completed hang-up into an error.
+ */
+function cancelCallNotifications(
+  call: { tenantId: unknown; whatsappPhoneNumberId?: unknown },
+  callId: string,
+): void {
+  if (!call.whatsappPhoneNumberId) return;
+  void pushCallCancelled({
+    tenantId: String(call.tenantId),
+    whatsappPhoneNumberId: String(call.whatsappPhoneNumberId),
+    callId,
+  }).catch(() => {
+    // See above.
+  });
+}
 
 /* ------------------------------------------------------------------ *
  * The customer's side                                                 *
@@ -191,6 +217,10 @@ export function registerGuestCallHandlers(io: AppServer, socket: AppSocket, gues
       status: ended.status,
       durationSeconds: ended.duration ?? 0,
     });
+    // The socket event only reaches a phone with the app awake. A phone
+    // that was rung by a push is still ringing at a call that has ended,
+    // and its owner is about to answer into silence.
+    void cancelCallNotifications(live, String(ended._id));
   });
 }
 
@@ -310,6 +340,10 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
       return;
     }
 
+    // Answered here, so every other phone this rang on must stop. The
+    // answering device is included on purpose: it clears its own
+    // notification and keeps the call.
+    cancelCallNotifications(claimed, String(claimed._id));
     socket.to(conversationRoom(String(claimed.conversationId))).emit('web:call:answered', {
       callId: String(claimed._id),
       sdp: payload.sdp,
@@ -324,6 +358,7 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
 
     const ended = await endWebCall(payload.callId, 'REJECTED');
     if (!ended) return;
+    cancelCallNotifications(ended, String(ended._id));
     socket.to(conversationRoom(String(ended.conversationId))).emit('web:call:ended', {
       callId: String(ended._id),
       status: 'REJECTED',
@@ -352,6 +387,7 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
 
     const ended = await endWebCall(payload.callId, live.status === 'ANSWERED' ? 'COMPLETED' : 'REJECTED');
     if (!ended) return;
+    cancelCallNotifications(ended, String(ended._id));
     socket.to(conversationRoom(String(ended.conversationId))).emit('web:call:ended', {
       callId: String(ended._id),
       status: ended.status,

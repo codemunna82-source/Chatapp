@@ -50,6 +50,9 @@ export function createSocketRealtimeEmitter(io: AppServer): RealtimeEmitter {
         status,
       });
     },
+    emitWebCallEnded(conversationId, payload) {
+      io.to(conversationRoom(conversationId)).emit('web:call:ended', payload);
+    },
     emitConversationUpdated(tenantId, conversation) {
       io.to(tenantRoom(tenantId))
         .to(phoneNumberRoom(conversation.whatsappPhoneNumberId))

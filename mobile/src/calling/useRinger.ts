@@ -3,6 +3,8 @@ import { Vibration } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { useAlertPreferenceStore } from '../store/alertPreferenceStore';
 import { currentRingtone } from '../store/ringtoneStore';
+import { cancelIncomingCall } from './callNotification';
+import { useCallStore } from './callStore';
 
 /**
  * The ring — sound and vibration — while a call is waiting to be answered.
@@ -70,9 +72,17 @@ export function useRinger(active: boolean): void {
     if (sound) startSound();
     if (vibrate) Vibration.vibrate(VIBRATION_PATTERN, true);
 
+    /** The call this ring belongs to, captured now: by cleanup time the
+     *  store has already been reset to idle and the id is gone. */
+    const callId = useCallStore.getState().callId;
+
     return () => {
       stopSound();
       Vibration.cancel();
+      // Answered, declined, cancelled or timed out — every way a ring
+      // ends comes through here, which makes it the one place that can
+      // promise the notification never outlives the call.
+      if (callId) void cancelIncomingCall(callId);
     };
   }, [active]);
 }

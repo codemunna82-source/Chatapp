@@ -31,6 +31,26 @@ export interface PushPayload {
    * like a message notification and fade.
    */
   requireInteraction?: boolean;
+  /**
+   * Send with NO notification block, so Android hands the message to the
+   * app instead of drawing it itself.
+   *
+   * For ringing calls and their cancellations, and nothing else. A
+   * notification Android draws is a notification the app cannot put
+   * buttons on — the system tray owns it, the app's JS never runs, and
+   * Accept/Reject have nowhere to come from. Data-only is what lets the
+   * app build a call notification with actions and a full-screen intent.
+   *
+   * The cost is real and worth naming: Android does not deliver data-only
+   * messages to an app the user or the OEM has force-stopped, where a
+   * notification block would still have shown. PendingCallSync is the
+   * backstop — it asks the server for a ringing call whenever the app is
+   * opened — so the call is late rather than lost.
+   *
+   * The webpush block is untouched: a browser has no such distinction and
+   * still needs its notification drawn for it.
+   */
+  dataOnly?: boolean;
 }
 
 export interface SendResult {

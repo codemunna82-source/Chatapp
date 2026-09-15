@@ -9,7 +9,7 @@ import type { ExpoConfig, ConfigContext } from 'expo/config';
 // every build so far — bumping it here since an unchanged versionCode on a
 // same-package/same-signature reinstall can make Android's installer treat
 // a new APK as a no-op if the previous copy isn't uninstalled first.
-const ANDROID_VERSION_CODE = 32;
+const ANDROID_VERSION_CODE = 33;
 
 // Resolved from this file's own directory rather than the working
 // directory, so the config behaves the same whether Expo is invoked from
@@ -50,6 +50,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'RECORD_AUDIO',
       'MODIFY_AUDIO_SETTINGS',
       'POST_NOTIFICATIONS',
+      // Raises the incoming-call UI over the lock screen — the one thing a
+      // ringing notification must do that an ordinary one must not. Used
+      // by the call notification alone; messages stay ordinary.
+      'USE_FULL_SCREEN_INTENT',
       // Sharing a pin in a chat. COARSE only: a customer being told where
       // the shop is does not need the agent's position to the metre, and
       // the fine permission is a far larger thing to ask for on a screen

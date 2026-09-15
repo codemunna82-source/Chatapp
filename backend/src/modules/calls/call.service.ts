@@ -7,8 +7,9 @@ import { visibleWhatsAppPhoneNumberId } from '../conversations/conversation.acce
 import type { AuthContext } from '../../types/express';
 import { recordAudit } from '../audit/auditLog.service';
 import { findUserByIdAndTenant } from '../users/user.repository';
-import { pushCallStarted, pushIncomingCall } from '../notifications/push.service';
+import { pushCallStarted, pushIncomingCall, pushCallCancelled } from '../notifications/push.service';
 import * as repo from './callLog.repository';
+import { endWebCall, findLiveWebCall } from './webCall.service';
 import * as contactRepo from '../contacts/contact.repository';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
 import type { CallLogDoc } from './callLog.model';
@@ -221,6 +222,18 @@ export async function handleInboundCallEvent(
     endedAt: item.timestamp,
   });
 
+  // Same reasoning as the web path: the socket event below reaches a
+  // phone with the app awake, and the push reached one that was asleep.
+  // Without this, that phone rings on at a call Meta has already ended.
+  void pushCallCancelled({
+    tenantId,
+    whatsappPhoneNumberId,
+    callId: String(existing._id),
+  }).catch(() => {
+    // The call has already ended correctly; a failed retraction must not
+    // fail a webhook Meta would then retry.
+  });
+
   getRealtimeEmitter().emitCallEnded(
     tenantId,
     {
@@ -356,6 +369,49 @@ export async function answerCallForUser(
 
 /** Declines a ringing call. Meta then sends a terminate webhook. */
 export async function rejectCallForUser(auth: AuthContext, callId: string): Promise<PublicCallLog> {
+  /**
+   * A web call first, because it is the only one a REST reject can be
+   * about that the socket handler cannot already do.
+   *
+   * This path exists for a phone acting on a notification with the app
+   * closed: there is no socket in a headless handler, so `web:call:reject`
+   * is out of reach and the customer would be left listening to a ring
+   * nobody can stop. Same authorisation as everywhere else — the call has
+   * to belong to this tenant and be visible on this user's number.
+   *
+   * endWebCall only acts on a LIVE call and returns null otherwise, which
+   * is what makes a double-tap, a retry, and a reject arriving after the
+   * caller already hung up all end in the same harmless place rather than
+   * moving a finished call backwards.
+   */
+  const web = await findLiveWebCall(callId);
+  if (web && String(web.tenantId) === auth.tenantId) {
+    const scope = visibleWhatsAppPhoneNumberId(auth);
+    if (scope && web.whatsappPhoneNumberId && String(web.whatsappPhoneNumberId) !== scope) {
+      throw ApiError.notFound('CALL_NOT_FOUND', 'Call not found');
+    }
+    const ended = await endWebCall(callId, 'REJECTED');
+    const row = ended ?? web;
+    if (ended && row.conversationId) {
+      getRealtimeEmitter().emitWebCallEnded(String(row.conversationId), {
+        callId: String(row._id),
+        status: 'REJECTED',
+        durationSeconds: 0,
+      });
+    }
+    if (ended && row.whatsappPhoneNumberId) {
+      void pushCallCancelled({
+        tenantId: auth.tenantId,
+        whatsappPhoneNumberId: String(row.whatsappPhoneNumberId),
+        callId: String(row._id),
+      }).catch(() => {
+        // The call is already rejected; a failed retraction must not fail
+        // the request that did the rejecting.
+      });
+    }
+    return toPublicCallLog(row);
+  }
+
   const call = await loadOwnCall(auth, callId);
   const creds = await resolveMetaCredentialsForPhoneNumber(
     auth.tenantId,

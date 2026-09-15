@@ -6,6 +6,9 @@ import type { NavigationContainerRef } from '@react-navigation/native';
 import { registerForPushNotifications, getPushStatus } from './pushRegistration';
 import { useActiveConversationStore } from '../store/activeConversationStore';
 import { useCallStore } from '../calling/callStore';
+import notifee, { EventType } from '@notifee/react-native';
+import { displayIncomingCall, cancelIncomingCall } from '../calling/callNotification';
+import { handleCallAction } from '../calling/callActions';
 import { queryKeys } from '../queries/keys';
 
 /**
@@ -18,6 +21,10 @@ interface PushData {
   conversationId?: string;
   contactId?: string;
   callId?: string;
+  /** Call pushes only — see push.service.ts. */
+  callerName?: string;
+  callType?: string;
+  channelId?: string;
 }
 
 interface PushNotificationSyncProps {
@@ -81,8 +88,50 @@ export function PushNotificationSync({ navigationRef }: PushNotificationSyncProp
     // A notification arriving while the app is open still means new data:
     // the socket usually delivered it already, but a push can beat a
     // reconnecting socket, and refreshing costs nothing when it did not.
+    /**
+     * Button presses while the app IS running.
+     *
+     * The background handler in callBackground.ts covers the other two
+     * cases; notifee routes a press to whichever of the two is live, never
+     * both, so there is no risk of a call being answered twice.
+     */
+    const unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {
+      if (type !== EventType.ACTION_PRESS) return;
+      const actionId = detail.pressAction?.id;
+      const callId = detail.notification?.data?.callId as string | undefined;
+      if (!actionId || !callId) return;
+      void handleCallAction(actionId, callId);
+    });
+
     const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
       const data = (notification.request.content.data ?? {}) as PushData;
+
+      /**
+       * A call push landing while the app is awake.
+       *
+       * Two outcomes, and the socket decides which. If the socket already
+       * put this call on screen, the push is the slower copy of news
+       * already acted on and there is nothing to draw. If it did not — a
+       * socket still reconnecting after a doze, which is exactly when a
+       * push earns its keep — the call notification goes up here, because
+       * the background task that would have drawn it does not run while
+       * the app is in the foreground.
+       */
+      if (data.type === 'call_cancelled' && data.callId) {
+        void cancelIncomingCall(data.callId);
+        return;
+      }
+      if (data.type === 'incoming_call' && data.callId) {
+        const live = useCallStore.getState();
+        if (live.callId === data.callId && live.phase !== 'idle') return;
+        void displayIncomingCall({
+          callId: data.callId,
+          callerName: data.callerName ?? 'Incoming call',
+          callType: data.callType === 'video' ? 'video' : 'audio',
+          channelId: data.channelId,
+        });
+        return;
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
       if (data.conversationId) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.messages(data.conversationId) });
@@ -105,6 +154,7 @@ export function PushNotificationSync({ navigationRef }: PushNotificationSyncProp
     });
 
     return () => {
+      unsubscribeNotifee();
       receivedSub.remove();
       responseSub.remove();
     };
