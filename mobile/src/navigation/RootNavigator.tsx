@@ -11,6 +11,7 @@ import { OutboxFlusher } from '../sockets/OutboxFlusher';
 import { PushNotificationSync } from '../notifications/PushNotificationSync';
 import { CallOverlay } from '../calling/CallOverlay';
 import { PendingCallSync } from '../calling/PendingCallSync';
+import { CallReadinessSheet, CallReadinessWatcher } from '../notifications/CallReadinessSheet';
 import { navigationIntegration, isSentryEnabled } from '../lib/sentry';
 
 export function RootNavigator() {
@@ -68,11 +69,18 @@ export function RootNavigator() {
           <OutboxFlusher />
           <PushNotificationSync navigationRef={navigationRef} />
           <PendingCallSync />
+          {/* Checks, on every foreground, that this phone can still ring —
+              the settings a call depends on all belong to the user and
+              every one of them fails silently. */}
+          <CallReadinessWatcher />
           <MainTabNavigator />
           {/* Last, and outside the tab navigator, so a ringing call covers
               whatever screen the user was on rather than replacing it —
               declining puts them straight back with nothing to navigate. */}
           <CallOverlay />
+          {/* Above the tabs for the same reason as the call overlay: it is
+              raised from a background check, not from a screen. */}
+          <CallReadinessSheet />
         </>
       ) : (
         <AuthNavigator />

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { RingtoneSheet, ringtoneLabel } from './RingtoneSheet';
 import { useRingtoneStore } from '../../store/ringtoneStore';
+import { useCallReadinessStore } from '../../notifications/callReadiness';
 import {
   registerForPushNotifications,
   getPushStatus,
@@ -333,6 +334,10 @@ function AlertsSection() {
     }
   }, []);
   const ringtoneId = useRingtoneStore((s) => s.ringtoneId);
+  const readinessIssues = useCallReadinessStore((s) => s.issues);
+  const showReadiness = useCallReadinessStore((s) => s.show);
+  const refreshReadiness = useCallReadinessStore((s) => s.refresh);
+  const blockingCount = readinessIssues.filter((i) => i.severity === 'blocking').length;
   const [ringtoneOpen, setRingtoneOpen] = useState(false);
   const sound = useAlertPreferenceStore((s) => s.sound);
   const vibrate = useAlertPreferenceStore((s) => s.vibrate);
@@ -406,6 +411,45 @@ function AlertsSection() {
       </Pressable>
 
       <RingtoneSheet visible={ringtoneOpen} onClose={() => setRingtoneOpen(false)} />
+
+      {/* Always reachable, not only when something is wrong. Someone whose
+          calls are not arriving needs a door to walk through, and looking
+          for it is not the moment to discover it only appears on its own. */}
+      <Pressable
+        onPress={() => {
+          void refreshReadiness();
+          showReadiness();
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Check whether calls can reach this phone"
+        style={({ pressed }) => [
+          styles.alertRow,
+          {
+            marginTop: spacing.sm,
+            paddingHorizontal: spacing.md,
+            backgroundColor: pressed ? colors.surfaceElevated : colors.surfaceAlt,
+            borderRadius: radius.md,
+          },
+        ]}
+      >
+        <Text style={[typography.body, { color: colors.textPrimary }]}>Can calls reach you?</Text>
+        <View style={styles.ringtoneValue}>
+          <Ionicons
+            name={blockingCount > 0 ? 'alert-circle' : 'checkmark-circle'}
+            size={16}
+            color={blockingCount > 0 ? colors.warning : colors.success}
+          />
+          <Text
+            style={[
+              typography.body,
+              { color: blockingCount > 0 ? colors.warning : colors.textSecondary, marginLeft: spacing.xs },
+            ]}
+          >
+            {blockingCount > 0 ? `${blockingCount} to fix` : 'Ready'}
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} style={{ marginLeft: spacing.xs }} />
+        </View>
+      </Pressable>
 
       {/* And the other half: whether anything arrives when it is closed.
           Tappable on every state except success, because every failing
