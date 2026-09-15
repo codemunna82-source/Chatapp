@@ -141,6 +141,56 @@ jobs:
             # step whether or not a prebuild is ever added.
             cp google-services.json android/app/google-services.json
             echo "google-services.json written — push notifications enabled in this build"
+
+            # Check the API KEY, because nothing else does.
+            #
+            # The google-services Gradle plugin validates the package name
+            # and stops there — a config whose api_key is masked, trimmed
+            # or a placeholder builds perfectly, ships, and fails only on
+            # the phone, with:
+            #
+            #   "Fetching the token failed: Please set a valid API key."
+            #
+            # That is exactly what happened here, and it cost four rounds
+            # of fixing things that were never broken: the file was in the
+            # APK, the plugin ran, R8 kept every Firebase class. The key
+            # inside was not a key.
+            #
+            # Firebase browser keys are "AIza" followed by 35 characters
+            # from [A-Za-z0-9_-]. Nothing below prints the key, its length
+            # or any part of it — only whether it is shaped like one.
+            python3 - <<'CHECK'
+          import json, re, sys
+          with open('google-services.json') as f:
+              try:
+                  cfg = json.load(f)
+              except json.JSONDecodeError as err:
+                  sys.exit(f"::error::GOOGLE_SERVICES_JSON is not valid JSON ({err.msg}). "
+                           "Re-download it from the Firebase console and paste the whole file.")
+
+          clients = cfg.get('client') or []
+          if not clients:
+              sys.exit("::error::google-services.json has no `client` entry — this is not a "
+                       "complete Firebase config.")
+
+          packages = [
+              (c.get('client_info', {}).get('android_client_info', {}) or {}).get('package_name')
+              for c in clients
+          ]
+          if 'com.voxo.app' not in packages:
+              sys.exit("::error::google-services.json has no client for com.voxo.app. "
+                       "Add an Android app with that package name in the Firebase console.")
+
+          key = ((clients[0].get('api_key') or [{}])[0]).get('current_key', '')
+          if not re.fullmatch(r'AIza[0-9A-Za-z_-]{35}', key):
+              sys.exit("::error::The api_key in GOOGLE_SERVICES_JSON is not a valid Firebase "
+                       "key. It must be 'AIza' followed by 35 characters. A masked or "
+                       "truncated copy builds fine and then fails on the phone with "
+                       "'Please set a valid API key'. Re-download google-services.json from "
+                       "the Firebase console and paste it into the secret unedited.")
+
+          print("google-services.json validated: client for com.voxo.app present, api_key well-formed")
+          CHECK
           else
             echo "GOOGLE_SERVICES_JSON secret not set — building without push notifications"
           fi
