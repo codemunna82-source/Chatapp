@@ -1,7 +1,8 @@
-import { env } from '../../config/env';
 import { logger } from '../../lib/logger';
 import { getPushGateway } from '../../integrations/fcm';
 import { previewForMessage } from '../notifications/push.service';
+import { guestChatUrl } from '../tenants/guestDomain';
+import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
 import {
   deleteGuestPushTokens,
   listGuestPushTokens,
@@ -22,10 +23,19 @@ import {
  * that has genuinely happened.
  */
 
-/** Where a tapped notification should open. */
-function chatLink(token?: string): string | undefined {
-  if (!env.GUEST_LINK_BASE_URL || !token) return undefined;
-  return `${env.GUEST_LINK_BASE_URL}/c/${token}`;
+/**
+ * Where a tapped notification should open.
+ *
+ * Built on the workspace's own chat domain when it has one. It has to
+ * match the domain the link was originally sent on, because a browser
+ * scopes a push subscription — and the open tab the notification would
+ * otherwise focus — to one origin.
+ */
+async function chatLink(tenantId: string, token?: string): Promise<string | undefined> {
+  if (!token) return undefined;
+  const baseUrl = await guestLinkBaseUrlFor(tenantId);
+  if (!baseUrl) return undefined;
+  return guestChatUrl(baseUrl, token);
 }
 
 async function sendToGuest(
@@ -90,7 +100,7 @@ export async function pushGuestMessage(input: GuestMessagePushInput): Promise<vo
       type: 'message',
       conversationId: input.conversationId,
     },
-    link: chatLink(input.linkToken),
+    link: await chatLink(input.tenantId, input.linkToken),
   });
 }
 
@@ -125,6 +135,6 @@ export async function pushGuestIncomingCall(input: GuestCallPushInput): Promise<
       conversationId: input.conversationId,
       callId: input.callId,
     },
-    link: chatLink(input.linkToken),
+    link: await chatLink(input.tenantId, input.linkToken),
   });
 }

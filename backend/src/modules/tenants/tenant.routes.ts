@@ -7,11 +7,20 @@ import { validate } from '../../middleware/validate.middleware';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { ApiError } from '../../lib/ApiError';
-import { env } from '../../config/env';
 import { Tenant, DEFAULT_AUTO_GUEST_LINK_TEXT, DEFAULT_AUTO_GUEST_WELCOME } from './tenant.model';
 import { resolveBusinessName, resolveBusinessNameForConversation } from '../guest/businessName';
 import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
 import { AVATAR_MAX_SIZE_BYTES } from '../media/avatarAsset';
+import { CONTENT_POLICY_MESSAGE, findPolicyViolation } from '../messages/contentPolicy';
+import { guestLinkUrlPattern } from './guestDomain';
+import {
+  assignPoolDomain,
+  claimCustomDomain,
+  clearGuestDomain,
+  getGuestDomainSettings,
+  guestLinkBaseUrlFor,
+  verifyCustomDomain,
+} from './guestDomain.service';
 import {
   getTenantAvatar,
   removeTenantAvatar,
@@ -107,19 +116,28 @@ const autoGuestLinkSchema = z
       message: 'Name the approved template and its language, or switch to plain text',
       path: ['templateName'],
     },
-  );
+  )
+  /**
+   * The content policy, applied when the wording is SAVED.
+   *
+   * sendOutboundMessage already refuses this text at send time, so nothing
+   * gets out either way. The reason to check it here too is that these two
+   * messages are the only ones on the platform that go out with no human
+   * in the loop — they fire from the webhook handler the moment a customer
+   * writes in. Caught only at send time, a blocked wording would look
+   * saved, look enabled, and silently fail against every customer forever,
+   * which is precisely the failure the template check above exists to
+   * prevent. See contentPolicy.ts.
+   */
+  .refine((body) => !findPolicyViolation(body.message), {
+    message: CONTENT_POLICY_MESSAGE,
+    path: ['message'],
+  })
+  .refine((body) => !findPolicyViolation(body.welcomeMessage), {
+    message: CONTENT_POLICY_MESSAGE,
+    path: ['welcomeMessage'],
+  });
 
-/**
- * The address a template's URL button must be built on.
- *
- * Returned so the admin screen can print the exact string to paste into
- * WhatsApp Manager. Meta lets a template URL vary only in a suffix, so the
- * base has to be right before the template is submitted for review — and
- * getting it wrong is discovered days later, after approval.
- */
-function guestLinkUrlPattern(): string | null {
-  return env.GUEST_LINK_BASE_URL ? `${env.GUEST_LINK_BASE_URL}/c/{{1}}` : null;
-}
 
 tenantRouter.get(
   '/settings',
@@ -136,6 +154,12 @@ tenantRouter.get(
     // header is per-conversation, but a workspace's numbers almost always
     // carry one business name, and a preview that needs a conversation
     // picked first is a preview nobody looks at.
+    // Per workspace now, not from the environment: a workspace on its
+    // own chat domain needs a DIFFERENT template URL pattern from one on
+    // the shared domain, and printing the shared one to both is how a
+    // template gets approved against an address its links never use.
+    const linkBaseUrl = await guestLinkBaseUrlFor(auth.tenantId);
+
     const firstNumber = await findFirstPhoneNumberForTenant(auth.tenantId);
     const resolved = firstNumber
       ? await resolveBusinessNameForConversation(auth.tenantId, String(firstNumber._id))
@@ -194,8 +218,10 @@ tenantRouter.get(
         // Without this the feature cannot work at all, and the admin has no
         // way to find that out short of turning it on and waiting for a
         // customer to receive nothing.
-        guestLinkConfigured: env.GUEST_LINK_BASE_URL.length > 0,
-        guestLinkUrlPattern: guestLinkUrlPattern(),
+        guestLinkConfigured: linkBaseUrl.length > 0,
+        guestLinkUrlPattern: guestLinkUrlPattern(linkBaseUrl),
+        /** Which domain those links are built on, and how it got there. */
+        guestDomain: await getGuestDomainSettings(auth.tenantId),
       },
     });
   }),
@@ -208,10 +234,10 @@ tenantRouter.patch(
     const auth = getTenantContext(req);
     const body = req.body as z.infer<typeof autoGuestLinkSchema>;
 
-    if (body.enabled && !env.GUEST_LINK_BASE_URL) {
+    if (body.enabled && !(await guestLinkBaseUrlFor(auth.tenantId))) {
       throw ApiError.serviceUnavailable(
         'GUEST_LINK_NOT_CONFIGURED',
-        'GUEST_LINK_BASE_URL is not set on the server, so there is no link to send yet.',
+        'No chat domain is configured on the server, so there is no link to send yet.',
       );
     }
 
@@ -311,5 +337,73 @@ tenantRouter.patch(
           : null,
       },
     });
+  }),
+);
+
+/**
+ * Which domain this workspace's private-chat links are built on.
+ *
+ * MASTER_ADMIN only, like everything else on this router, and this one
+ * earns it twice over: the answer decides what address goes out to every
+ * customer of the workspace, and a verified hostname becomes an origin
+ * this API accepts credentialed browser requests from.
+ *
+ * Two routes in, matching the two arrangements that actually isolate a
+ * workspace's link reputation from everyone else's (guestDomain.ts):
+ * `/pool` takes one of ours, `/custom` claims one of theirs and then has
+ * to pass a DNS check before it does anything.
+ */
+const poolDomainSchema = z.object({
+  /** A specific spare domain. Omitted means "any free one". */
+  host: z.string().trim().max(253).optional(),
+});
+
+const customDomainSchema = z.object({
+  host: z.string().trim().min(3).max(253),
+});
+
+tenantRouter.get(
+  '/settings/guest-domain',
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    res.status(200).json({ success: true, data: await getGuestDomainSettings(auth.tenantId) });
+  }),
+);
+
+tenantRouter.post(
+  '/settings/guest-domain/pool',
+  validate({ body: poolDomainSchema }),
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const body = req.body as z.infer<typeof poolDomainSchema>;
+    res.status(200).json({ success: true, data: await assignPoolDomain(auth.tenantId, body.host) });
+  }),
+);
+
+tenantRouter.post(
+  '/settings/guest-domain/custom',
+  validate({ body: customDomainSchema }),
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const body = req.body as z.infer<typeof customDomainSchema>;
+    // 202, not 200: the domain is recorded but is deliberately doing
+    // nothing yet. The DNS record in the response is the remaining work.
+    res.status(202).json({ success: true, data: await claimCustomDomain(auth.tenantId, body.host) });
+  }),
+);
+
+tenantRouter.post(
+  '/settings/guest-domain/verify',
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    res.status(200).json({ success: true, data: await verifyCustomDomain(auth.tenantId) });
+  }),
+);
+
+tenantRouter.delete(
+  '/settings/guest-domain',
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    res.status(200).json({ success: true, data: await clearGuestDomain(auth.tenantId) });
   }),
 );

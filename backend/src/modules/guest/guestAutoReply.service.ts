@@ -1,5 +1,4 @@
 import { logger } from '../../lib/logger';
-import { env } from '../../config/env';
 import {
   Tenant,
   AUTO_GUEST_LINK_BUTTON_INDEX,
@@ -15,6 +14,8 @@ import {
   reissueGuestSessionToken,
   recordInviteSent,
 } from './guestSession.repository';
+import { guestChatUrl } from '../tenants/guestDomain';
+import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
 
 /**
  * Hands a customer the private-chat link the moment they message in.
@@ -57,7 +58,8 @@ export async function maybeSendGuestLinkAutoReply(input: {
 }): Promise<void> {
   try {
     if (input.inboundMessageType === 'reaction') return;
-    if (!env.GUEST_LINK_BASE_URL) return;
+    const linkBaseUrl = await guestLinkBaseUrlFor(input.tenantId);
+    if (!linkBaseUrl) return;
 
     const tenant = await Tenant.findById(input.tenantId).select('autoGuestLink').lean();
     const config = tenant?.autoGuestLink;
@@ -115,7 +117,7 @@ export async function maybeSendGuestLinkAutoReply(input: {
       token = created.token;
     }
 
-    const url = `${env.GUEST_LINK_BASE_URL}/c/${token}`;
+    const url = guestChatUrl(linkBaseUrl, token);
 
     // No senderId on either path: nobody sent this. Recording a human's id
     // would put an agent's name on a message they did not write, and the

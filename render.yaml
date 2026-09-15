@@ -74,6 +74,20 @@ services:
       # all. Must be the domain the chat frontend is deployed on.
       - key: GUEST_LINK_BASE_URL
         sync: false
+      # Extra domains the chat window is ALSO served on, comma separated,
+      # origin only. Optional, and empty is the starting state.
+      #
+      # These exist for blast radius. Reputation — Meta's and everyone
+      # else's — is scored on the registrable domain, so every workspace
+      # sharing GUEST_LINK_BASE_URL shares its fate: one workspace's links
+      # getting flagged breaks the links of all of them. Listing several
+      # unrelated domains here lets a workspace be moved onto its own.
+      #
+      # Security-relevant: every host listed becomes an origin this API
+      # accepts credentialed browser requests from. Only list hosts that
+      # serve the chat frontend.
+      - key: GUEST_LINK_DOMAIN_POOL
+        sync: false
       # Firebase service account JSON, as one line. Drives every push
       # notification: the agent app's, and — since the web chat window
       # asks for permission too — the customer's browser. Without it

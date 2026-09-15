@@ -18,6 +18,7 @@ import {
 } from './queues/subscriptionExpiry.queue';
 import { startSocketServer, stopSocketServer } from './sockets/socketServer';
 import { migrateWabaIndexAtBoot } from './modules/whatsapp/wabaIndexMigration';
+import { domainPool } from './modules/tenants/guestDomain.service';
 
 /**
  * What this deployment can and cannot do, said once at boot.
@@ -42,6 +43,10 @@ function logConfigReadiness(): void {
       metaAppId: env.META_APP_ID.length > 0,
       metaRegisterPin: env.META_REGISTER_PIN.length > 0,
       guestLinkBaseUrl: env.GUEST_LINK_BASE_URL.length > 0,
+      // A count, not the domains: how many spare chat domains a workspace
+      // can be moved onto, which is the number that says whether the
+      // isolation this exists for is actually available.
+      guestLinkDomainPool: domainPool().length,
       pushFcm: getPushGateway().isConfigured(),
       turn: hasTurnConfigured(),
       cloudinary: Boolean(env.CLOUDINARY_URL),

@@ -155,6 +155,28 @@ const envSchema = z.object({
     .default('')
     .transform((v) => v.trim().replace(/\/+$/, '')),
   /**
+   * Extra domains the chat window is also served on, comma separated.
+   *
+   * These are ours, unrelated to each other as registrable domains, and
+   * handed out to workspaces one at a time so that one workspace's links
+   * being flagged takes down a fraction of the platform instead of all of
+   * it — reputation is scored on the registrable domain, so subdomains of
+   * GUEST_LINK_BASE_URL would share its fate exactly (guestDomain.ts).
+   *
+   * Empty is fine and is the starting state: every workspace then sits on
+   * GUEST_LINK_BASE_URL, which is the behaviour that existed before this
+   * was introduced.
+   *
+   * Every entry here is automatically a trusted browser origin, so this is
+   * a security-relevant list: only put a host on it that serves the chat
+   * window and nothing else.
+   */
+  GUEST_LINK_DOMAIN_POOL: z
+    .string()
+    .optional()
+    .default('')
+    .transform((v) => v.trim()),
+  /**
    * How long a web-chat link keeps working.
    *
    * 0 means it never expires. That is a real trade, not a free win: a

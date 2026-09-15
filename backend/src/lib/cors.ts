@@ -17,18 +17,46 @@ import type { CorsOptions } from 'cors';
  * the CORS spec forbids pairing a credentialed response with a wildcard —
  * a browser rejects that combination even though the server sent it.
  */
-export function resolveCorsOrigin(allowed: string[]): CorsOptions['origin'] {
+export function resolveCorsOrigin(
+  allowed: string[],
+  /**
+   * An extra, changeable source of trusted origins — the per-workspace
+   * chat domains, which live in the database and cannot be listed in an
+   * environment variable that is only read at boot.
+   *
+   * Consulted only after the static list misses, and expected to answer
+   * from a cache: this runs on every cross-origin request, including the
+   * ones an attacker sends from origins that will never match.
+   */
+  isAllowedOrigin?: (origin: string) => Promise<boolean>,
+): CorsOptions['origin'] {
   const list = allowed.map((o) => o.trim()).filter(Boolean);
-  if (list.length === 0) return false;
-  if (list.includes('*')) return true;
-
+  const wildcard = list.includes('*');
   const normalized = new Set(list.map(stripTrailingSlash));
+
+  // A wildcard still short-circuits, but only when there is no dynamic
+  // source to consult — with one, "allow everything" and "allow these"
+  // are the same answer and the cheaper one wins.
+  if (wildcard) return true;
+  if (normalized.size === 0 && !isAllowedOrigin) return false;
+
   return (origin, callback) => {
     // No Origin header: same-origin requests, curl, health checks and the
     // native mobile client. Not a browser cross-origin request, so there
     // is nothing for CORS to decide.
     if (!origin) return callback(null, true);
-    callback(null, normalized.has(stripTrailingSlash(origin)));
+
+    const candidate = stripTrailingSlash(origin);
+    if (normalized.has(candidate)) return callback(null, true);
+    if (!isAllowedOrigin) return callback(null, false);
+
+    isAllowedOrigin(candidate).then(
+      (ok) => callback(null, ok),
+      // A lookup that threw is not a grant. It is also not a 500: the
+      // request continues without CORS headers, which the browser turns
+      // into the same "blocked" the caller would have seen anyway.
+      () => callback(null, false),
+    );
   };
 }
 

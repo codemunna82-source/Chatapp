@@ -24,6 +24,8 @@ import { registerGuestTypingHandlers } from './events/guestTyping';
 import { createSocketRealtimeEmitter } from './realtimeEmitterImpl';
 import { setRealtimeEmitter } from '../realtime/events';
 import type { AppServer, AppSocket } from './types';
+import { resolveCorsOrigin } from '../lib/cors';
+import { isTrustedGuestOrigin } from '../modules/tenants/guestDomain.service';
 
 const REVALIDATE_INTERVAL_MS = 5 * 60 * 1000; // must be <= JWT_ACCESS_TTL for expiry to be caught promptly
 
@@ -53,7 +55,12 @@ export function getIO(): AppServer {
  */
 export function startSocketServer(httpServer: HttpServer): AppServer {
   io = new Server(httpServer, {
-    cors: { origin: env.CORS_ORIGINS, credentials: true },
+    // The same resolver the REST app uses, and for the same reason: a
+    // workspace on its own chat domain opens a socket from that origin
+    // too, and a static list read at boot cannot know about it. Passing
+    // the raw array here also reproduced the bug cors.ts documents — the
+    // "*" that render.yaml ships as its default matched no origin at all.
+    cors: { origin: resolveCorsOrigin(env.CORS_ORIGINS, isTrustedGuestOrigin), credentials: true },
     // socket.io-client reconnects automatically with these defaults; the
     // Android app doesn't need extra client-side reconnect logic beyond
     // handling the 'disconnect'/'connect' events to refresh UI state.

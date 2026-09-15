@@ -1,4 +1,5 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mongoose';
+import { GUEST_DOMAIN_SOURCES } from './guestDomain';
 
 export const TENANT_STATUSES = ['ACTIVE', 'SUSPENDED'] as const;
 export type TenantStatus = (typeof TENANT_STATUSES)[number];
@@ -46,6 +47,33 @@ const tenantSchema = new Schema(
     avatarCloudinaryPublicId: { type: String, select: false },
     avatarUpdatedAt: { type: Date },
     slug: { type: String, required: true, trim: true, lowercase: true },
+    /**
+     * The domain this workspace's private-chat links are built on.
+     *
+     * Unset means the shared GUEST_LINK_BASE_URL, which is where every
+     * workspace starts and where most stay. It is set when a workspace
+     * needs its link reputation separated from everyone else's — see
+     * guestDomain.ts for why a subdomain would not achieve that.
+     *
+     * `host` is a bare hostname, always served over https. `source` says
+     * who owns it: POOL is one of ours, handed out automatically, and is
+     * usable the moment it is assigned. CUSTOM is the workspace's own and
+     * is NOT usable until `verifiedAt` is set — until then we would be
+     * pointing customers at a hostname nobody has proved they control.
+     *
+     * `verifyToken` is the value that has to appear in their DNS. Kept on
+     * the document rather than derived, so re-reading the settings screen
+     * shows the same record they were told to create rather than a new
+     * one every time.
+     */
+    guestDomain: {
+      host: { type: String, trim: true, lowercase: true },
+      source: { type: String, enum: GUEST_DOMAIN_SOURCES },
+      verifyToken: { type: String },
+      verifiedAt: { type: Date },
+      /** When a POOL host was handed out, or a CUSTOM one was claimed. */
+      assignedAt: { type: Date },
+    },
     status: { type: String, enum: TENANT_STATUSES, default: 'ACTIVE', required: true },
     masterAdminId: { type: Schema.Types.ObjectId, ref: 'User' },
     /**
@@ -149,6 +177,22 @@ const tenantSchema = new Schema(
 );
 
 tenantSchema.index({ slug: 1 }, { unique: true });
+
+/**
+ * One workspace per hostname, enforced by the database rather than by the
+ * route that sets it.
+ *
+ * Two workspaces on one host is not a cosmetic clash: the host decides
+ * which origin the API trusts and which workspace a customer's link is
+ * read against, so a duplicate would let one workspace's domain carry
+ * another's chat sessions. Sparse, because the overwhelming majority of
+ * documents have no host at all and a plain unique index would let exactly
+ * one of them exist.
+ */
+tenantSchema.index(
+  { 'guestDomain.host': 1 },
+  { unique: true, partialFilterExpression: { 'guestDomain.host': { $type: 'string' } } },
+);
 
 /**
  * The index of a template's URL button, as a string, for the send payload.

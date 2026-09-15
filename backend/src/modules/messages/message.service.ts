@@ -41,6 +41,12 @@ import { pushGuestMessage } from '../guest/guestPush.service';
 import { resolveBusinessNameForConversation } from '../guest/businessName';
 import type { ConversationDoc } from '../conversations/conversation.model';
 import type { ContactDoc } from '../contacts/contact.model';
+import { logger } from '../../lib/logger';
+import {
+  CONTENT_POLICY_CODE,
+  CONTENT_POLICY_MESSAGE,
+  findPolicyViolationInSend,
+} from './contentPolicy';
 
 /**
  * Message types this service can actually dispatch through the Meta
@@ -239,6 +245,39 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
   // came before it is the client and the network, which the app's own
   // marks cover. See lib/perfTrace.ts — off unless PERF_TRACE=true.
   const perf = trace('message.send', { conversationId: input.conversationId, type: input.type });
+
+  /**
+   * Platform content policy, before anything is read, stored or sent.
+   *
+   * Placed above the channel decision on purpose: this is the one check
+   * that must hold on BOTH sides of it. Putting it after would leave the
+   * private window — the branch that never reaches Meta — as the way
+   * around it, which would make this a way of hiding the activity rather
+   * than a rule against it. See contentPolicy.ts.
+   *
+   * Internal notes are exempt: they are staff-to-staff, never delivered
+   * to the customer and never sent to Meta, so nothing leaves the
+   * platform in the workspace's name. An agent recording what a customer
+   * said to them is exactly the note this should not eat.
+   */
+  if (!input.internal) {
+    const violation = findPolicyViolationInSend(input);
+    if (violation) {
+      // The matched terms, not the message: enough to tune the list and
+      // to show an admin why, without copying a customer conversation
+      // into the logs.
+      logger.warn(
+        {
+          tenantId: input.tenantId,
+          conversationId: input.conversationId,
+          rule: violation.rule,
+          terms: violation.terms,
+        },
+        'Outbound message refused by the platform content policy',
+      );
+      throw new ApiError(422, CONTENT_POLICY_CODE, CONTENT_POLICY_MESSAGE);
+    }
+  }
 
   const conversation =
     input.conversation ?? (await findConversationByIdAndTenant(input.conversationId, input.tenantId));

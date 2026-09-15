@@ -1,4 +1,3 @@
-import { env } from '../../config/env';
 import { ApiError } from '../../lib/ApiError';
 import { logger } from '../../lib/logger';
 import { trace } from '../../lib/perfTrace';
@@ -52,6 +51,13 @@ import { resolveBusinessName, resolveBusinessNameForConversation } from './busin
 import { hasMovedToWebChat } from './webChatRouting';
 import { guestSessionExpiresAt } from './guestSessionExpiry';
 import { findCustomerFacingNameForPhoneNumber } from '../users/user.repository';
+import { guestChatUrl } from '../tenants/guestDomain';
+import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
+import {
+  CONTENT_POLICY_CODE,
+  CONTENT_POLICY_MESSAGE,
+  findPolicyViolationInSend,
+} from '../messages/contentPolicy';
 
 /**
  * What a resolved web-chat token stands for. Deliberately narrower than
@@ -346,10 +352,14 @@ export async function issueGuestLinkForConversation(
   auth: AuthContext,
   conversationId: string,
 ): Promise<{ url: string; token: string; expiresAt: string; reused: boolean }> {
-  if (!env.GUEST_LINK_BASE_URL) {
+  // The workspace's own chat domain when it has one, the shared one
+  // otherwise. Resolved before anything is minted so a workspace with no
+  // domain at all fails here rather than after a session exists.
+  const linkBaseUrl = await guestLinkBaseUrlFor(auth.tenantId);
+  if (!linkBaseUrl) {
     throw ApiError.serviceUnavailable(
       'GUEST_LINK_NOT_CONFIGURED',
-      'GUEST_LINK_BASE_URL is not set on the server, so a chat link cannot be built yet',
+      'No chat domain is configured on the server, so a chat link cannot be built yet',
     );
   }
 
@@ -382,7 +392,7 @@ export async function issueGuestLinkForConversation(
   });
 
   return {
-    url: `${env.GUEST_LINK_BASE_URL}/c/${token}`,
+    url: guestChatUrl(linkBaseUrl, token),
     token,
     expiresAt: expiresAt.toISOString(),
     reused: false,
@@ -1173,6 +1183,28 @@ export async function sendGuestReply(
   conversationId: string,
   text: string,
 ): Promise<GuestMessageView> {
+  /**
+   * The same platform content policy sendOutboundMessage applies.
+   *
+   * Repeated here rather than shared through a wrapper because this is a
+   * SECOND way out: an agent replying straight into the private window
+   * never passes through sendOutboundMessage at all. A policy enforced on
+   * one of two exits is not enforced. See contentPolicy.ts.
+   */
+  const violation = findPolicyViolationInSend({ text });
+  if (violation) {
+    logger.warn(
+      {
+        tenantId: auth.tenantId,
+        conversationId,
+        rule: violation.rule,
+        terms: violation.terms,
+      },
+      'Web chat reply refused by the platform content policy',
+    );
+    throw new ApiError(422, CONTENT_POLICY_CODE, CONTENT_POLICY_MESSAGE);
+  }
+
   const conversation = await findConversationByIdAndTenant(conversationId, auth.tenantId);
   const scope = visibleWhatsAppPhoneNumberId(auth);
   if (!conversation || (scope && String(conversation.whatsappPhoneNumberId) !== scope)) {
