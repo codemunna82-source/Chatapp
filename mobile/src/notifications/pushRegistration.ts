@@ -7,6 +7,22 @@ import { registerDevice, unregisterDevice } from '../api/endpoints/devices';
  *  naming a channel that does not exist is silently dropped by Android. */
 export const CHAT_CHANNEL_ID = 'voxo-messages';
 
+/**
+ * Ringing calls, on a channel of their own.
+ *
+ * Not because the code is tidier that way — because an Android channel's
+ * sound and importance are FIXED at creation and only the user can change
+ * them afterwards. A call and a message sharing one channel can never
+ * sound different, however the payload is written. Two channels is the
+ * only way a call can ring while a message chimes.
+ *
+ * It also hands the choice to the person whose phone it is: Android shows
+ * these separately in system settings, so someone who wants calls loud
+ * and messages silent can say so, and someone who wants the ringtone
+ * changed can change it without touching the app.
+ */
+export const CALL_CHANNEL_ID = 'voxo-calls';
+
 let currentToken: string | null = null;
 
 /**
@@ -23,6 +39,24 @@ async function ensureChannel(): Promise<void> {
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#26344D',
+  });
+
+  await Notifications.setNotificationChannelAsync(CALL_CHANNEL_ID, {
+    name: 'Incoming calls',
+    description: 'Rings when a customer calls you.',
+    // MAX, not HIGH: a ringing call is the one notification worth
+    // interrupting whatever is on screen, and HIGH does not do that.
+    importance: Notifications.AndroidImportance.MAX,
+    // res/raw/ringtone.wav, by filename. Android resolves it from the
+    // APK — a path or a URL here silently falls back to the default
+    // notification chime, which is exactly the sound this exists to
+    // replace.
+    sound: 'ringtone.wav',
+    // A phone-like cadence rather than the short triple-buzz a message
+    // gets: long, gap, long, so it reads as ringing even in a pocket.
+    vibrationPattern: [0, 800, 600, 800, 600, 800],
+    lightColor: '#26344D',
+    enableVibrate: true,
   });
 }
 

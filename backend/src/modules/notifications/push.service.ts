@@ -14,6 +14,21 @@ import type { PushPayload } from '../../integrations/fcm';
 export const CHAT_CHANNEL_ID = 'voxo-messages';
 
 /**
+ * The ringing-call channel, created by the app alongside the chat one.
+ *
+ * Its own channel because an Android channel's sound and importance are
+ * fixed at creation — a call and a message sharing one can never sound
+ * different, whatever this payload says. The app gives this one the
+ * ringtone, MAX importance and a phone-like vibration; naming it here is
+ * what routes a call to it.
+ *
+ * Same warning as above, and it bites harder: a channelId the device does
+ * not have is dropped SILENTLY, and for a call that means a customer
+ * ringing a phone that never makes a sound.
+ */
+export const CALL_CHANNEL_ID = 'voxo-calls';
+
+/**
  * A one-line preview of a message, for the notification body.
  *
  * Media messages have no text, so they get a label rather than an empty
@@ -231,7 +246,8 @@ export async function pushIncomingCall(input: IncomingCallPushInput): Promise<vo
       // Not collapsed with the chat key: a call must never replace, or be
       // replaced by, a message notification from the same contact.
       collapseKey: `incoming-call:${input.callId}`,
-      channelId: CHAT_CHANNEL_ID,
+      // The ringing channel, not the chat one — see CALL_CHANNEL_ID.
+      channelId: CALL_CHANNEL_ID,
       data: {
         type: 'incoming_call',
         callId: input.callId,
