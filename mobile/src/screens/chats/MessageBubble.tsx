@@ -11,6 +11,7 @@ import { LocationBubble } from './LocationBubble';
 import { MediaFileChip } from './MediaFileChip';
 import { VideoMessageBubble } from './VideoMessageBubble';
 import { revokedLine } from './messageRevoke';
+import { ReplyQuote } from './ReplyQuote';
 import { AudioMessageBubble } from './AudioMessageBubble';
 import type { Message } from '../../api/types';
 import { impactLight, impactMedium } from '../../utils/haptics';
@@ -33,6 +34,17 @@ interface MessageBubbleProps {
   onForward?: (message: Message) => void;
   /** Tapping a photo opens it full-screen; receives the cached local uri. */
   onOpenImage?: (localUri: string, mediaId?: string) => void;
+  /** Tapping the quoted message inside a reply. Omit to leave the quote
+   *  inert, which is what the composer's own preview wants. */
+  onJumpToMessage?: (messageId: string) => void;
+  /**
+   * Briefly marked, because something just jumped to it.
+   *
+   * The counterpart to onJumpToMessage: a list that scrolls to a message
+   * and does nothing else leaves the reader hunting for which of the
+   * bubbles on screen was the point.
+   */
+  highlighted?: boolean;
   /** True while the screen is in multi-select mode. */
   selectable?: boolean;
   selected?: boolean;
@@ -157,6 +169,8 @@ function MessageBubbleImpl({
   onLongPress,
   onRetry,
   onReply,
+  onJumpToMessage,
+  highlighted = false,
   onForward,
   onOpenImage,
   selectable = false,
@@ -336,22 +350,51 @@ function MessageBubbleImpl({
             // screen's own palette in chatTheme.ts) — a failed send
             // overrides it with the danger color to keep that state visible.
             borderWidth: 1,
-            borderColor: isFailed ? colors.danger : colors.border,
+            /**
+             * The jump target, for a moment.
+             *
+             * A ring rather than a changed background: the bubble colour
+             * is what says who sent it, and borrowing it to mean "this
+             * one" would make an inbound message look outbound for two
+             * seconds. Two pixels of the accent colour reads as a
+             * spotlight and nothing else.
+             */
+            borderColor: highlighted ? colors.primary : isFailed ? colors.danger : colors.border,
           },
+          highlighted ? styles.highlighted : null,
         ]}
       >
         {replyTarget ? (
-          <View
-            style={[
+          /**
+           * Tapping the quote goes to the message it quotes.
+           *
+           * The thing every messenger does, and the reason the quote is
+           * worth rendering at all: a reply to something from twenty
+           * messages ago is unreadable until you can get back to what it
+           * was answering.
+           *
+           * A Pressable rather than making the whole bubble tappable: a
+           * plain tap on a bubble already means other things (retrying a
+           * failed send, opening a photo, toggling selection), and one
+           * gesture that sometimes scrolls the thread away instead would
+           * be the worst kind of surprise.
+           */
+          <Pressable
+            onPress={onJumpToMessage ? () => onJumpToMessage(replyTarget.id) : undefined}
+            accessibilityRole={onJumpToMessage ? 'button' : undefined}
+            accessibilityLabel={onJumpToMessage ? 'Go to the quoted message' : undefined}
+            style={({ pressed }) => [
               styles.replyBlock,
-              { borderLeftColor: isOut ? colors.bubbleSentText : colors.primary, marginBottom: spacing.xs },
+              { marginBottom: spacing.xs, opacity: pressed ? 0.6 : 1 },
               bleed ? styles.replyBlockBleeding : null,
             ]}
           >
-            <Text style={[typography.caption, { color: isOut ? colors.bubbleSentText : colors.textSecondary, opacity: 0.85 }]} numberOfLines={1}>
-              {replyTarget.text || `[${replyTarget.type}]`}
-            </Text>
-          </View>
+            <ReplyQuote
+              target={replyTarget}
+              tint={isOut ? colors.bubbleSentText : colors.primary}
+              textColor={isOut ? colors.bubbleSentText : colors.textSecondary}
+            />
+          </Pressable>
         ) : null}
 
         {revoked ? (
@@ -450,6 +493,7 @@ const styles = StyleSheet.create({
   // without competing with what the message says.
   starMark: { marginRight: 4, opacity: 0.75 },
   revoked: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  highlighted: { borderWidth: 2 },
   row: { flexDirection: 'row' },
   bubble: { maxWidth: '100%' },
   bubbleShift: { maxWidth: '80%' },
@@ -461,7 +505,10 @@ const styles = StyleSheet.create({
   checkWrap: { justifyContent: 'center' },
   checkIn: { marginRight: 6 },
   checkOut: { marginRight: 6 },
-  replyBlock: { borderLeftWidth: 2, paddingLeft: 6 },
+  // No border here: ReplyQuote draws its own leading bar, and two of
+  // them stacked was the giveaway that the quote had been rebuilt
+  // underneath a wrapper that still thought it owned the accent.
+  replyBlock: { borderRadius: 6, overflow: 'hidden' },
   // The quote would otherwise start at the media's own left edge, with no
   // gap at all, once the bubble's padding is gone.
   replyBlockBleeding: { marginLeft: 4, marginTop: 3, marginRight: 4 },

@@ -189,6 +189,14 @@ const SCREEN_EDGES: Edge[] = [];
 const KEYBOARD_GAP = 8;
 
 // Module scope so these never change identity between renders.
+/**
+ * How long a jumped-to message stays marked.
+ *
+ * Long enough to find after the scroll animation settles, short enough
+ * that it is gone before it becomes a state the thread is stuck in.
+ */
+const HIGHLIGHT_MS = 2000;
+
 const keyExtractor = (item: RenderItem) => item.id;
 /** Far enough up that the user is clearly reading history, not just
  *  overscrolling past the newest bubble. */
@@ -419,6 +427,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // --- scroll-to-bottom + new-message count --------------------------------
   // The list is inverted, so "at the bottom" is scroll offset ~0.
   const listRef = useRef<FlashListRef<RenderItem>>(null);
+  /** The message something just jumped to, marked until the timer clears it. */
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The newest message at the moment the user scrolled away from the bottom.
   // Storing an anchor rather than a counter means the count is derived from
   // the list itself, so it cannot drift out of sync with what is rendered —
@@ -506,25 +517,55 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   }, []);
 
   /**
-   * Jumps to a result when it is already loaded in the thread. When it is
-   * not, the panel says so rather than pretending: fetching backwards until
-   * a match appears could be many round trips on a long conversation, and a
-   * button that silently does nothing is worse than one that explains.
+   * Goes to one message and marks it briefly.
+   *
+   * Shared by search results and by tapping a reply's quote, which is the
+   * same act: "show me the one this is about". The highlight is not
+   * decoration — a list that scrolls somewhere and does nothing else
+   * leaves the reader working out which of the bubbles on screen was the
+   * point, which on a screen of five similar messages is a real question.
+   *
+   * When the message is not loaded, this says so rather than pretending.
+   * Fetching backwards until it appears could be many round trips on a
+   * long conversation, and a control that silently does nothing is worse
+   * than one that explains.
    */
-  const handleSelectSearchResult = useCallback(
-    (message: Message) => {
-      const index = renderItems.findIndex((item) => item.kind === 'message' && item.message.id === message.id);
+  const jumpToMessage = useCallback(
+    (messageId: string) => {
+      /**
+       * An album is ONE row carrying several photos, so a reply to the
+       * third picture of nine has no row of its own to scroll to. Landing
+       * on the album is the right answer — it is where that photo is —
+       * and it is also the common case here, since replying to one
+       * picture out of a batch is exactly when a quote earns its keep.
+       */
+      const index = renderItems.findIndex((item) =>
+        item.kind === 'message'
+          ? item.message.id === messageId
+          : item.kind === 'album' && item.messages.some((m) => m.id === messageId),
+      );
       if (index === -1) {
         showToast('Older message — scroll up in the chat to load it');
-        return;
+        return false;
       }
-      setSearchOpen(false);
-      setSearchInput('');
-      setStarredOnly(false);
       listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+      setHighlightedId(messageId);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+      highlightTimer.current = setTimeout(() => setHighlightedId(null), HIGHLIGHT_MS);
+      return true;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- showToast is a stable useCallback defined below
     [renderItems],
+  );
+
+  const handleSelectSearchResult = useCallback(
+    (message: Message) => {
+      if (!jumpToMessage(message.id)) return;
+      setSearchOpen(false);
+      setSearchInput('');
+      setStarredOnly(false);
+    },
+    [jumpToMessage],
   );
 
   const submitSend = useCallback(
@@ -972,10 +1013,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   useEffect(
     () => () => {
-      // Both timers must die with the screen — a pending typing-clear or
-      // toast timer would otherwise fire setState on an unmounted component.
+      // Every timer must die with the screen — a pending typing-clear,
+      // toast or highlight would otherwise fire setState on an unmounted
+      // component.
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (typingClearTimer.current) clearTimeout(typingClearTimer.current);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
     },
     [],
   );
@@ -1004,6 +1047,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           // on one of five pictures was stored, emitted and then dropped
           // on the floor by the one screen meant to show it.
           reactionsByTarget={view.reactionsByTarget}
+          highlightedId={highlightedId}
           onOpenImage={selectionMode ? undefined : handleOpenImage}
           onLongPress={handleLongPress}
         />
@@ -1017,6 +1061,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           onReply={selectionMode ? undefined : handleReply}
           onForward={selectionMode || !buildForwardBody(item.message) ? undefined : handleForwardOne}
           onOpenImage={selectionMode ? undefined : handleOpenImage}
+          // Not while selecting: every tap belongs to the selection then,
+          // and one that scrolled the thread away instead would lose the
+          // rows already ticked.
+          onJumpToMessage={selectionMode ? undefined : jumpToMessage}
+          highlighted={highlightedId === item.message.id}
           selectable={selectionMode}
           selected={selectedIds.includes(item.message.id)}
           onSelectTap={handleSelectTap}
@@ -1032,6 +1081,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       selectionMode,
       selectedIds,
       handleSelectTap,
+      jumpToMessage,
+      // The highlight has to reach the row that is now marked, so
+      // renderItem genuinely does depend on it — leaving it out would
+      // scroll to the message and never light it up.
+      highlightedId,
     ],
   );
 

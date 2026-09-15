@@ -4,6 +4,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { IconButton } from '../../components/IconButton';
 import { touchTarget } from '../../theme/spacing';
 import type { Message } from '../../api/types';
+import { ReplyQuote } from './ReplyQuote';
 
 export function ReplyPreviewBar({ target, onCancel }: { target: Message; onCancel: () => void }) {
   const { colors, spacing, typography } = useTheme();
@@ -14,12 +15,12 @@ export function ReplyPreviewBar({ target, onCancel }: { target: Message; onCance
         { backgroundColor: colors.surface, borderTopColor: colors.border, padding: spacing.sm },
       ]}
     >
-      <View style={[styles.bar, { backgroundColor: colors.primary }]} />
-      <View style={{ flex: 1, marginLeft: spacing.sm }}>
-        <Text style={[typography.label, { color: colors.primary }]}>Replying to</Text>
-        <Text style={[typography.caption, { color: colors.textSecondary }]} numberOfLines={1}>
-          {target.text || `[${target.type}]`}
-        </Text>
+      <View style={{ flex: 1 }}>
+        <Text style={[typography.label, { color: colors.primary, marginBottom: 2 }]}>Replying to</Text>
+        {/* The same quote the sent bubble will carry, so what is being
+            answered looks identical before and after Send — and a reply
+            to a photo shows the photo rather than the word "[image]". */}
+        <ReplyQuote target={target} tint={colors.primary} textColor={colors.textSecondary} />
       </View>
       <IconButton
         name="close"
@@ -35,5 +36,4 @@ export function ReplyPreviewBar({ target, onCancel }: { target: Message; onCance
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
-  bar: { width: 3, alignSelf: 'stretch', borderRadius: 2 },
 });

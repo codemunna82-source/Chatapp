@@ -47,6 +47,7 @@ const LEAD_RATIO = 0.62;
 export function AlbumBubble({
   messages,
   reactionsByTarget,
+  highlightedId,
   onOpenImage,
   onLongPress,
 }: {
@@ -54,6 +55,15 @@ export function AlbumBubble({
   messages: Message[];
   /** Every reaction in the thread, keyed by the message it is on. */
   reactionsByTarget?: Map<string, ReactionSummary>;
+  /**
+   * One photo in here, briefly marked because a reply's quote just jumped
+   * to it.
+   *
+   * On the TILE rather than the whole album: a reply to the third picture
+   * of nine landed on the right row and then left the reader to work out
+   * which of the nine it meant, which is most of the question.
+   */
+  highlightedId?: string | null;
   /** Given the whole album, so the viewer can reach every photo — including the ones behind the +N. */
   onOpenImage?: (localUri: string, mediaId: string | undefined, album?: Message[]) => void;
   onLongPress: (message: Message) => void;
@@ -116,6 +126,7 @@ export function AlbumBubble({
                 height={half}
                 album={messages}
                 reactions={reactionsByTarget?.get(m.id)}
+                highlighted={highlightedId === m.id}
                 onOpenImage={onOpenImage}
                 onLongPress={onLongPress}
               />
@@ -129,6 +140,7 @@ export function AlbumBubble({
               height={leadHeight}
               album={messages}
               reactions={reactionsByTarget?.get(tiles[0]!.id)}
+              highlighted={highlightedId === tiles[0]!.id}
               onOpenImage={onOpenImage}
               onLongPress={onLongPress}
             />
@@ -141,6 +153,7 @@ export function AlbumBubble({
                   height={half}
                   album={messages}
                   reactions={reactionsByTarget?.get(m.id)}
+                highlighted={highlightedId === m.id}
                   // The bottom-right cell carries the count. Tapping it
                   // opens the viewer like any other — the rest are in
                   // there.
@@ -183,6 +196,7 @@ function Tile({
   more = 0,
   album,
   reactions,
+  highlighted = false,
   onOpenImage,
   onLongPress,
 }: {
@@ -193,13 +207,22 @@ function Tile({
   /** Every photo in this album, forwarded to the viewer on open. */
   album: Message[];
   reactions?: ReactionSummary;
+  highlighted?: boolean;
   onOpenImage?: (localUri: string, mediaId: string | undefined, album?: Message[]) => void;
   onLongPress: (message: Message) => void;
 }) {
-  const { typography } = useTheme();
+  const { colors, typography } = useTheme();
   const active = reactions ? [reactions.IN, reactions.OUT].filter((e): e is string => Boolean(e)) : [];
   return (
-    <Pressable onLongPress={() => onLongPress(message)} style={[styles.cell, { width, height }]}>
+    <Pressable
+      onLongPress={() => onLongPress(message)}
+      style={[
+        styles.cell,
+        { width, height },
+        // A ring around the one tile, the same mark a single bubble gets.
+        highlighted ? { borderWidth: 2, borderColor: colors.primary } : null,
+      ]}
+    >
       <MediaImage
         mediaId={message.mediaId}
         localUri={message.localUri}

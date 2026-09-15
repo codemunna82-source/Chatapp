@@ -91,8 +91,17 @@ export interface GuestMessageView {
   replyTo?: {
     id: string;
     from: 'me' | 'business';
-    /** One line: the text, or a bracketed type for a photo or a recording. */
+    /** One line: the text, or a word for a photo or a recording. */
     preview: string;
+    /** What kind of message it was, so the window can put the right icon
+     *  beside the line rather than inferring it from the wording. */
+    type: string;
+    /**
+     * The quoted PHOTO, so the window can show it rather than the word
+     * "photo". Present only for an image that still exists — a withdrawn
+     * one has no bytes left to fetch.
+     */
+    mediaId?: string;
   };
   /** Emoji reactions on this message, most-used first. */
   reactions?: { emoji: string; mine: boolean }[];
@@ -200,6 +209,29 @@ export function locationLine(input: { latitude: number; longitude: number; name?
   return `${input.name?.trim() || 'Location'} (${coords})`;
 }
 
+/**
+ * The quoted message, as the window needs to draw it.
+ *
+ * One builder because there were three copies of it, and because it just
+ * grew a field: a reply to a photo used to quote the literal text
+ * "[photo]", which says nothing about WHICH photo — and in a thread where
+ * someone has just sent nine of them, that is the entire question.
+ */
+function quoteOf(quoted: MessageLean): NonNullable<GuestMessageView['replyTo']> {
+  const view: NonNullable<GuestMessageView['replyTo']> = {
+    id: String(quoted._id),
+    from: quoted.direction === 'IN' ? 'me' : 'business',
+    preview: previewOf(quoted),
+    type: quoted.type,
+  };
+  // Only a picture. A document or a voice note has no frame to show, and
+  // the window draws an icon for those instead of a grey box.
+  if (quoted.type === 'image' && quoted.mediaId && !quoted.revokedAt) {
+    view.mediaId = String(quoted.mediaId);
+  }
+  return view;
+}
+
 /** One line standing in for a message inside a quote. */
 function previewOf(doc: MessageLean): string {
   // A reply that outlived the message it quoted. Checked first, before
@@ -263,11 +295,7 @@ async function toGuestMessagePage(
     const view = toGuestMessage(doc);
     const quoted = doc.replyToMessageId ? onPage.get(String(doc.replyToMessageId)) : undefined;
     if (quoted) {
-      view.replyTo = {
-        id: String(quoted._id),
-        from: quoted.direction === 'IN' ? 'me' : 'business',
-        preview: previewOf(quoted),
-      };
+      view.replyTo = quoteOf(quoted);
     }
     const emoji = byTarget.get(String(doc._id));
     if (emoji && emoji.length > 0) view.reactions = emoji;
@@ -722,11 +750,7 @@ export async function postGuestMessage(
 
   const view = toGuestMessage(message as unknown as MessageLean);
   if (quoted) {
-    view.replyTo = {
-      id: String(quoted._id),
-      from: quoted.direction === 'IN' ? 'me' : 'business',
-      preview: previewOf(quoted),
-    };
+    view.replyTo = quoteOf(quoted);
   }
   return view;
 }
@@ -1024,11 +1048,7 @@ export async function postGuestLocationMessage(
 
   const view = toGuestMessage(message as unknown as MessageLean);
   if (quoted) {
-    view.replyTo = {
-      id: String(quoted._id),
-      from: quoted.direction === 'IN' ? 'me' : 'business',
-      preview: previewOf(quoted),
-    };
+    view.replyTo = quoteOf(quoted);
   }
   return view;
 }
