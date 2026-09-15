@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { RTCView, type MediaStream } from 'react-native-webrtc';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallStore } from './callStore';
 import { useGuestPresenceStore } from '../store/guestPresenceStore';
@@ -142,6 +143,12 @@ export function CallOverlay() {
   const hangUp = useCallStore((s) => s.hangUp);
   const toggleMute = useCallStore((s) => s.toggleMute);
   const dismiss = useCallStore((s) => s.dismiss);
+  const media = useCallStore((s) => s.media);
+  const cameraOn = useCallStore((s) => s.cameraOn);
+  const localStream = useCallStore((s) => s.localStream);
+  const remoteStream = useCallStore((s) => s.remoteStream);
+  const toggleCamera = useCallStore((s) => s.toggleCamera);
+  const switchCamera = useCallStore((s) => s.switchCamera);
 
   useRinger(phase === 'ringing');
 
@@ -162,15 +169,65 @@ export function CallOverlay() {
   const displayName = contactName?.trim() || fromPhone || 'Unknown caller';
   const showNumber = Boolean(fromPhone) && displayName !== fromPhone;
 
+  const isVideo = media === 'video';
+  const onCall = phase === 'connecting' || phase === 'active';
+  /**
+   * The far end's picture, once it exists.
+   *
+   * Not simply "is this a video call": the remote stream arrives when
+   * WebRTC negotiates it, which is after the answer, so between picking
+   * up and the first frame there is a moment with nothing to show. The
+   * name and avatar stay up for exactly that moment rather than the
+   * screen going black.
+   */
+  const showRemoteVideo = isVideo && onCall && Boolean(remoteStream);
+  /** This side's own camera, from the moment it is opened — including
+   *  while an outgoing call is still ringing, which is when someone
+   *  checks what they look like. */
+  const showSelfView = isVideo && onCall && cameraOn && Boolean(localStream);
+
   return (
     <Modal visible animationType="fade" onRequestClose={phase === 'ringing' ? reject : dismiss} statusBarTranslucent>
       <SafeAreaView style={styles.container}>
+        {/* Behind everything, not beside it: the far end's picture is the
+            screen on a video call, and the name, status and buttons sit
+            on top of it. Until it arrives the identity block below is on
+            the ordinary dark background, which is also what an audio call
+            always looks like. */}
+        {showRemoteVideo ? (
+          <RTCView
+            streamURL={(remoteStream as MediaStream).toURL()}
+            style={StyleSheet.absoluteFill}
+            objectFit="cover"
+            // Only the far end is mirrored-off: their picture is of them,
+            // not of the person holding the phone.
+            mirror={false}
+          />
+        ) : null}
+
+        {showSelfView ? (
+          <View style={styles.selfView} pointerEvents="none">
+            <RTCView
+              streamURL={(localStream as MediaStream).toURL()}
+              style={styles.selfViewVideo}
+              objectFit="cover"
+              // Mirrored, because a self-view that is not is the one thing
+              // everyone notices immediately — it is a mirror, not a
+              // photograph.
+              mirror
+              zOrder={1}
+            />
+          </View>
+        ) : null}
+
         <View style={styles.header}>
-          <Text style={styles.badge}>WhatsApp call</Text>
+          <Text style={styles.badge}>
+            {callConversationId || media === 'video' ? (isVideo ? 'Video call' : 'Voice call') : 'WhatsApp call'}
+          </Text>
         </View>
 
-        <View style={styles.identity}>
-          <PulsingAvatar label={displayName} pulsing={phase === 'ringing'} />
+        <View style={[styles.identity, showRemoteVideo && styles.identityOverVideo]}>
+          {showRemoteVideo ? null : <PulsingAvatar label={displayName} pulsing={phase === 'ringing'} />}
           <Text style={styles.name} numberOfLines={1}>
             {displayName}
           </Text>
@@ -226,6 +283,27 @@ export function CallOverlay() {
                 label={muted ? 'Unmute' : 'Mute'}
                 onPress={toggleMute}
               />
+              {/* Only on a call that has a camera in it. An audio call
+                  cannot grow one without being placed again — the media
+                  is negotiated once, and offering a button that would
+                  have to renegotiate a live call is a promise this does
+                  not keep. */}
+              {isVideo ? (
+                <>
+                  <RoundButton
+                    icon={cameraOn ? 'videocam' : 'videocam-off'}
+                    color={cameraOn ? CALL_SURFACE : '#4C3FE0'}
+                    label={cameraOn ? 'Camera' : 'Camera off'}
+                    onPress={toggleCamera}
+                  />
+                  <RoundButton
+                    icon="camera-reverse"
+                    color={CALL_SURFACE}
+                    label="Flip"
+                    onPress={switchCamera}
+                  />
+                </>
+              ) : null}
               <RoundButton
                 icon="call"
                 color={DECLINE}
@@ -245,9 +323,11 @@ export function CallOverlay() {
         </View>
 
         <Text style={styles.footnote}>
-          {phase === 'active' || phase === 'connecting'
-            ? 'Audio plays through the earpiece — use a headset for hands-free.'
-            : ' '}
+          {!onCall
+            ? ' '
+            : isVideo
+              ? 'Audio plays through the speaker on a video call.'
+              : 'Audio plays through the earpiece — use a headset for hands-free.'}
         </Text>
       </SafeAreaView>
     </Modal>
@@ -265,6 +345,31 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   identity: { alignItems: 'center', paddingHorizontal: 32, gap: 6 },
+  /** Over the far end's picture, where plain white text on a bright frame
+   *  would be unreadable. A panel rather than a text shadow: it holds
+   *  whatever the picture happens to be behind it. */
+  identityOverVideo: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(16,16,24,0.55)',
+    borderRadius: 18,
+    paddingVertical: 14,
+  },
+  /** Top right, out of the way of the name and above the buttons. Fixed
+   *  rather than draggable: one more thing to get wrong mid-call, and
+   *  every phone puts it here anyway. */
+  selfView: {
+    position: 'absolute',
+    top: 78,
+    right: 16,
+    width: 104,
+    height: 150,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  selfViewVideo: { width: '100%', height: '100%' },
   avatarWrap: { width: 148, height: 148, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
   halo: { position: 'absolute', width: 148, height: 148, borderRadius: 74, backgroundColor: 'rgba(76,63,224,0.22)' },
   avatar: {
@@ -280,7 +385,16 @@ const styles = StyleSheet.create({
   number: { color: CALL_TEXT_DIM, fontSize: 15.5 },
   status: { color: CALL_TEXT_DIM, fontSize: 15.5, marginTop: 10 },
   statusError: { color: '#FF8A87', textAlign: 'center' },
-  actions: { flexDirection: 'row', justifyContent: 'center', gap: 44, paddingHorizontal: 32 },
+  // Wraps, because a video call has four buttons where an audio one has
+  // two and a narrow phone would otherwise push Flip off the screen.
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 28,
+    rowGap: 18,
+    paddingHorizontal: 24,
+  },
   buttonColumn: { alignItems: 'center', gap: 10 },
   roundButton: { width: 68, height: 68, borderRadius: 34, alignItems: 'center', justifyContent: 'center' },
   rotated: { transform: [{ rotate: '135deg' }] },

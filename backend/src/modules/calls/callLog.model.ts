@@ -3,6 +3,11 @@ import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mong
 export const CALL_DIRECTIONS = ['INBOUND', 'OUTBOUND'] as const;
 export type CallDirection = (typeof CALL_DIRECTIONS)[number];
 
+/** Whether a call carries video. Web calls only — Meta's calling API has
+ *  no video, so a WhatsApp call is always audio. */
+export const CALL_MEDIA = ['audio', 'video'] as const;
+export type CallMedia = (typeof CALL_MEDIA)[number];
+
 /**
  * Reconciled with what WhatsApp Business Calling actually reports.
  * REJECTED is its own outcome, not a flavour of MISSED: an agent who
@@ -31,6 +36,21 @@ const callLogSchema = new Schema(
     endedAt: { type: Date },
     providerCallId: { type: String },
     provider: { type: String }, // "meta" for WhatsApp Business Calling
+    /**
+     * Whether there is a camera in this call.
+     *
+     * Decided when the call is placed and fixed for its life. Both ends
+     * have to agree before either opens a device — a side that answers a
+     * video call with audio-only leaves the caller looking at a black
+     * rectangle with no way to tell whether it is broken or deliberate —
+     * and the SDP that carries that agreement is built from this.
+     *
+     * Web calls only. A WhatsApp call is whatever Meta says it is, and
+     * Meta's calling API has no video at all, so a Meta row keeps the
+     * default. Absent on every row written before this field existed,
+     * which reads as audio.
+     */
+    media: { type: String, enum: CALL_MEDIA, default: 'audio' },
     /**
      * Which number the call came in on. Carried for the same reason
      * conversations carry it: it is what decides whose call this is, and a

@@ -2,6 +2,7 @@ import { logger } from '../../lib/logger';
 import { conversationRoom, tenantRoom, userRoom, phoneNumberRoom } from '../rooms';
 import {
   startWebCall,
+  normalizeCallMedia,
   answerWebCall,
   claimWebCallForAgent,
   endWebCall,
@@ -43,6 +44,19 @@ type Ack = (res: { success: boolean; callId?: string; error?: string }) => void;
 interface SdpPayload {
   callId?: string;
   sdp?: string;
+  /**
+   * Whether the caller opened a camera.
+   *
+   * Taken from the CALLER only, and only when the call starts. The
+   * answering side is told what kind of call it is and follows; it does
+   * not get to disagree, because a side that answers a video call
+   * audio-only leaves the caller looking at a black rectangle with no way
+   * to tell whether it is broken or deliberate.
+   *
+   * Anything that is not 'video' is audio, including a client too old to
+   * send the field at all.
+   */
+  media?: string;
 }
 interface IcePayload {
   callId?: string;
@@ -138,6 +152,7 @@ export function registerGuestCallHandlers(io: AppServer, socket: AppSocket, gues
       contactId: guest.contactId,
       whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
       direction: 'INBOUND',
+      media: normalizeCallMedia(payload.media),
       // Held only while it rings, so an agent woken by the push can pick
       // the call up from GET /calls/pending instead of finding a ring
       // that was delivered to a socket nobody had open.
@@ -154,6 +169,10 @@ export function registerGuestCallHandlers(io: AppServer, socket: AppSocket, gues
       contactId: guest.contactId,
       contactName,
       sdp: payload.sdp,
+      // Read back from the row rather than echoed from the payload, so
+      // what rings is exactly what was stored and what a late joiner
+      // picking the call up from /calls/pending will be told.
+      media: call.media,
     });
 
     ack?.({ success: true, callId });
@@ -168,6 +187,7 @@ export function registerGuestCallHandlers(io: AppServer, socket: AppSocket, gues
       contactName,
       callId,
       channel: 'web',
+      callType: call.media,
     });
   });
 
@@ -266,6 +286,7 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
       contactId: String(conversation.contactId),
       whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
       direction: 'OUTBOUND',
+      media: normalizeCallMedia(payload.media),
       // Kept, so the ring can be REPLAYED to a customer who opens their
       // window after the call was placed. The emit below reaches whoever
       // is in the room right now; without the offer stored, someone who
@@ -289,6 +310,7 @@ export function registerAgentWebCallHandlers(io: AppServer, socket: AppSocket, a
       callId: String(call._id),
       conversationId,
       sdp: payload.sdp,
+      media: call.media,
     });
 
     // And the customer's browser, for the case the socket above cannot

@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
 import { env } from '../../config/env';
-import { CallLog, type CallLogDoc, type CallStatus } from './callLog.model';
+import { CallLog, type CallLogDoc, type CallStatus, type CallMedia } from './callLog.model';
 
 /**
  * Calls carried over our own WebRTC signalling, between the customer's web
@@ -75,6 +75,19 @@ export const RINGING_TTL_MS = 60_000;
  */
 export const ANSWERED_TTL_MS = 4 * 60 * 60 * 1000;
 
+/**
+ * What a client asked for, narrowed to what a call can be.
+ *
+ * Anything that is not exactly 'video' is audio: a client too old to send
+ * the field, a typo, a value someone tried on the socket by hand. Wrong
+ * only in the safe direction — a call that should have had video and does
+ * not is a disappointment, where one that opens a camera nobody asked for
+ * is a different kind of problem entirely.
+ */
+export function normalizeCallMedia(raw: unknown): CallMedia {
+  return raw === 'video' ? 'video' : 'audio';
+}
+
 export interface StartWebCallInput {
   tenantId: string;
   conversationId: string;
@@ -90,6 +103,8 @@ export interface StartWebCallInput {
    * the notification would open the app to a call they cannot answer.
    */
   sdpOffer?: string;
+  /** Whether the caller opened a camera. Both ends follow this. */
+  media?: CallMedia;
 }
 
 export async function startWebCall(input: StartWebCallInput): Promise<CallLogDoc> {
@@ -102,6 +117,7 @@ export async function startWebCall(input: StartWebCallInput): Promise<CallLogDoc
     status: 'RINGING',
     provider: 'web',
     sdpOffer: input.sdpOffer,
+    media: input.media ?? 'audio',
     startedAt: new Date(),
   });
 }

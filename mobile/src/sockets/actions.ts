@@ -41,7 +41,10 @@ export function emitWebCallEnd(callId: string): void {
 export function emitWebCallInvite(
   conversationId: string,
   sdp: string,
+  /** Whether this side opened a camera. The customer's window follows it
+   *  rather than deciding for itself — see the server's CallLog.media. */
+  media: 'audio' | 'video',
   ack: (res: { success: boolean; callId?: string; error?: string }) => void,
 ): void {
-  getSocket().emit('web:call:invite', { conversationId, sdp }, ack);
+  getSocket().emit('web:call:invite', { conversationId, sdp, media }, ack);
 }

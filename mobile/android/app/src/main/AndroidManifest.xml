@@ -14,6 +14,11 @@
        Added by hand to match the expo-contacts config plugin, because this
        native project is committed rather than regenerated: `expo prebuild`
        would overwrite the release signing config and ProGuard rules. -->
+  <!-- Video calls, and nothing else. expo-image-picker takes photos
+       through the system camera app, which needs no permission here — so
+       before video calling existed this app genuinely had no use for it
+       and correctly did not ask. -->
+  <uses-permission android:name="android.permission.CAMERA"/>
   <uses-permission android:name="android.permission.READ_CONTACTS"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>

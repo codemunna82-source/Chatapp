@@ -30,6 +30,18 @@ export interface PendingCall {
    * not send it is read as the WhatsApp call it can only have been.
    */
   channel?: 'meta' | 'web';
+  /**
+   * Whether there is a camera in this call.
+   *
+   * Matters most on exactly this path: a phone woken by a push gets a
+   * notification with no offer and no media kind, and asks the server
+   * here. Answering a video call as audio because this was missing would
+   * leave the customer looking at a black rectangle.
+   *
+   * Optional so an older server is read as audio, which a WhatsApp call
+   * always is anyway.
+   */
+  media?: 'audio' | 'video';
 }
 
 /**

@@ -3,6 +3,7 @@ import * as callsApi from '../api/endpoints/calls';
 import { getApiErrorMessage } from '../api/client';
 import { answerIncomingCall, MicrophoneUnavailableError, type CallSession } from './callSession';
 import { answerWebCall, placeWebCall, type WebCallSession, type WebCallOutgoingSession } from './webCallSession';
+import type { MediaStream } from 'react-native-webrtc';
 import { getWebCallIceServers } from '../api/endpoints/calls';
 import {
   emitWebCallAnswer,
@@ -53,6 +54,12 @@ export interface WebIncomingCallPayload {
   contactId?: string;
   contactName?: string;
   sdp?: string;
+  /**
+   * Whether the caller opened a camera. Decided by them and followed
+   * here — see the server's CallLog.media. Absent from an older server,
+   * which means audio.
+   */
+  media?: 'audio' | 'video';
 }
 
 /** The `call:ended` socket payload. */
@@ -82,6 +89,27 @@ interface CallState {
   fromPhone: string | null;
   sdpOffer: string | null;
   muted: boolean;
+  /**
+   * Whether this call has a camera in it at all.
+   *
+   * Fixed for the life of the call, on both sides. Turning a camera off
+   * mid-call is `cameraOn` below — it stops sending frames and leaves the
+   * negotiated media alone, which is why an audio call can never become a
+   * video one without being placed again.
+   */
+  media: 'audio' | 'video';
+  /** This side's camera, which the agent can switch off without leaving. */
+  cameraOn: boolean;
+  /**
+   * The two pictures.
+   *
+   * Held in the store rather than beside the peer connection, unlike the
+   * session itself, because the overlay has to RE-RENDER when they
+   * arrive — a stream that appeared without a state change would leave
+   * the remote view black until something else happened to repaint.
+   */
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
   /** Epoch ms the call connected, for the on-screen duration. */
   connectedAt: number | null;
   /** Why the call failed or how it ended — shown on the overlay. */
@@ -95,7 +123,12 @@ interface CallState {
    * window open. Only changes what the overlay says while the call is
    * being placed — see below.
    */
-  placeWebCall: (conversationId: string, contactName: string, present?: boolean) => Promise<void>;
+  placeWebCall: (
+    conversationId: string,
+    contactName: string,
+    present?: boolean,
+    media?: 'audio' | 'video',
+  ) => Promise<void>;
   /** The customer picked up — apply their answer. */
   applyWebAnswer: (callId: string, sdp: string) => void;
   /** A trickled candidate from the far end; buffered if the call is not answered yet. */
@@ -104,6 +137,10 @@ interface CallState {
   reject: () => Promise<void>;
   hangUp: () => Promise<void>;
   toggleMute: () => void;
+  /** The camera off and on again, without renegotiating. */
+  toggleCamera: () => void;
+  /** Front to back. Does nothing on an audio call or a one-camera device. */
+  switchCamera: () => void;
   remoteEnded: (payload: CallEndedPayload) => void;
   dismiss: () => void;
 }
@@ -171,6 +208,10 @@ const IDLE = {
   fromPhone: null,
   sdpOffer: null,
   muted: false,
+  media: 'audio' as const,
+  cameraOn: true,
+  localStream: null,
+  remoteStream: null,
   connectedAt: null,
   message: null,
 };
@@ -206,6 +247,7 @@ export const useCallStore = create<CallState>((set, get) => ({
 
     pendingRemoteIce = [];
     set({
+      ...IDLE,
       phase: 'ringing',
       channel: 'web',
       callId: payload.callId,
@@ -214,9 +256,10 @@ export const useCallStore = create<CallState>((set, get) => ({
       // they hold a link to.
       fromPhone: null,
       sdpOffer: payload.sdp ?? null,
-      muted: false,
-      connectedAt: null,
-      message: null,
+      // The caller decided this and this side follows. Answering a video
+      // call with audio only would leave them looking at a black
+      // rectangle with no way to tell whether it is broken or deliberate.
+      media: payload.media === 'video' ? 'video' : 'audio',
     });
   },
 
@@ -234,7 +277,7 @@ export const useCallStore = create<CallState>((set, get) => ({
     pendingRemoteIce.push(candidate);
   },
 
-  placeWebCall: async (conversationId, contactName, present = false) => {
+  placeWebCall: async (conversationId, contactName, present = false, media = 'audio') => {
     if (get().phase !== 'idle') return;
 
     // 'connecting' rather than a new phase: the overlay renders it with a
@@ -252,6 +295,7 @@ export const useCallStore = create<CallState>((set, get) => ({
       channel: 'web',
       conversationId,
       contactName,
+      media,
       // The starting word only. Once the call is up the overlay follows
       // the customer's live presence instead — someone who opens their
       // window mid-call turns this from Calling into Ringing, and the
@@ -263,6 +307,8 @@ export const useCallStore = create<CallState>((set, get) => ({
       const iceServers = await getWebCallIceServers();
       const outgoing = await placeWebCall({
         iceServers,
+        video: media === 'video',
+        onRemoteStream: (stream) => set({ remoteStream: stream }),
         onIceCandidate: (candidate) => {
           const { callId } = get();
           // Queued rather than dropped when the id is not back yet — see
@@ -292,8 +338,9 @@ export const useCallStore = create<CallState>((set, get) => ({
         return;
       }
       outgoingWebSession = outgoing;
+      set({ localStream: outgoing.localStream, cameraOn: true });
 
-      emitWebCallInvite(conversationId, outgoing.offerSdp, (res) => {
+      emitWebCallInvite(conversationId, outgoing.offerSdp, media, (res) => {
         if (!res?.success || !res.callId) {
           closeSession();
           set({ phase: 'failed', message: res?.error ?? 'Could not start the call.' });
@@ -355,6 +402,8 @@ export const useCallStore = create<CallState>((set, get) => ({
         const newSession = await answerWebCall({
           offerSdp: sdpOffer,
           iceServers,
+          video: get().media === 'video',
+          onRemoteStream: (stream) => set({ remoteStream: stream }),
           onIceCandidate: (candidate) => emitWebCallIce(callId, candidate),
           onStateChange: (state) => {
             if (state === 'failed') {
@@ -377,7 +426,12 @@ export const useCallStore = create<CallState>((set, get) => ({
         for (const queued of pendingRemoteIce.splice(0)) newSession.addRemoteCandidate(queued);
 
         emitWebCallAnswer(callId, newSession.answerSdp);
-        set({ phase: 'active', connectedAt: Date.now() });
+        set({
+          phase: 'active',
+          connectedAt: Date.now(),
+          localStream: newSession.localStream,
+          cameraOn: true,
+        });
       } catch (err) {
         closeSession();
         set({
@@ -473,6 +527,22 @@ export const useCallStore = create<CallState>((set, get) => ({
     webSession?.setMuted(next);
     outgoingWebSession?.setMuted(next);
     set({ muted: next });
+  },
+
+  toggleCamera: () => {
+    const next = !get().cameraOn;
+    // Disables the track rather than stopping it: a stopped track has to
+    // be replaced and renegotiated to come back, where a disabled one
+    // just freezes the last frame at the far end. Turning a camera off
+    // and on again must not renegotiate a live call.
+    webSession?.setCameraEnabled(next);
+    outgoingWebSession?.setCameraEnabled(next);
+    set({ cameraOn: next });
+  },
+
+  switchCamera: () => {
+    webSession?.switchCamera();
+    outgoingWebSession?.switchCamera();
   },
 
   remoteEnded: (payload) => {

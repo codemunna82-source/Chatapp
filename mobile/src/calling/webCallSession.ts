@@ -25,7 +25,26 @@ import { MicrophoneUnavailableError } from './callSession';
  * NAT usually means a TURN relay, supplied by the server.
  */
 
-export interface WebCallSession {
+/**
+ * The camera controls a video call adds.
+ *
+ * Kept on both session shapes rather than on a separate object, because
+ * the call overlay holds one session and should not have to ask which
+ * kind it is before offering a button — on an audio call these are no-ops
+ * and the overlay simply does not draw them.
+ */
+export interface VideoControls {
+  /** The camera off, without leaving the call. Stops sending frames while
+   *  keeping the track, so the far end sees a still rather than a
+   *  renegotiation. */
+  setCameraEnabled(enabled: boolean): void;
+  /** Front to back and back again. Does nothing on a device with one. */
+  switchCamera(): void;
+  /** This side's own picture, for the self-view. Null on an audio call. */
+  readonly localStream: MediaStream | null;
+}
+
+export interface WebCallSession extends VideoControls {
   /** The SDP answer, ready to send the moment it exists — candidates follow separately. */
   readonly answerSdp: string;
   /** A candidate from the far end. Queued if it arrives before the offer is applied. */
@@ -35,7 +54,7 @@ export interface WebCallSession {
 }
 
 /** The agent's side when they are the one calling. */
-export interface WebCallOutgoingSession {
+export interface WebCallOutgoingSession extends VideoControls {
   /** The SDP offer to send with the invite. */
   readonly offerSdp: string;
   /** Applies the customer's answer when it arrives. */
@@ -51,6 +70,93 @@ export interface AnswerWebCallOptions {
   /** Called for each local candidate as it is discovered. */
   onIceCandidate: (candidate: unknown) => void;
   onStateChange?: (state: CallSessionState) => void;
+  /**
+   * Open the camera as well as the microphone.
+   *
+   * Decided by the CALLER and followed here — see the server's
+   * CallLog.media. Answering a video call with audio only would leave the
+   * caller looking at a black rectangle with no way to tell whether it is
+   * broken or deliberate.
+   */
+  video?: boolean;
+  /**
+   * The far end's stream, handed over the moment WebRTC produces it.
+   *
+   * Audio plays itself on both platforms, so this existed for nobody
+   * until there was a picture to draw. It fires once per call in
+   * practice, but is written to be safe if it fires again.
+   */
+  onRemoteStream?: (stream: MediaStream) => void;
+}
+
+/**
+ * What to ask the device for.
+ *
+ * The camera constraints name a preference, not a requirement: `facingMode`
+ * as a plain string is a hint that a device with one camera can ignore,
+ * where `exact` would make getUserMedia throw on a phone that has no
+ * front camera — failing the whole call over the choice of lens. The
+ * frame size is the same bargain: a hint, so a camera that cannot do 720p
+ * gives what it has instead of refusing.
+ */
+function constraintsFor(video?: boolean) {
+  if (!video) return { audio: true, video: false } as const;
+  return {
+    audio: true,
+    video: {
+      facingMode: 'user',
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      frameRate: { ideal: 30 },
+    },
+  };
+}
+
+/**
+ * The camera controls, built once over a stream.
+ *
+ * Shared by both directions because they are identical on each side and
+ * the only difference between the two functions below is which end makes
+ * the offer.
+ *
+ * Disabling the track rather than stopping it is deliberate: a stopped
+ * track has to be replaced and renegotiated to come back, where a
+ * disabled one keeps the transceiver and the far end simply sees the last
+ * frame freeze. Turning a camera off and on again should not renegotiate
+ * a live call.
+ */
+function videoControlsFor(stream: MediaStream, hasVideo: boolean): VideoControls {
+  return {
+    localStream: hasVideo ? stream : null,
+    setCameraEnabled(enabled: boolean) {
+      for (const track of stream.getVideoTracks()) track.enabled = enabled;
+    },
+    switchCamera() {
+      for (const track of stream.getVideoTracks()) {
+        // react-native-webrtc's own extension, not part of the spec. A
+        // device with one camera answers by doing nothing.
+        (track as unknown as { _switchCamera?: () => void })._switchCamera?.();
+      }
+    },
+  };
+}
+
+/**
+ * Hands the far end's stream up as soon as WebRTC has one.
+ *
+ * `ontrack` fires once per track — audio and then video on a video call —
+ * and both arrive on the same stream, so this is called more than once
+ * with the same object. Callers treat it as idempotent.
+ */
+function forwardRemoteStream(
+  pc: RTCPeerConnection,
+  onRemoteStream?: (stream: MediaStream) => void,
+): void {
+  if (!onRemoteStream) return;
+  (pc as unknown as { ontrack: (event: { streams: MediaStream[] }) => void }).ontrack = (event) => {
+    const stream = event.streams[0];
+    if (stream) onRemoteStream(stream);
+  };
 }
 
 export async function answerWebCall(opts: AnswerWebCallOptions): Promise<WebCallSession> {
@@ -59,7 +165,7 @@ export async function answerWebCall(opts: AnswerWebCallOptions): Promise<WebCall
     // Opened before the answer is produced, so a denied permission surfaces
     // as a failure to answer rather than a connected call the customer
     // cannot be heard on.
-    localStream = (await mediaDevices.getUserMedia({ audio: true, video: false })) as MediaStream;
+    localStream = (await mediaDevices.getUserMedia(constraintsFor(opts.video))) as MediaStream;
   } catch (err) {
     throw new MicrophoneUnavailableError(err);
   }
@@ -90,6 +196,8 @@ export async function answerWebCall(opts: AnswerWebCallOptions): Promise<WebCall
   pc.onicecandidate = (event: { candidate: { toJSON: () => unknown } | null }) => {
     if (event.candidate) opts.onIceCandidate(event.candidate.toJSON());
   };
+
+  forwardRemoteStream(pc, opts.onRemoteStream);
 
   pc.onconnectionstatechange = () => {
     switch (pc.connectionState) {
@@ -147,6 +255,7 @@ export async function answerWebCall(opts: AnswerWebCallOptions): Promise<WebCall
           track.enabled = !muted;
         }
       },
+      ...videoControlsFor(localStream, Boolean(opts.video)),
       close: teardown,
     };
   } catch (err) {
@@ -168,10 +277,13 @@ export async function placeWebCall(opts: {
   iceServers: IceServer[];
   onIceCandidate: (candidate: unknown) => void;
   onStateChange?: (state: CallSessionState) => void;
+  /** Open the camera too. This side decides — see AnswerWebCallOptions. */
+  video?: boolean;
+  onRemoteStream?: (stream: MediaStream) => void;
 }): Promise<WebCallOutgoingSession> {
   let localStream: MediaStream;
   try {
-    localStream = (await mediaDevices.getUserMedia({ audio: true, video: false })) as MediaStream;
+    localStream = (await mediaDevices.getUserMedia(constraintsFor(opts.video))) as MediaStream;
   } catch (err) {
     throw new MicrophoneUnavailableError(err);
   }
@@ -194,6 +306,8 @@ export async function placeWebCall(opts: {
   pc.onicecandidate = (event: { candidate: { toJSON: () => unknown } | null }) => {
     if (event.candidate) opts.onIceCandidate(event.candidate.toJSON());
   };
+
+  forwardRemoteStream(pc, opts.onRemoteStream);
 
   pc.onconnectionstatechange = () => {
     switch (pc.connectionState) {
@@ -248,6 +362,7 @@ export async function placeWebCall(opts: {
           track.enabled = !muted;
         }
       },
+      ...videoControlsFor(localStream, Boolean(opts.video)),
       close: teardown,
     };
   } catch (err) {

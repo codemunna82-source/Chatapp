@@ -58,6 +58,7 @@ export function PendingCallSync(): null {
             contactId: pending.contactId,
             contactName: pending.contactName,
             sdp: pending.sdpOffer,
+            media: pending.media,
           });
         } else {
           useCallStore.getState().ring(pending);

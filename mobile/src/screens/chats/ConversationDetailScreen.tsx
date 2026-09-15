@@ -568,18 +568,24 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
    * hand-off to wa.me, which leaves VOXO entirely — so when both are
    * possible the web one is plainly better for the agent.
    */
-  const handleCall = useCallback(() => {
-    if (guestActive) {
-      const name = conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Customer';
-      // Whether the customer is actually IN the window decides what the
-      // overlay says. With the page open there is a device to ring and
-      // "Ringing…" is true; without it the invitation is going out to
-      // something nobody is looking at yet, and only "Calling…" is.
-      void useCallStore.getState().placeWebCall(conversationId, name, guestOnline);
-      return;
-    }
-    if (contactId) placeCall(contactId);
-  }, [guestActive, guestOnline, conversationId, contactId, placeCall, conversationQuery.data]);
+  const handleCall = useCallback(
+    (media: 'audio' | 'video' = 'audio') => {
+      if (guestActive) {
+        const name = conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Customer';
+        // Whether the customer is actually IN the window decides what the
+        // overlay says. With the page open there is a device to ring and
+        // "Ringing…" is true; without it the invitation is going out to
+        // something nobody is looking at yet, and only "Calling…" is.
+        void useCallStore.getState().placeWebCall(conversationId, name, guestOnline, media);
+        return;
+      }
+      // Never video: this hands off to wa.me, and Meta's calling API has
+      // no video at all. The video button is not drawn without a live web
+      // window, so this is only ever reached for an audio call.
+      if (contactId) placeCall(contactId);
+    },
+    [guestActive, guestOnline, conversationId, contactId, placeCall, conversationQuery.data],
+  );
 
   /**
    * Setting the customer's photo from the chat itself.
@@ -871,9 +877,34 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               open at the other end. What the window changes is not
               whether the call can be placed but what can honestly be said
               while it is being placed, which handleCall passes on. */}
+          {/* Video only while the customer has the private window open.
+              Unlike the audio button above, this one genuinely cannot
+              fall back: without the window the call goes out over
+              WhatsApp, and Meta's calling API has no video. A camera
+              button that silently placed a voice call would be worse than
+              no button. */}
+          {guestActive ? (
+            <Pressable
+              onPress={() => handleCall('video')}
+              disabled={callPending}
+              style={styles.headerAction}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: callPending }}
+              accessibilityLabel="Video call this customer in the private chat"
+            >
+              {({ pressed }) => (
+                <Ionicons
+                  name="videocam"
+                  size={22}
+                  color={callPending ? `${headerFg}80` : headerFg}
+                  style={{ opacity: pressed ? 0.5 : 1 }}
+                />
+              )}
+            </Pressable>
+          ) : null}
           {contactId ? (
           <Pressable
-            onPress={handleCall}
+            onPress={() => handleCall('audio')}
             disabled={callPending}
             style={styles.headerAction}
             accessibilityRole="button"

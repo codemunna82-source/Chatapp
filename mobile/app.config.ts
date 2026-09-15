@@ -49,6 +49,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'ACCESS_NETWORK_STATE',
       'RECORD_AUDIO',
       'MODIFY_AUDIO_SETTINGS',
+      // Video calls with the customer's web chat window. Not for the
+      // photo picker, which goes through the system camera app and needs
+      // no permission of its own — which is why this was correctly absent
+      // until there was a video call to open a camera for.
+      'CAMERA',
       'POST_NOTIFICATIONS',
       // Raises the incoming-call UI over the lock screen — the one thing a
       // ringing notification must do that an ordinary one must not. Used

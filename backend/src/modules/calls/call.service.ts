@@ -272,6 +272,18 @@ export interface PendingCall {
    * hand a browser's offer to Meta's API.
    */
   channel: 'meta' | 'web';
+  /**
+   * Whether there is a camera in this call.
+   *
+   * Carried here as well as on the socket event because this is the path
+   * a phone woken by a push takes: the ring reaches it as a notification
+   * with no offer and no media kind, and it asks for the call here. An
+   * agent who answered a video call as audio because this was missing
+   * would leave the customer looking at a black rectangle.
+   *
+   * Always 'audio' for a WhatsApp call — Meta's calling API has no video.
+   */
+  media: 'audio' | 'video';
 }
 
 /**
@@ -309,6 +321,7 @@ export async function findPendingCallForUser(auth: AuthContext): Promise<Pending
     fromPhone: contact?.phone ?? '',
     sdpOffer: call.sdpOffer ?? undefined,
     channel: isWeb ? ('web' as const) : ('meta' as const),
+    media: isWeb && call.media === 'video' ? 'video' : 'audio',
   };
 }
 
