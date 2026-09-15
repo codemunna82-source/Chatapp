@@ -15,6 +15,7 @@ import {
   markMessageFailed,
   softDeleteMessage,
   revokeMessage,
+  countWhatsAppNudges,
   setMessageStarred,
 } from './message.repository';
 import { findMediaByIdAndTenant } from '../media/media.repository';
@@ -30,6 +31,12 @@ import { refusalToRevoke, REVOKE_REFUSAL_MESSAGE } from './messageRevoke';
 import { toWhatsAppId } from '../../lib/phone';
 import { findActiveSessionForConversation } from '../guest/guestSession.repository';
 import { resolveReplyChannel } from '../guest/webChatRouting';
+import {
+  countsAgainstNudgeQuota,
+  nudgeWindowStart,
+  NUDGE_QUOTA_MESSAGE,
+  WHATSAPP_NUDGE_LIMIT,
+} from './whatsappQuota';
 import { pushGuestMessage } from '../guest/guestPush.service';
 import { resolveBusinessNameForConversation } from '../guest/businessName';
 import type { ConversationDoc } from '../conversations/conversation.model';
@@ -338,6 +345,37 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
       'MESSAGE_TEMPLATE_REQUIRED',
       'An approved WhatsApp template is required.',
     );
+  }
+
+  /**
+   * The WhatsApp allowance.
+   *
+   * Everything reaching here is going out through Meta, which means the
+   * customer has not opened their private window — so this is one of the
+   * few nudges the workspace gets before the only way through is that
+   * link. See whatsappQuota.ts for what is counted and why.
+   *
+   * Refused rather than stored as FAILED: nothing was sent and nothing
+   * was attempted, so a row claiming otherwise would put a failed bubble
+   * in the thread for a message that never existed. The client's own
+   * retry then works unchanged the moment the customer opens their link,
+   * because by then replies route to the window and never reach this
+   * check at all.
+   *
+   * Counted after the 24-hour check, deliberately: a closed window is the
+   * more specific problem and has its own fix (a template), and reporting
+   * the allowance first would send someone to the wrong one.
+   */
+  if (countsAgainstNudgeQuota({ messageType: input.type, internal: input.internal, isDemoContact })) {
+    const used = await countWhatsAppNudges(
+      input.tenantId,
+      input.conversationId,
+      nudgeWindowStart(session),
+    );
+    perf.mark('nudge_quota_read');
+    if (used >= WHATSAPP_NUDGE_LIMIT) {
+      throw new ApiError(422, 'WHATSAPP_NUDGE_LIMIT_REACHED', NUDGE_QUOTA_MESSAGE);
+    }
   }
 
   const replyToMetaMessageId = replyTarget?.metaMessageId ?? undefined;

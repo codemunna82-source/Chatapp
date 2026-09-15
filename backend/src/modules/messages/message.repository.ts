@@ -335,6 +335,48 @@ export async function hideMessageForGuest(
   );
 }
 
+/**
+ * How many WhatsApp replies this conversation has spent since `since`.
+ *
+ * Counted from the messages themselves rather than kept as a running
+ * total on the conversation, because a counter drifts: a delete, a
+ * restore or a failed write leaves it wrong with nothing to notice, and
+ * the number decides whether an agent can reach a customer at all. This
+ * is self-correcting by construction.
+ *
+ * It runs on the WhatsApp path only, which is already about to make an
+ * HTTP call to Meta — so one indexed count beside that is not what makes
+ * a send slow. The private-window path never reaches it.
+ *
+ * What is NOT counted, and why:
+ *  - `channel: 'whatsapp'` explicitly. Rows written before that field
+ *    existed have no value and are left alone: they predate the
+ *    allowance, and starting every existing conversation already over
+ *    its limit would lock workspaces out of chats they were mid-way
+ *    through.
+ *  - `internal` — the private-chat invitation, which is the way OUT of
+ *    the cap. See countsAgainstNudgeQuota.
+ *  - reactions, which are not messages.
+ *  - FAILED, because the customer never received it. A send Meta refused
+ *    should not spend the reply that was meant to reach them.
+ */
+export async function countWhatsAppNudges(
+  tenantId: string,
+  conversationId: string,
+  since: Date | null,
+): Promise<number> {
+  return Message.countDocuments({
+    tenantId,
+    conversationId,
+    direction: 'OUT',
+    channel: 'whatsapp',
+    internal: { $ne: true },
+    type: { $ne: 'reaction' },
+    status: { $ne: 'FAILED' },
+    ...(since ? { createdAt: { $gt: since } } : {}),
+  });
+}
+
 /** Hard-deletes every message in a conversation — used when the chat itself is deleted. */
 export async function deleteMessagesByConversation(tenantId: string, conversationId: string): Promise<void> {
   await Message.deleteMany({ tenantId, conversationId });

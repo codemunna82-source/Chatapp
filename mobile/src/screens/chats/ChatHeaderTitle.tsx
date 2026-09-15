@@ -23,6 +23,14 @@ interface ChatHeaderTitleProps {
    * apply is just anxiety on the header of every chat.
    */
   guestActive?: boolean;
+  /**
+   * WhatsApp replies left before the private link is the only way
+   * through — see the backend's whatsappQuota.ts.
+   *
+   * Null or absent means the question does not apply here (a demo chat,
+   * or a customer already reading in their private window).
+   */
+  whatsappRepliesLeft?: number | null;
   /** Whose photo to show. Absent on a conversation with no contact yet. */
   contactId?: string;
   /** The contact's avatarUpdatedAt — busts the image cache after an upload. */
@@ -55,6 +63,7 @@ export function ChatHeaderTitle({
   isDemo = false,
   guestOnline = false,
   guestActive = false,
+  whatsappRepliesLeft,
   contactId,
   avatarUpdatedAt,
   onPressAvatar,
@@ -119,18 +128,47 @@ export function ChatHeaderTitle({
         <Text style={[styles.subtitle, { color: sub }]} numberOfLines={1}>
           Sample chat
         </Text>
-      ) : guestActive ? (
-        // No clock and no warning: the link is live, so this customer can be
-        // replied to at any hour. Meta's window still governs WhatsApp, but
-        // it stops being the user's problem the moment there is another way
-        // through — and showing it anyway taught people to worry about a
-        // deadline that no longer applies to them.
-        <Text style={[styles.subtitle, { color: sub }]} numberOfLines={1}>
-          Private chat open · reply anytime
-        </Text>
       ) : !withinWindow ? (
         <Text style={[styles.subtitle, styles.closed]} numberOfLines={1}>
           Reply window closed · template only
+        </Text>
+      ) : typeof whatsappRepliesLeft === 'number' ? (
+        /**
+         * How many WhatsApp replies are left before the private link is
+         * the only way through.
+         *
+         * Above `guestActive`, and that ordering is the point. A LIVE
+         * link is not an OPENED one, and the line below used to say
+         * "Private chat open · reply anytime" the moment one was issued —
+         * which was already a stretch and is now simply untrue: until the
+         * customer actually opens it, replies go out over WhatsApp and
+         * there are three of them. The server only sends a number in
+         * exactly that case (it sends null once they have moved), so a
+         * number here IS "they have not arrived yet".
+         *
+         * Above the 24-hour countdown too, for the same reason it is
+         * worth showing at all: three replies run out long before a day
+         * does, so it is the limit that actually bites. Said BEFORE it
+         * happens, because the alternative is discovering it by hitting
+         * it — with a message typed and a customer waiting.
+         */
+        <Text
+          style={[styles.subtitle, whatsappRepliesLeft === 0 ? styles.closed : { color: sub }]}
+          numberOfLines={1}
+        >
+          {whatsappRepliesLeft === 0
+            ? 'No WhatsApp replies left · send the private link'
+            : `${whatsappRepliesLeft} WhatsApp ${whatsappRepliesLeft === 1 ? 'reply' : 'replies'} left · then the private link`}
+        </Text>
+      ) : guestActive ? (
+        // No clock and no warning: the customer is in the private chat, so
+        // they can be replied to at any hour and as often as needed. Meta's
+        // window still governs WhatsApp, but it stops being the user's
+        // problem the moment the conversation has moved — and showing it
+        // anyway taught people to worry about a deadline that no longer
+        // applies to them.
+        <Text style={[styles.subtitle, { color: sub }]} numberOfLines={1}>
+          Private chat open · reply anytime
         </Text>
       ) : remaining ? (
         <Text style={[styles.subtitle, urgent ? styles.urgent : { color: sub }]} numberOfLines={1}>

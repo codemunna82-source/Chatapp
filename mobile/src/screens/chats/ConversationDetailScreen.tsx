@@ -63,7 +63,7 @@ import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { MessageSearchPanel } from './MessageSearchPanel';
 import { useActiveConversationStore } from '../../store/activeConversationStore';
 import { usePlaceCall } from '../../queries/useCalls';
-import { getApiErrorMessage } from '../../api/client';
+import { getApiErrorMessage, isOfflineError } from '../../api/client';
 import * as Clipboard from 'expo-clipboard';
 import { ThemeProvider, useResolvedScheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
@@ -574,9 +574,29 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   const submitSend = useCallback(
     (body: SendMessageBody) => {
-      sendMessage.mutate(body);
+      sendMessage.mutate(body, {
+        /**
+         * Say WHY, not just that it failed.
+         *
+         * The red bubble tells the one person looking at it that
+         * something went wrong and offers a retry — which for a closed
+         * 24-hour window or a spent WhatsApp allowance will fail again
+         * identically, because the reason is a rule and not a blip. The
+         * server's own wording is the only thing that says what to do
+         * instead, and without this it never left the device.
+         *
+         * Offline is exempt: that send is queued, not failed, and a
+         * toast about it would be an alarm for something the app is
+         * already handling.
+         */
+        onError: (err) => {
+          if (isOfflineError(err)) return;
+          showToast(getApiErrorMessage(err, 'Message not sent.'));
+        },
+      });
       setReplyingTo(null);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- showToast is a stable useCallback defined above
     [sendMessage],
   );
 
@@ -879,6 +899,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           isDemo={conversationQuery.data?.isDemo ?? false}
           guestOnline={guestOnline}
           guestActive={guestActive}
+          whatsappRepliesLeft={conversationQuery.data?.whatsappRepliesLeft}
         />
       ),
       // The header itself stays a fixed navy in both schemes (matches both

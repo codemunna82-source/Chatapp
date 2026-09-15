@@ -6,7 +6,10 @@ import * as repo from './conversation.repository';
 import * as contactRepo from '../contacts/contact.repository';
 import { findFirstPhoneNumberForTenant, findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
 import { findAssignedPhoneNumberId } from '../users/user.repository';
-import { deleteMessagesByConversation } from '../messages/message.repository';
+import { countWhatsAppNudges, deleteMessagesByConversation } from '../messages/message.repository';
+import { nudgesLeft, nudgeWindowStart } from '../messages/whatsappQuota';
+import { findActiveSessionForConversation } from '../guest/guestSession.repository';
+import { hasMovedToWebChat } from '../guest/webChatRouting';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
 import type { ConversationLean, ConversationStatus } from './conversation.model';
 import type { ContactLean } from '../contacts/contact.model';
@@ -32,6 +35,21 @@ export interface PublicConversation {
    * that window is meaningless on demo data.
    */
   isDemo: boolean;
+  /**
+   * WhatsApp replies left before the private chat link is the only way
+   * through — see messages/whatsappQuota.ts.
+   *
+   * Only on the single-conversation read, never on the list: it costs a
+   * count per conversation, and a chat list of thirty would pay thirty
+   * round trips to render a number nobody is looking at yet.
+   *
+   * Absent means "not counted here", which every client reads as "do not
+   * show it" — not as zero. Null is the same answer said out loud for a
+   * conversation the allowance does not govern at all: one on a demo
+   * contact, or one the customer is currently reading in their window,
+   * where there is no limit to report.
+   */
+  whatsappRepliesLeft?: number | null;
   unreadCount: number;
   manuallyUnread: boolean;
   pinned: boolean;
@@ -139,8 +157,39 @@ async function loadVisibleConversation(auth: AuthContext, id: string) {
 export async function getConversationForTenant(auth: AuthContext, id: string): Promise<PublicConversation> {
   const tenantId = auth.tenantId;
   const conversation = await loadVisibleConversation(auth, id);
-  const contact = await contactRepo.findContactByIdAndTenant(String(conversation.contactId), tenantId);
-  return toPublicConversation(conversation, contact ?? undefined);
+  const [contact, session] = await Promise.all([
+    contactRepo.findContactByIdAndTenant(String(conversation.contactId), tenantId),
+    findActiveSessionForConversation(id, tenantId),
+  ]);
+
+  const view = toPublicConversation(conversation, contact ?? undefined);
+  view.whatsappRepliesLeft = await whatsappRepliesLeftFor(tenantId, id, contact, session);
+  return view;
+}
+
+/**
+ * How many WhatsApp replies are left, or null when the question does not
+ * apply to this chat.
+ *
+ * Told to the agent BEFORE they run out, because the alternative is
+ * discovering the limit by hitting it — with a message typed and a
+ * customer waiting, which is the worst moment to learn a rule.
+ *
+ * Null rather than a number in the two cases where there is no limit: a
+ * demo contact (not a real WhatsApp number at all) and a customer who is
+ * currently in their private window (replies go there, and there is no
+ * cap on that).
+ */
+async function whatsappRepliesLeftFor(
+  tenantId: string,
+  conversationId: string,
+  contact: ContactLean | null,
+  session: Awaited<ReturnType<typeof findActiveSessionForConversation>>,
+): Promise<number | null> {
+  if (contact?.isDemo) return null;
+  if (hasMovedToWebChat(session)) return null;
+  const used = await countWhatsAppNudges(tenantId, conversationId, nudgeWindowStart(session));
+  return nudgesLeft(used);
 }
 
 export interface UpdateConversationBody {

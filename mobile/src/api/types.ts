@@ -84,6 +84,17 @@ export interface Conversation {
   conversationWindowExpiresAt?: string;
   withinCustomerServiceWindow: boolean;
   /**
+   * WhatsApp replies left before the private chat link is the only way
+   * through.
+   *
+   * Only on a single conversation read, never on the chat list — a list
+   * of thirty would cost thirty counts to render a number nobody is
+   * looking at. Absent means "not counted here"; null means the limit
+   * does not apply to this chat at all (a demo contact, or a customer
+   * currently reading in their private window, where there is no cap).
+   */
+  whatsappRepliesLeft?: number | null;
+  /**
    * Seeded sample data. The 24-hour window UI is dropped entirely for these
    * — the number is not on WhatsApp, so neither the countdown nor the
    * template prompt describes anything real (the backend treats them as a

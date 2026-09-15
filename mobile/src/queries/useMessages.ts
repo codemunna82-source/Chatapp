@@ -443,6 +443,15 @@ export function useSendMessage(conversationId: string) {
       // On success only. A sound for a send that then fails would be a
       // false confirmation — the FAILED bubble is the honest signal there.
       playSentSound();
+
+      // A WhatsApp send spends one of the replies allowed before the
+      // private chat link is the only way through, and the header counts
+      // them down. Only that channel: a message into the customer's own
+      // window costs nothing and has no limit, so re-reading the
+      // conversation after one would be a round trip for no change.
+      if (message.channel === 'whatsapp') {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.conversation(conversationId) });
+      }
     },
     onError: (err, body, context) => {
       if (!context) return;
@@ -478,6 +487,11 @@ export function useSendMessage(conversationId: string) {
           items: page.items.map((m) => (m.id === context.tempId ? { ...m, status: 'FAILED' as const } : m)),
         })),
       );
+
+      // The server may have refused because the WhatsApp allowance is
+      // spent, in which case the header is now showing a count that is
+      // one too many.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversation(conversationId) });
     },
   });
 }
