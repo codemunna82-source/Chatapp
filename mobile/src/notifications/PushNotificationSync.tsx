@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NavigationContainerRef } from '@react-navigation/native';
-import { registerForPushNotifications } from './pushRegistration';
+import { registerForPushNotifications, getPushStatus } from './pushRegistration';
 import { useActiveConversationStore } from '../store/activeConversationStore';
 import { useCallStore } from '../calling/callStore';
 import { queryKeys } from '../queries/keys';
@@ -34,8 +35,37 @@ export function PushNotificationSync({ navigationRef }: PushNotificationSyncProp
   const queryClient = useQueryClient();
   const handledResponse = useRef<string | null>(null);
 
+  /**
+   * Registers, and tries again when the app comes back to the front.
+   *
+   * It used to run exactly once, on mount, and never again for the life
+   * of the session. That is fine for the failures that stay failed — a
+   * build with no config, a ROM with no Play Services — and wrong for
+   * every failure that does not:
+   *
+   * - FCM answers SERVICE_NOT_AVAILABLE when it cannot be reached, which
+   *   on a phone waking on a weak signal is simply what happens. It
+   *   succeeds seconds later, and nothing asked it again.
+   * - The permission prompt can be answered AFTER the first attempt has
+   *   already given up on it.
+   * - Granting notifications in system settings takes the user out of
+   *   the app; returning is the obvious moment to notice.
+   *
+   * Only retried while the last attempt was NOT 'registered', so a phone
+   * that is already set up does nothing on every foreground — and the
+   * whole point of a token is that it is registered once and kept.
+   */
   useEffect(() => {
     void registerForPushNotifications();
+
+    const onChange = (state: AppStateStatus) => {
+      if (state !== 'active') return;
+      if (getPushStatus() === 'registered') return;
+      void registerForPushNotifications();
+    };
+
+    const sub = AppState.addEventListener('change', onChange);
+    return () => sub.remove();
   }, []);
 
   useEffect(() => {

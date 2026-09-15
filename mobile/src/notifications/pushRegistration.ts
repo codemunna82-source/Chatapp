@@ -65,10 +65,37 @@ export const PUSH_STATUS_TEXT: Record<PushStatus, string> = {
 };
 
 let lastStatus: PushStatus | null = null;
+let lastDetail: string | null = null;
 
 /** What the last registration attempt concluded; null before the first. */
 export function getPushStatus(): PushStatus | null {
   return lastStatus;
+}
+
+/**
+ * What actually went wrong, in the platform's own words.
+ *
+ * The five statuses above say WHICH step failed. They do not say why,
+ * and for `no-firebase-config` that gap has now cost three rounds of
+ * guessing: the config file is demonstrably in the APK, the Gradle
+ * plugin demonstrably ran, R8 has keep rules for every Firebase class —
+ * and getDevicePushTokenAsync still throws. The message it throws with
+ * is the one piece of evidence nobody has looked at, because the catch
+ * discarded it.
+ *
+ * Several completely different faults land on this same status and need
+ * completely different fixes:
+ *
+ *   "Default FirebaseApp is not initialized"  → the config never loaded
+ *   "SERVICE_NOT_AVAILABLE"                   → FCM was unreachable; retrying works
+ *   "MISSING_INSTANCEID_SERVICE"              → no Play Services on this ROM
+ *   "AUTHENTICATION_FAILED"                   → wrong Firebase project
+ *
+ * Only the first is a build problem. Telling them apart is the whole
+ * point of keeping this string.
+ */
+export function getPushDetail(): string | null {
+  return lastDetail;
 }
 
 export async function registerForPushNotifications(): Promise<PushStatus> {
@@ -93,16 +120,20 @@ export async function registerForPushNotifications(): Promise<PushStatus> {
   }
 
   let token: string | null = null;
+  lastDetail = null;
   try {
     const devicePushToken = await Notifications.getDevicePushTokenAsync();
     // The native FCM token is a string on Android; the type is a union
     // covering web push, where it is not.
     token = typeof devicePushToken.data === 'string' ? devicePushToken.data : null;
-  } catch {
-    // The build has no google-services.json, so there is no Firebase
-    // project to get a token from. Separated from the registration call
-    // below because the two need completely different things done about
-    // them, and telling them apart was impossible before.
+    if (!token) lastDetail = 'The platform returned a token that was not a string.';
+  } catch (err) {
+    // Kept, not discarded. This branch covers a missing config, an
+    // uninitialised Firebase, an unreachable FCM and a ROM with no Play
+    // Services — four different problems with four different fixes, and
+    // the message is the only thing that separates them. See
+    // getPushDetail above for what the common ones look like.
+    lastDetail = err instanceof Error ? err.message : String(err);
     token = null;
   }
   if (!token) {
@@ -112,12 +143,14 @@ export async function registerForPushNotifications(): Promise<PushStatus> {
 
   try {
     await registerDevice(token, Platform.OS === 'ios' ? 'ios' : 'android');
-  } catch {
+  } catch (err) {
+    lastDetail = err instanceof Error ? err.message : String(err);
     lastStatus = 'server-rejected';
     return lastStatus;
   }
 
   currentToken = token;
+  lastDetail = null;
   lastStatus = 'registered';
   return lastStatus;
 }

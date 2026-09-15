@@ -6,6 +6,7 @@ import {
   registerForPushNotifications,
   getPushStatus,
   PUSH_STATUS_TEXT,
+  getPushDetail,
   type PushStatus,
 } from '../../notifications/pushRegistration';
 import * as ImagePicker from 'expo-image-picker';
@@ -317,12 +318,14 @@ function AlertsSection() {
    * ways and no screen anywhere said which, or that it had failed at all.
    */
   const [push, setPush] = useState<PushStatus | null>(getPushStatus);
+  const [detail, setDetail] = useState<string | null>(getPushDetail);
   const [checking, setChecking] = useState(false);
 
   const retry = useCallback(async () => {
     setChecking(true);
     try {
       setPush(await registerForPushNotifications());
+      setDetail(getPushDetail());
     } finally {
       setChecking(false);
     }
@@ -401,6 +404,26 @@ function AlertsSection() {
               : 'Background alerts: tap to check.'}
         </Text>
       </Pressable>
+
+      {/* The platform's own words, when there are any.
+          The line above names the STEP that failed; this names the
+          fault. For "no push configuration" those are very different
+          questions — a missing config, an unreachable FCM and a ROM with
+          no Play Services all produce that one sentence, and only the
+          first is anything to do with the build. Three rounds of fixing
+          the wrong thing went by before this was worth the two lines it
+          takes. */}
+      {detail && push !== 'registered' && !checking ? (
+        <Text
+          selectable
+          style={[
+            typography.caption,
+            { color: colors.textTertiary, marginTop: spacing.xs, marginLeft: spacing.lg },
+          ]}
+        >
+          {detail}
+        </Text>
+      ) : null}
 
       {/* Which APK this actually is.
           Two builds minutes apart differed only in whether they carried
