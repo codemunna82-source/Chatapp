@@ -6,6 +6,7 @@ import { useSocketEvent } from './useSocketEvent';
 import { useSocketConnection } from './useSocketConnected';
 import { useMessageAlert } from './useMessageAlert';
 import { useActiveConversationStore } from '../store/activeConversationStore';
+import { clearMessageNotification } from '../notifications/messageNotification';
 import { useGuestPresenceStore } from '../store/guestPresenceStore';
 import {
   useCallStore,
@@ -190,8 +191,20 @@ export function RealtimeSync({
 
   useSocketEvent<{ conversationId: string; byUserId: string }>(
     'conversation:read',
-    () => {
+    (payload) => {
       invalidateConversations();
+      /**
+       * Somebody read this chat — here, on another device, or a colleague
+       * at a desk. Either way it has been picked up, so the notification
+       * on this phone has stopped being a thing to act on.
+       *
+       * Right for a SHARED inbox specifically: in a personal messenger a
+       * teammate reading your notification away would be wrong, but here
+       * the whole point is that whoever gets to a customer first deals
+       * with them, and a shade full of conversations someone else has
+       * already answered is how a workspace learns to ignore it.
+       */
+      if (payload?.conversationId) void clearMessageNotification(payload.conversationId);
     },
     [invalidateConversations],
   );

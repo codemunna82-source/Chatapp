@@ -5,6 +5,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { useAuthStore } from '../store/authStore';
 import { userAvatarUrl } from '../api/endpoints/users';
 import { contactAvatarUrl } from '../api/endpoints/contacts';
+import { avatarCacheName } from '../media/avatarCache';
 
 const PALETTE = ['#4C3FE0', '#0E9384', '#C9861A', '#D64545', '#2463EB', '#9333EA'];
 
@@ -42,7 +43,9 @@ function AvatarPhoto({
   size,
 }: {
   url: string;
-  /** Stable per photo VERSION, so a new upload is a new file. */
+  /** The cache FILENAME, from avatarCache.ts — shared with the
+   *  notification builder so a face drawn on a notification and one drawn
+   *  in the chat list are the same downloaded file. */
   cacheKey: string;
   label: string;
   size: number;
@@ -67,7 +70,7 @@ function AvatarPhoto({
    */
   useEffect(() => {
     let cancelled = false;
-    const target = new File(Paths.cache, `voxo-avatar-${cacheKey}.img`);
+    const target = new File(Paths.cache, cacheKey);
 
     (async () => {
       try {
@@ -163,7 +166,7 @@ export function Avatar({ label, size = 48, userId, contactId, version }: AvatarP
     return (
       <AvatarPhoto
         key={`u:${userId}:${version}`}
-        cacheKey={`u-${userId}-${cacheSafe(version)}`}
+        cacheKey={avatarCacheName('u', userId, version)}
         url={userAvatarUrl(userId, version)}
         label={label}
         size={size}
@@ -174,7 +177,7 @@ export function Avatar({ label, size = 48, userId, contactId, version }: AvatarP
     return (
       <AvatarPhoto
         key={`c:${contactId}:${version}`}
-        cacheKey={`c-${contactId}-${cacheSafe(version)}`}
+        cacheKey={avatarCacheName('c', contactId, version)}
         url={contactAvatarUrl(contactId, version)}
         label={label}
         size={size}
@@ -185,10 +188,6 @@ export function Avatar({ label, size = 48, userId, contactId, version }: AvatarP
 }
 
 /** avatarUpdatedAt is an ISO string; colons and dots are not filenames. */
-function cacheSafe(version: string): string {
-  return version.replace(/[^a-zA-Z0-9]/g, '');
-}
-
 const styles = StyleSheet.create({
   circle: { alignItems: 'center', justifyContent: 'center' },
   text: { fontWeight: '600' },

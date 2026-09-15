@@ -35,6 +35,7 @@ import { AttachmentSheet } from './AttachmentSheet';
 import { ForwardSheet, buildForwardBody } from './ForwardSheet';
 import { ImageViewerModal, type ViewerPhoto } from './ImageViewerModal';
 import { canDeleteForEveryone } from './messageRevoke';
+import { clearMessageNotification } from '../../notifications/messageNotification';
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
@@ -209,6 +210,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   useEffect(() => {
     const { setActiveConversation } = useActiveConversationStore.getState();
     setActiveConversation(conversationId);
+    // Opening the chat IS reading it, so whatever is in the shade for this
+    // conversation goes — along with the thread it remembered, which would
+    // otherwise resurface under the next message as if none of this had
+    // been seen. Deliberately not awaited: nothing on this screen depends
+    // on it, and a slow cancel must not delay the messages loading.
+    void clearMessageNotification(conversationId);
     return () => setActiveConversation(null);
   }, [conversationId]);
 

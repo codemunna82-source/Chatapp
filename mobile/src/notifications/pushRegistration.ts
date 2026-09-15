@@ -1,9 +1,11 @@
 import { Platform } from 'react-native';
+import notifee, { AndroidImportance } from '@notifee/react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { registerDevice, unregisterDevice } from '../api/endpoints/devices';
 import { RINGTONES, channelConfigFor, type Ringtone } from '../calling/ringtones';
 import { currentRingtone } from '../store/ringtoneStore';
+import { QUIET_CHAT_CHANNEL } from './messageNotification';
 
 /** Must match CHAT_CHANNEL_ID in the backend's push.service.ts. A payload
  *  naming a channel that does not exist is silently dropped by Android. */
@@ -59,6 +61,28 @@ async function ensureChannel(): Promise<void> {
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#26344D',
+  });
+
+  /**
+   * The silent twin of the channel above.
+   *
+   * Created with notifee rather than expo-notifications because notifee's
+   * channel is silent when no sound is named, which is precisely what is
+   * wanted and is not expressible through the other API. Still HIGH, so
+   * it is still a heads-up banner — see QUIET_CHAT_CHANNEL for when it is
+   * used and why a second channel is the only way to say "silently" on
+   * Android 8 and later.
+   *
+   * It appears in the app's notification settings alongside the others,
+   * which is honest: someone who wants message banners gone while the app
+   * is open can turn exactly that off.
+   */
+  await notifee.createChannel({
+    id: QUIET_CHAT_CHANNEL,
+    name: 'Messages (app open)',
+    description: 'Shown without a sound, because the app has already chimed',
+    importance: AndroidImportance.HIGH,
+    vibration: false,
   });
 
   await applyRingtoneChannel(currentRingtone());

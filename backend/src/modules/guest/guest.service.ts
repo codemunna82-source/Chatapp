@@ -711,6 +711,11 @@ export async function postGuestMessage(
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
     contactName: contactDisplayName(contact),
+    contactId: contact ? String(contact._id) : undefined,
+    // The photo's own version, so the notification shows the picture the
+    // contact has now rather than one the phone cached weeks ago.
+    avatarVersion: contact?.avatarUpdatedAt?.toISOString(),
+    sentAt: message.createdAt,
     messageType: 'text',
     text,
   }).catch(() => {});
@@ -935,6 +940,11 @@ export async function postGuestMediaMessage(
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
     contactName: contactDisplayName(contact),
+    contactId: contact ? String(contact._id) : undefined,
+    // The photo's own version, so the notification shows the picture the
+    // contact has now rather than one the phone cached weeks ago.
+    avatarVersion: contact?.avatarUpdatedAt?.toISOString(),
+    sentAt: message.createdAt,
     messageType: kind,
   }).catch(() => {});
 
@@ -1003,6 +1013,11 @@ export async function postGuestLocationMessage(
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
     contactName: contactDisplayName(contact),
+    contactId: contact ? String(contact._id) : undefined,
+    // The photo's own version, so the notification shows the picture the
+    // contact has now rather than one the phone cached weeks ago.
+    avatarVersion: contact?.avatarUpdatedAt?.toISOString(),
+    sentAt: message.createdAt,
     messageType: 'location',
     text,
   }).catch(() => {});

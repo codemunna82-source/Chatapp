@@ -165,19 +165,56 @@ export interface MessagePushInput {
   contactName: string;
   messageType: string;
   text?: string;
+  /** Who it is from, so the app can show their photo on the notification. */
+  contactId?: string;
+  /** Cache-buster for that photo — the contact's avatarUpdatedAt. */
+  avatarVersion?: string;
+  /** When it was sent, so a delayed notification does not claim to be new. */
+  sentAt?: Date;
 }
 
-/** A new customer message. Collapsed per conversation so a burst from one
- *  customer is one notification, not ten. */
+/**
+ * A new customer message.
+ *
+ * Sent data-only, so the APP draws it rather than the system tray.
+ *
+ * That is what buys everything a message notification is expected to have
+ * and could not: the sender's photo, a stacked thread when three messages
+ * arrive rather than one line replacing another, Reply straight from the
+ * shade, and Mark as read. A notification Android draws from an FCM
+ * notification block cannot have any of it — the tray owns it and none of
+ * this app's code runs.
+ *
+ * The cost is the one named on PushPayload.dataOnly: Android does not
+ * deliver a data-only message to an app the user or the OEM has
+ * force-stopped, where a notification block would still have shown. This
+ * was a deliberate trade, taken with that understood.
+ *
+ * Still collapsed per conversation: the app's own stacking is what turns a
+ * burst from one customer into one thread, and the collapse key is what
+ * stops FCM queueing ten separate deliveries to a phone that is asleep.
+ */
 export async function pushIncomingMessage(input: MessagePushInput): Promise<void> {
   await sendToTenant(input.tenantId, {
     title: input.contactName,
     body: previewForMessage(input.messageType, input.text),
     collapseKey: input.conversationId,
     channelId: CHAT_CHANNEL_ID,
+    dataOnly: true,
     data: {
       type: 'message',
       conversationId: input.conversationId,
+      // The title and body again, in data. With no notification block
+      // there is nowhere else for them to travel, and the app needs the
+      // name and the preview separately rather than as one drawn line.
+      contactName: input.contactName,
+      preview: previewForMessage(input.messageType, input.text),
+      messageType: input.messageType,
+      ...(input.contactId ? { contactId: input.contactId } : {}),
+      ...(input.avatarVersion ? { avatarVersion: input.avatarVersion } : {}),
+      // Milliseconds as a string: FCM rejects any data value that is not
+      // one, and does not coerce.
+      sentAt: String((input.sentAt ?? new Date()).getTime()),
     },
   }, { whatsappPhoneNumberId: input.whatsappPhoneNumberId });
 }
@@ -191,6 +228,9 @@ export interface ReactionPushInput {
   emoji?: string;
   /** The text of the message that was reacted to, for context. */
   targetPreview?: string;
+  /** Who reacted, and the cache-buster for their photo — see MessagePushInput. */
+  contactId?: string;
+  avatarVersion?: string;
 }
 
 /**
@@ -206,14 +246,24 @@ export async function pushReaction(input: ReactionPushInput): Promise<void> {
   const target = input.targetPreview
     ? `: "${input.targetPreview.length > 40 ? `${input.targetPreview.slice(0, 39)}…` : input.targetPreview}"`
     : '';
+  const body = `Reacted ${input.emoji ?? ''} to your message${target}`.trim();
   await sendToTenant(input.tenantId, {
     title: input.contactName,
-    body: `Reacted ${input.emoji ?? ''} to your message${target}`.trim(),
+    body,
     collapseKey: `${input.conversationId}:reaction`,
     channelId: CHAT_CHANNEL_ID,
+    // Drawn by the app, like the message notification it sits beside —
+    // two notifications about the same chat that looked different
+    // depending on which arrived would be its own small confusion.
+    dataOnly: true,
     data: {
       type: 'reaction',
       conversationId: input.conversationId,
+      contactName: input.contactName,
+      preview: body,
+      ...(input.contactId ? { contactId: input.contactId } : {}),
+      ...(input.avatarVersion ? { avatarVersion: input.avatarVersion } : {}),
+      sentAt: String(Date.now()),
     },
   }, { whatsappPhoneNumberId: input.whatsappPhoneNumberId });
 }
@@ -307,6 +357,8 @@ export async function pushIncomingCall(input: IncomingCallPushInput): Promise<vo
        * what that costs.
        */
       dataOnly: true,
+      // A ring that arrives after the caller hung up is worse than none.
+      ttlSeconds: 45,
       data: {
         type: 'incoming_call',
         callId: input.callId,
@@ -354,6 +406,7 @@ export async function pushCallCancelled(input: CallCancelledPushInput): Promise<
       body: '',
       collapseKey: `incoming-call:${input.callId}`,
       dataOnly: true,
+      ttlSeconds: 45,
       data: { type: 'call_cancelled', callId: input.callId },
     },
     { whatsappPhoneNumberId: input.whatsappPhoneNumberId },

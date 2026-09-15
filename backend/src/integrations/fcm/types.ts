@@ -51,6 +51,16 @@ export interface PushPayload {
    * still needs its notification drawn for it.
    */
   dataOnly?: boolean;
+  /**
+   * How long FCM keeps trying, in seconds. Default is four weeks.
+   *
+   * Set short for anything that stops being true — a ring is worthless
+   * once it has stopped ringing. Deliberately separate from `dataOnly`,
+   * which it used to be tied to: message notifications are data-only too
+   * now, and a message that arrives late is still a message, where a call
+   * that arrives late is a phone ringing at nobody.
+   */
+  ttlSeconds?: number;
 }
 
 export interface SendResult {

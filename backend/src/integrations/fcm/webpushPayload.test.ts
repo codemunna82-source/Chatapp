@@ -84,6 +84,45 @@ describe('fcmGateway web push', () => {
     expect(sentMessage().webpush.headers.TTL).toBe('60');
   });
 
+  it('holds a data-only message for as long as the caller asks, not always 45s', async () => {
+    const gateway = await loadGateway();
+
+    // A ringing call names its own short life. Anything longer and FCM
+    // delivers a notification for a call that ended long ago.
+    await gateway.send(['t'], { title: '', body: '', dataOnly: true, ttlSeconds: 45 });
+    expect(sentMessage().android.ttl).toBe('45s');
+    expect(sentMessage().webpush.headers.TTL).toBe('45');
+
+    // A message is data-only too now, and must NOT inherit that: a
+    // message delivered when the phone comes back into signal is still
+    // worth having, where a call is not.
+    mockedAxios.post.mockClear();
+    await gateway.send(['t'], { title: 'Priya', body: 'Hello', dataOnly: true });
+    expect(sentMessage().android.ttl).toBeUndefined();
+    expect(sentMessage().webpush.headers.TTL).toBe('86400');
+  });
+
+  it('sends no notification block at all when the app is to draw it', async () => {
+    const gateway = await loadGateway();
+    await gateway.send(['t'], {
+      title: 'Priya',
+      body: 'Hello',
+      dataOnly: true,
+      channelId: 'voxo-messages',
+      data: { type: 'message', conversationId: 'c1' },
+    });
+
+    const message = sentMessage();
+    // An EMPTY object is not the same thing: FCM treats a present
+    // notification block as one to draw, and the system tray would own
+    // the notification again — no face, no thread, no Reply.
+    expect(message.notification).toBeUndefined();
+    expect(message.android.notification).toBeUndefined();
+    expect(message.data).toEqual({ type: 'message', conversationId: 'c1' });
+    // The browser has no such distinction and still needs its drawn.
+    expect(message.webpush.notification.title).toBe('Priya');
+  });
+
   it('omits fcmOptions rather than sending an empty link', async () => {
     const gateway = await loadGateway();
     await gateway.send(['t'], { title: 'a', body: 'b' });

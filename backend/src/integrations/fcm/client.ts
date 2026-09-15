@@ -157,7 +157,7 @@ export const fcmGateway: PushGateway = {
                   // Seconds FCM keeps trying. A day is right for a
                   // message and absurd for a ring, so a call sets its own
                   // via requireInteraction's sibling below.
-                  TTL: payload.requireInteraction ? '60' : '86400',
+                  TTL: String(payload.ttlSeconds ?? (payload.requireInteraction ? 60 : 86400)),
                 },
                 notification: {
                   title: payload.title,
@@ -178,8 +178,10 @@ export const fcmGateway: PushGateway = {
                 // A ring is worthless once it has stopped ringing. Without
                 // this FCM would hold an undelivered call message for four
                 // weeks and hand a phone a notification for a call that
-                // ended long ago.
-                ...(payload.dataOnly ? { ttl: '45s' } : {}),
+                // ended long ago. Named by the caller rather than inferred
+                // from dataOnly: messages are data-only too, and a message
+                // that arrives late is still worth delivering.
+                ...(payload.ttlSeconds ? { ttl: `${payload.ttlSeconds}s` } : {}),
                 ...(payload.dataOnly ? {} : { notification: {
                   channelId: payload.channelId,
                   tag: payload.collapseKey,

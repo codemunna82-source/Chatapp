@@ -112,6 +112,10 @@ export async function displayIncomingCall(call: IncomingCallNotification): Promi
     data: { type: 'incoming_call', callId: call.callId, callType: call.callType },
     android: {
       channelId,
+      // The monochrome mark the manifest already names as this app's
+      // notification icon. notifee falls back to the launcher icon
+      // otherwise, which Android renders as a white blob.
+      smallIcon: 'notification_icon',
       // Fully coloured, the way Android dresses a phone call. Among a
       // column of grey notifications this is the one that reads as
       // urgent without anybody having to look twice.

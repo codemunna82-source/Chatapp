@@ -8,7 +8,9 @@
     // "include" so it is typechecked like everything else. Without this it
     // fails on node:fs/node:path/__dirname, which are perfectly valid in
     // the only context that file ever runs in.
-    "types": ["node"],
+    // "jest" so the test files beside the code they cover typecheck like
+    // everything else rather than being quietly excluded.
+    "types": ["node", "jest"],
     "paths": {
       "@/*": ["./src/*"]
     }

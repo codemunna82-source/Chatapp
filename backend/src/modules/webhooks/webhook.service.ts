@@ -145,6 +145,11 @@ async function handleIncomingMessage(
       conversationId: String(conversation._id),
       whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
       contactName,
+      contactId: String(contact._id),
+      // The photo's own version, so a notification shows the
+      // picture the contact has now rather than one the phone
+      // cached weeks ago.
+      avatarVersion: contact.avatarUpdatedAt?.toISOString(),
       emoji: raw.reaction?.emoji,
       targetPreview: target?.text ?? undefined,
     });
@@ -154,8 +159,14 @@ async function handleIncomingMessage(
       conversationId: String(conversation._id),
       whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
       contactName,
+      contactId: String(contact._id),
+      // The photo's own version, so a notification shows the
+      // picture the contact has now rather than one the phone
+      // cached weeks ago.
+      avatarVersion: contact.avatarUpdatedAt?.toISOString(),
       messageType: item.messageType,
       text: item.text,
+      sentAt: message.createdAt,
     });
   }
 

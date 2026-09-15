@@ -8,6 +8,9 @@ import { useActiveConversationStore } from '../store/activeConversationStore';
 import { useCallStore } from '../calling/callStore';
 import notifee, { EventType } from '@notifee/react-native';
 import { displayIncomingCall, cancelIncomingCall } from '../calling/callNotification';
+import { displayMessageNotification } from './messageNotification';
+import { handleMessageAction } from './messageActions';
+import { forgetThread } from './messageThread';
 import { handleCallAction } from '../calling/callActions';
 import { queryKeys } from '../queries/keys';
 
@@ -26,6 +29,11 @@ interface PushData {
   callType?: string;
   channelId?: string;
   ringingSince?: string;
+  /** Message and reaction pushes only — what the app needs to draw one. */
+  contactName?: string;
+  preview?: string;
+  avatarVersion?: string;
+  sentAt?: string;
 }
 
 interface PushNotificationSyncProps {
@@ -92,16 +100,63 @@ export function PushNotificationSync({ navigationRef }: PushNotificationSyncProp
     /**
      * Button presses while the app IS running.
      *
-     * The background handler in callBackground.ts covers the other two
+     * The background handler in pushBackground.ts covers the other two
      * cases; notifee routes a press to whichever of the two is live, never
      * both, so there is no risk of a call being answered twice.
      */
     const unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {
+      const data = (detail.notification?.data ?? {}) as Record<string, string | undefined>;
+
+      /**
+       * Tapping the notification body.
+       *
+       * Handled here and not by expo-notifications' response listener,
+       * which only ever hears about notifications IT presented — and
+       * message notifications are drawn by notifee now. Without this, a
+       * tap brought the app to the front and left it wherever it was.
+       */
+      if (type === EventType.PRESS) {
+        openFromData(data as PushData);
+        return;
+      }
+
+      // A swiped-away message notification has to drop its remembered
+      // thread, or the next message reappears underneath everything that
+      // was already dealt with.
+      if (type === EventType.DISMISSED) {
+        if (data.conversationId) forgetThread(data.conversationId);
+        return;
+      }
       if (type !== EventType.ACTION_PRESS) return;
+
       const actionId = detail.pressAction?.id;
-      const callId = detail.notification?.data?.callId as string | undefined;
-      if (!actionId || !callId) return;
-      void handleCallAction(actionId, callId);
+      if (!actionId) return;
+
+      if (data.conversationId) {
+        void handleMessageAction(
+          actionId,
+          {
+            conversationId: data.conversationId,
+            contactName: data.contactName,
+            contactId: data.contactId,
+            avatarVersion: data.avatarVersion,
+            channelId: data.channelId,
+          },
+          // What the agent typed into the Reply box. On the event rather
+          // than the action, which is why it travels separately.
+          detail.input,
+        ).then((handled) => {
+          if (!handled && data.callId) void handleCallAction(actionId, data.callId);
+          // A reply sent from the shade is a message this workspace sent,
+          // and the open chat list has no other way to hear about it.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+          if (data.conversationId) {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.messages(data.conversationId) });
+          }
+        });
+        return;
+      }
+      if (data.callId) void handleCallAction(actionId, data.callId);
     });
 
     const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
@@ -135,6 +190,38 @@ export function PushNotificationSync({ navigationRef }: PushNotificationSyncProp
         });
         return;
       }
+      /**
+       * A message push landing while the app is awake.
+       *
+       * Messages are data-only now, so nothing is drawn unless this
+       * draws it — the background task that would have does not run
+       * while the app is in the foreground.
+       *
+       * Skipped for the conversation already on screen: the message is
+       * right there, and a banner over it is pure noise. That is the
+       * same rule the in-app chime uses.
+       */
+      if ((data.type === 'message' || data.type === 'reaction') && data.conversationId) {
+        const activeId = useActiveConversationStore.getState().activeConversationId;
+        if (data.conversationId !== activeId) {
+          const sentAt = Number(data.sentAt);
+          void displayMessageNotification({
+            conversationId: data.conversationId,
+            contactName: data.contactName?.trim() || 'New message',
+            preview: data.preview?.trim() || 'New message',
+            contactId: data.contactId,
+            avatarVersion: data.avatarVersion,
+            sentAt: Number.isFinite(sentAt) && sentAt > 0 ? sentAt : undefined,
+            channelId: data.channelId,
+            // The in-app chime (useMessageAlert) has already sounded for
+            // this message, and it is the one that respects the Settings
+            // toggles. Two systems both making a noise for one message is
+            // a bug — see QUIET_CHAT_CHANNEL.
+            quiet: true,
+          });
+        }
+      }
+
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
       if (data.conversationId) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.messages(data.conversationId) });
@@ -146,9 +233,22 @@ export function PushNotificationSync({ navigationRef }: PushNotificationSyncProp
       openFromData((response.notification.request.content.data ?? {}) as PushData);
     });
 
-    // Covers the cold start: tapping a notification while the app is closed
-    // launches it, and by the time this listener is attached the tap has
-    // already happened, so it would otherwise be lost.
+    /**
+     * The cold start, for a notification the APP drew.
+     *
+     * notifee keeps the press that launched the process and hands it over
+     * once; expo-notifications knows nothing about it, so without this a
+     * message notification tapped on a locked phone opened the app at the
+     * chat list rather than at the customer who was waiting.
+     */
+    void notifee.getInitialNotification().then((initial) => {
+      if (!initial) return;
+      openFromData((initial.notification.data ?? {}) as PushData);
+    });
+
+    // The same for a notification expo-notifications presented: tapping
+    // one while the app is closed launches it, and by the time this
+    // listener is attached the tap has already happened.
     void Notifications.getLastNotificationResponseAsync().then((response) => {
       if (!response) return;
       if (handledResponse.current === response.notification.request.identifier) return;
