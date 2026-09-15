@@ -4,6 +4,7 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { registerDevice, unregisterDevice } from '../api/endpoints/devices';
 import { RINGTONES, channelConfigFor, type Ringtone } from '../calling/ringtones';
+import { ensureCustomChannel } from '../calling/customRingtone';
 import { currentRingtone } from '../store/ringtoneStore';
 import { QUIET_CHAT_CHANNEL } from './messageNotification';
 
@@ -35,7 +36,24 @@ export const CHAT_CHANNEL_ID = 'voxo-messages';
  */
 export async function applyRingtoneChannel(ringtone: Ringtone): Promise<void> {
   if (Platform.OS !== 'android') return;
-  await Notifications.setNotificationChannelAsync(ringtone.channelId, channelConfigFor(ringtone));
+
+  if (ringtone.channelSound) {
+    await Notifications.setNotificationChannelAsync(ringtone.channelId, channelConfigFor(ringtone));
+  } else {
+    // The one entry that is not a file this app ships. Its channel starts
+    // on the phone's own ringtone and then belongs to its owner — see
+    // customRingtone.ts for why it cannot be done any other way.
+    await ensureCustomChannel();
+  }
+
+  /**
+   * The others go.
+   *
+   * Deleting a channel and recreating it under the same id RESTORES what
+   * it had, which is usually a hazard and here is the point: someone who
+   * picks Marimba for a week and comes back to their own sound finds it
+   * still set, because Android kept it.
+   */
   await Promise.all(
     RINGTONES.filter((r) => r.channelId !== ringtone.channelId).map((r) =>
       Notifications.deleteNotificationChannelAsync(r.channelId).catch(() => {

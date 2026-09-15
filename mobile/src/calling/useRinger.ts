@@ -3,6 +3,7 @@ import { Vibration } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { useAlertPreferenceStore } from '../store/alertPreferenceStore';
 import { currentRingtone } from '../store/ringtoneStore';
+import { customSoundUri } from './customRingtone';
 import { cancelIncomingCall } from './callNotification';
 import { useCallStore } from './callStore';
 
@@ -18,9 +19,36 @@ import { useCallStore } from './callStore';
 const VIBRATION_PATTERN = [0, 700, 900];
 
 let player: AudioPlayer | null = null;
-/** Which ringtone `player` holds, so a changed choice rebuilds it and an
- *  unchanged one does not. */
-let loadedRingtoneId: string | null = null;
+/** What `player` holds — the ringtone id, or the custom sound's URI, so a
+ *  changed choice rebuilds it and an unchanged one does not. */
+let loadedSource: string | null = null;
+
+/**
+ * Builds the player for a source and starts it.
+ *
+ * Split out because the custom sound has to be looked up asynchronously
+ * (Android reports it on the channel) while a bundled one is a require()
+ * that is already in hand — and the ring must not wait on the lookup in
+ * the common case.
+ */
+function play(source: number | string, key: string): void {
+  // Rebuilt only when the choice changed. A player holds a decoded file,
+  // and creating one per call would leak nine of them through an
+  // afternoon of picking ringtones in Settings.
+  if (!player || loadedSource !== key) {
+    player?.remove();
+    player = createAudioPlayer(typeof source === 'string' ? { uri: source } : source);
+    // Every bundled file carries its own trailing silence, so looping
+    // produces a repeating ring rather than one unbroken tone. A sound
+    // the user chose has whatever shape it has; looping it is still
+    // closer to ringing than playing it once.
+    player.loop = true;
+    player.volume = 0.7;
+    loadedSource = key;
+  }
+  player.seekTo(0);
+  player.play();
+}
 
 function startSound(): void {
   try {
@@ -29,20 +57,29 @@ function startSound(): void {
     // loud. The vibration below is what reaches the user there.
     void setAudioModeAsync({ playsInSilentMode: false });
     const ringtone = currentRingtone();
-    // Rebuilt only when the choice changed. A player holds a decoded
-    // file, and creating one per call would leak eight of them through an
-    // afternoon of picking ringtones in Settings.
-    if (!player || loadedRingtoneId !== ringtone.id) {
-      player?.remove();
-      player = createAudioPlayer(ringtone.asset);
-      // Every file carries its own trailing silence, so looping produces a
-      // repeating ring rather than one unbroken tone.
-      player.loop = true;
-      player.volume = 0.7;
-      loadedRingtoneId = ringtone.id;
+
+    if (ringtone.asset !== undefined) {
+      play(ringtone.asset, ringtone.id);
+      return;
     }
-    player.seekTo(0);
-    player.play();
+
+    /**
+     * The sound the user chose in Android's own settings.
+     *
+     * Asked for rather than stored, because they can change it there at
+     * any time without this app being involved. The lookup is a native
+     * round trip, so the ring starts a beat late — acceptable for the one
+     * option whose whole point is that it is not ours, and the vibration
+     * and the call screen are already up by then.
+     */
+    void customSoundUri()
+      .then((uri) => {
+        if (uri) play(uri, uri);
+      })
+      .catch(() => {
+        // No channel, or a sound that will not open. The vibration and
+        // the on-screen call are the parts that actually matter.
+      });
   } catch {
     // No audio route, or the file failed to load. The vibration and the
     // on-screen call are the parts that actually matter.

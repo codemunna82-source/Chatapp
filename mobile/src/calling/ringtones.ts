@@ -15,8 +15,14 @@ import * as Notifications from 'expo-notifications';
 export interface Ringtone {
   id: string;
   label: string;
-  /** Bundled asset, for ringing while the app is open. */
-  asset: number;
+  /**
+   * Bundled asset, for ringing while the app is open.
+   *
+   * Absent for the one entry that is not a file this app ships — see
+   * CUSTOM_RINGTONE_ID, where the sound is whatever the phone's owner
+   * chose and lives outside the APK entirely.
+   */
+  asset?: number;
   /**
    * The Android notification channel that carries this sound when the app
    * is CLOSED.
@@ -31,9 +37,33 @@ export interface Ringtone {
    * one saying the same thing.
    */
   channelId: string;
-  /** res/raw filename the channel names. Must exist in the APK. */
-  channelSound: string;
+  /**
+   * res/raw filename the channel names. Must exist in the APK.
+   *
+   * Absent for the custom entry, whose channel is created asking for the
+   * phone's DEFAULT ringtone and then handed to the owner to change —
+   * see CUSTOM_RINGTONE_ID.
+   */
+  channelSound?: string;
 }
+
+/**
+ * The entry that is not one of ours.
+ *
+ * Android will not let an app point a notification channel at an
+ * arbitrary file: a channel's sound is resolved from `res/raw` inside the
+ * APK (or the system default), and a `content://` from the phone's own
+ * storage is not accepted — which is why the eight above are the eight
+ * this app ships, and why "use my own MP3" cannot simply be a ninth file.
+ *
+ * What Android DOES allow is its own channel settings screen, where the
+ * owner of the phone picks any sound on it, including one they added
+ * themselves. So this entry creates a channel of its own and sends them
+ * there. The chosen sound is then read back off the channel — it is the
+ * one channel property Android reports — so the in-app ringer plays the
+ * same thing the notification does.
+ */
+export const CUSTOM_RINGTONE_ID = 'custom';
 
 export const RINGTONES: Ringtone[] = [
   {
@@ -91,6 +121,12 @@ export const RINGTONES: Ringtone[] = [
     asset: require('../../assets/ringtones/ringtone_urgent.wav'),
     channelId: 'voxo-calls-urgent',
     channelSound: 'ringtone_urgent.wav',
+  },
+  {
+    id: CUSTOM_RINGTONE_ID,
+    label: 'A sound from this phone',
+    // No asset and no channelSound: this one is not a file VOXO ships.
+    channelId: 'voxo-calls-custom',
   },
 ];
 

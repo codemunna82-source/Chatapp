@@ -4,7 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
-import { RINGTONES, ringtoneById, type Ringtone } from '../../calling/ringtones';
+import { RINGTONES, ringtoneById, CUSTOM_RINGTONE_ID, type Ringtone } from '../../calling/ringtones';
+import { customSoundUri, isDefaultSound, openCustomSoundPicker } from '../../calling/customRingtone';
 import { useRingtoneStore } from '../../store/ringtoneStore';
 import { applyRingtoneChannel, registerForPushNotifications } from '../../notifications/pushRegistration';
 
@@ -24,6 +25,16 @@ export function RingtoneSheet({ visible, onClose }: { visible: boolean; onClose:
   const ringtoneId = useRingtoneStore((s) => s.ringtoneId);
   const setRingtoneId = useRingtoneStore((s) => s.setRingtoneId);
   const [playing, setPlaying] = useState<string | null>(null);
+  /**
+   * What the custom entry currently rings with, read off the Android
+   * channel rather than remembered.
+   *
+   * Re-read whenever this sheet opens, because the way it is changed is
+   * by leaving the app for system settings and coming back — there is no
+   * event to listen for, and a remembered value would be stale exactly
+   * when someone had just changed it.
+   */
+  const [customUri, setCustomUri] = useState<string | null>(null);
 
   /**
    * One player, replaced per preview and released on close.
@@ -44,6 +55,17 @@ export function RingtoneSheet({ visible, onClose }: { visible: boolean; onClose:
 
   useEffect(() => release, [release]);
 
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    void customSoundUri().then((uri) => {
+      if (!cancelled) setCustomUri(uri);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
+
   /**
    * Closing silences the preview.
    *
@@ -61,14 +83,33 @@ export function RingtoneSheet({ visible, onClose }: { visible: boolean; onClose:
   const choose = useCallback(
     (ringtone: Ringtone) => {
       setRingtoneId(ringtone.id);
-
       release();
+
+      /**
+       * The custom entry has nothing to preview here.
+       *
+       * Its sound lives outside the APK and is chosen on Android's own
+       * screen, which previews it there as you scroll the list — a second
+       * preview in this sheet would be a second opinion about a file this
+       * app did not choose. Selecting it opens that screen instead.
+       */
+      if (ringtone.id === CUSTOM_RINGTONE_ID) {
+        void openCustomSoundPicker()
+          .then(() => applyRingtoneChannel(ringtone))
+          .then(() => registerForPushNotifications())
+          .catch(() => {
+            // Settings refused to open, or there is no channel yet. The
+            // choice is saved and the next launch re-applies it.
+          });
+        return;
+      }
+
       try {
         // Previews play even on silent: someone comparing ringtones has
         // deliberately asked to hear them, unlike a call arriving on its
         // own — which useRinger keeps quiet on a silenced phone.
         void setAudioModeAsync({ playsInSilentMode: true });
-        const player = createAudioPlayer(ringtone.asset);
+        const player = createAudioPlayer(ringtone.asset!);
         player.volume = 0.8;
         playerRef.current = player;
         setPlaying(ringtone.id);
@@ -132,19 +173,28 @@ export function RingtoneSheet({ visible, onClose }: { visible: boolean; onClose:
         <ScrollView style={styles.listScroll} showsVerticalScrollIndicator={false}>
           {RINGTONES.map((ringtone) => {
             const selected = ringtone.id === ringtoneId;
+            const custom = ringtone.id === CUSTOM_RINGTONE_ID;
             return (
               <Pressable
                 key={ringtone.id}
                 onPress={() => choose(ringtone)}
                 accessibilityRole="button"
                 accessibilityState={{ selected }}
-                accessibilityLabel={`${ringtone.label} ringtone`}
+                accessibilityLabel={
+                  custom ? 'Choose a sound from this phone' : `${ringtone.label} ringtone`
+                }
                 style={({ pressed }) => [
                   styles.row,
                   {
                     paddingHorizontal: spacing.md,
                     paddingVertical: spacing.sm,
                     backgroundColor: pressed ? colors.surfaceAlt : 'transparent',
+                    // A rule above the last row, because it is a
+                    // different kind of thing from the eight above it —
+                    // it does not play here, it leaves for Android.
+                    borderTopWidth: custom ? StyleSheet.hairlineWidth : 0,
+                    borderTopColor: colors.border,
+                    marginTop: custom ? spacing.sm : 0,
                   },
                 ]}
               >
@@ -153,15 +203,32 @@ export function RingtoneSheet({ visible, onClose }: { visible: boolean; onClose:
                   size={20}
                   color={selected ? colors.success : colors.textTertiary}
                 />
-                <Text
-                  style={[
-                    selected ? typography.bodyMedium : typography.body,
-                    { color: colors.textPrimary, marginLeft: spacing.md, flex: 1 },
-                  ]}
-                >
-                  {ringtone.label}
-                </Text>
-                {playing === ringtone.id ? (
+                <View style={{ flex: 1, marginLeft: spacing.md }}>
+                  <Text
+                    style={[
+                      selected ? typography.bodyMedium : typography.body,
+                      { color: colors.textPrimary },
+                    ]}
+                  >
+                    {ringtone.label}
+                  </Text>
+                  {custom ? (
+                    <Text style={[typography.caption, { color: colors.textSecondary }]}>
+                      {/* Says what will happen before it happens: this row
+                          leaves VOXO for Android's own sound picker, which
+                          is the only place a file outside the app can be
+                          chosen. */}
+                      {selected
+                        ? isDefaultSound(customUri)
+                          ? "This phone's default ringtone · tap to change"
+                          : 'Your own sound · tap to change'
+                        : 'Pick any sound on this phone, in Android settings'}
+                    </Text>
+                  ) : null}
+                </View>
+                {custom ? (
+                  <Ionicons name="open-outline" size={17} color={colors.textTertiary} />
+                ) : playing === ringtone.id ? (
                   <Ionicons name="volume-high" size={18} color={colors.success} />
                 ) : null}
               </Pressable>
@@ -181,7 +248,8 @@ export function ringtoneLabel(id: string): string {
 
 const styles = StyleSheet.create({
   scrim: { flex: 1 },
-  sheet: { maxHeight: '62%' },
+  // Nine rows now, the last of them two lines high.
+  sheet: { maxHeight: '74%' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   listScroll: { flexGrow: 0 },
   row: { flexDirection: 'row', alignItems: 'center', minHeight: touchTarget.compact },

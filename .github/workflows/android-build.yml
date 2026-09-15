@@ -195,6 +195,47 @@ jobs:
             echo "GOOGLE_SERVICES_JSON secret not set — building without push notifications"
           fi
 
+      # A ringtone that names a file the APK does not carry is a call that
+      # arrives in silence. Android does not complain — the channel is
+      # created, the notification posts, and nothing makes a sound — so
+      # there is no way to find out except by missing a call. Checked here,
+      # where it costs a second, rather than on someone's phone.
+      - name: Check every ringtone has its files
+        working-directory: mobile
+        run: |
+          python3 - <<'CHECK'
+          import pathlib, re, sys
+
+          src = pathlib.Path('src/calling/ringtones.ts').read_text()
+          raw = pathlib.Path('android/app/src/main/res/raw')
+          bundled = pathlib.Path('assets/ringtones')
+
+          sounds = re.findall(r"channelSound:\s*'([^']+)'", src)
+          channels = re.findall(r"channelId:\s*'([^']+)'", src)
+          assets = re.findall(r"assets/ringtones/([A-Za-z0-9_.]+)", src)
+
+          problems = []
+          if not sounds:
+              problems.append('no channelSound entries found — has ringtones.ts moved?')
+          for name in sounds:
+              if not (raw / name).exists():
+                  problems.append(f'res/raw/{name} is missing, but a ringtone names it')
+          for name in assets:
+              if not (bundled / name).exists():
+                  problems.append(f'assets/ringtones/{name} is missing, but a ringtone requires it')
+          dupes = {c for c in channels if channels.count(c) > 1}
+          for c in sorted(dupes):
+              # Two ringtones on one channel cannot both be heard: a
+              # channel's sound is fixed when it is created, so the second
+              # one silently rings with the first one's sound.
+              problems.append(f'channel id {c} is used by more than one ringtone')
+
+          if problems:
+              print('\n'.join(f'  - {p}' for p in problems))
+              sys.exit(1)
+          print(f'{len(channels)} ringtones, {len(sounds)} bundled sounds, all present')
+          CHECK
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
