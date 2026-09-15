@@ -152,6 +152,22 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Install NOTHING here, and let the step below name what this
+          # build actually needs.
+          #
+          # The action's default is `tools platform-tools`, and Google has
+          # removed `tools` from the SDK repository — it is the obsolete
+          # pre-cmdline-tools package. sdkmanager then exits 1 with
+          # "Failed to find package 'tools'" and the whole build stops
+          # before it compiles a single file. Nothing in this project has
+          # ever used it: platform-tools comes with the runner image, and
+          # the platform and build-tools are installed by name below.
+          #
+          # This broke between two consecutive green builds with no change
+          # on our side, which is what a moving dependency does. Naming the
+          # packages ourselves is what stops it happening again.
+          packages: ''
 
       - name: Install required SDK platform/build-tools
         run: |
