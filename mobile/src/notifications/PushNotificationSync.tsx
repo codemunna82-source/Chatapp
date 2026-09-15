@@ -11,6 +11,8 @@ import { displayIncomingCall, cancelIncomingCall } from '../calling/callNotifica
 import { displayMessageNotification } from './messageNotification';
 import { handleMessageAction } from './messageActions';
 import { forgetThread } from './messageThread';
+import { shouldShowPush } from './signedOutGuard';
+import { useAuthStore } from '../store/authStore';
 import { handleCallAction } from '../calling/callActions';
 import { queryKeys } from '../queries/keys';
 
@@ -161,6 +163,20 @@ export function PushNotificationSync({ navigationRef }: PushNotificationSyncProp
 
     const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
       const data = (notification.request.content.data ?? {}) as PushData;
+
+      /**
+       * A push for a workspace this phone is no longer signed into.
+       *
+       * Rare in the foreground — this component only mounts inside the
+       * signed-in tree — but the session can end while it is still
+       * mounted, and the guard is what detaches the device in the one
+       * case clearSession could not. See signedOutGuard.
+       */
+      void shouldShowPush().then((show) => {
+        if (show) return;
+        if (data.callId) void cancelIncomingCall(data.callId);
+      });
+      if (!useAuthStore.getState().accessToken) return;
 
       /**
        * A call push landing while the app is awake.

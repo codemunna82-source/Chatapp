@@ -30,6 +30,15 @@ export interface TenantSettings {
    * businessAvatarUrl below.
    */
   avatarUpdatedAt: string | null;
+  /**
+   * What the CUSTOMER actually sees, which is not always the workspace's
+   * own photo: with none set, the web chat shows the profile picture of
+   * the person answering the number — the same person whose name it
+   * already shows.
+   *
+   * Null when neither has one.
+   */
+  customerFacingAvatar: { version: string; source: 'workspace' | 'member'; userId?: string } | null;
 }
 
 /**
@@ -54,6 +63,7 @@ function normalize(s: Partial<TenantSettings>): TenantSettings {
     // An older server sends nothing here, which reads as "no photo" —
     // the safe answer, since it only ever withholds a picture.
     avatarUpdatedAt: s.avatarUpdatedAt ?? null,
+    customerFacingAvatar: s.customerFacingAvatar ?? null,
   };
 }
 

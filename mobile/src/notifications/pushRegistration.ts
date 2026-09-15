@@ -7,6 +7,7 @@ import { RINGTONES, channelConfigFor, type Ringtone } from '../calling/ringtones
 import { ensureCustomChannel } from '../calling/customRingtone';
 import { currentRingtone } from '../store/ringtoneStore';
 import { QUIET_CHAT_CHANNEL } from './messageNotification';
+import { getJSON, remove, setJSON } from '../storage/mmkv';
 
 /** Must match CHAT_CHANNEL_ID in the backend's push.service.ts. A payload
  *  naming a channel that does not exist is silently dropped by Android. */
@@ -63,7 +64,20 @@ export async function applyRingtoneChannel(ringtone: Ringtone): Promise<void> {
   );
 }
 
-let currentToken: string | null = null;
+/**
+ * The FCM token this install last registered.
+ *
+ * Kept in device storage, not only in memory, and that is a fix rather
+ * than a nicety: the in-memory copy is null on every fresh process until
+ * a registration completes, and sign-out consulted only that. Sign out
+ * in a process where registration had not finished — a cold start with
+ * no signal, a phone that has just rebooted — and the server was never
+ * told, so that install kept receiving the workspace's calls and
+ * messages after the person had left it.
+ */
+const REGISTERED_TOKEN_KEY = 'voxo.pushToken';
+
+let currentToken: string | null = getJSON<string>(REGISTERED_TOKEN_KEY);
 
 /**
  * Android 8+ requires every notification to name a channel that already
@@ -238,19 +252,52 @@ export async function registerForPushNotifications(): Promise<PushStatus> {
   }
 
   currentToken = token;
+  setJSON(REGISTERED_TOKEN_KEY, token);
   lastDetail = null;
   lastStatus = 'registered';
   return lastStatus;
 }
 
-/** Detaches this device from the workspace on sign-out. Best-effort: if the
- *  call fails the user is signing out regardless, and blocking that on a
- *  network round trip would be worse than a stale token the backend prunes
- *  when its next send bounces. */
+/**
+ * Detaches this device from the workspace on sign-out.
+ *
+ * Called from clearSession, which is where EVERY way out of a session
+ * converges — the Sign out button, an expired refresh token, an admin
+ * revoking access, the socket reporting the same. It used to be called
+ * only from the Sign out button, so the other three left the install
+ * registered and it kept ringing for a workspace nobody on it was signed
+ * into any more.
+ *
+ * The token is asked for three ways, in order of certainty, because the
+ * whole point is that this must not quietly do nothing:
+ *   1. what this process registered,
+ *   2. what the last process registered (device storage),
+ *   3. the platform itself, which always knows.
+ *
+ * Best-effort at the network: the user is signing out regardless, and
+ * blocking that on a round trip would be worse than a stale token — which
+ * the app now also refuses to draw notifications for, and the backend
+ * prunes when its next send bounces.
+ */
 export async function unregisterForPushNotifications(): Promise<void> {
-  if (!currentToken) return;
-  const token = currentToken;
+  let token = currentToken ?? getJSON<string>(REGISTERED_TOKEN_KEY);
+  if (!token) {
+    try {
+      const devicePushToken = await Notifications.getDevicePushTokenAsync();
+      token = typeof devicePushToken.data === 'string' ? devicePushToken.data : null;
+    } catch {
+      // No Play Services, no config, no permission. Nothing to detach.
+    }
+  }
+
+  // Cleared whatever happens: this install is signed out, and a token
+  // left here would make the next sign-in think it was already
+  // registered.
   currentToken = null;
+  remove(REGISTERED_TOKEN_KEY);
+  lastStatus = null;
+
+  if (!token) return;
   try {
     await unregisterDevice(token);
   } catch {

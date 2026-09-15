@@ -16,6 +16,7 @@ import {
 } from '../../queries/useTenantSettings';
 import { AvatarPhoto } from '../../components/Avatar';
 import { businessAvatarUrl, type BusinessNameSource } from '../../api/endpoints/tenant';
+import { userAvatarUrl } from '../../api/endpoints/users';
 import { avatarCacheName } from '../../media/avatarCache';
 import { getApiErrorMessage } from '../../api/client';
 
@@ -121,6 +122,29 @@ export function BusinessProfileScreen() {
   const displayName = draft ?? data.displayName;
   const dirty = displayName.trim() !== data.displayName;
 
+  /**
+   * The photo the customer is actually shown, and where to fetch it.
+   *
+   * Two different authenticated routes depending on whose it is, which is
+   * why this is resolved here rather than by passing a version around:
+   * the workspace's own has its own endpoint, and a member's is the
+   * ordinary user-avatar one this app already reads everywhere else.
+   */
+  const facing = data.customerFacingAvatar;
+  const shown = facing
+    ? facing.source === 'workspace'
+      ? {
+          url: businessAvatarUrl(facing.version),
+          cacheKey: avatarCacheName('u', 'business', facing.version),
+        }
+      : facing.userId
+        ? {
+            url: userAvatarUrl(facing.userId, facing.version),
+            cacheKey: avatarCacheName('u', facing.userId, facing.version),
+          }
+        : null
+    : null;
+
   return (
     <Screen>
       <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -156,13 +180,18 @@ export function BusinessProfileScreen() {
               }
               style={[styles.avatarWrap, { marginRight: spacing.sm }]}
             >
-              {data.avatarUpdatedAt ? (
+              {/* Whatever the CUSTOMER sees, which is not always the
+                  workspace's own photo — with none set the window shows
+                  the profile picture of the person answering the number.
+                  Showing the workspace's here instead would make this
+                  preview a preview of something else. */}
+              {shown ? (
                 <AvatarPhoto
                   // Remounted per photo, so a new upload starts from a
                   // clean state rather than showing the previous one.
-                  key={data.avatarUpdatedAt}
-                  url={businessAvatarUrl(data.avatarUpdatedAt)}
-                  cacheKey={avatarCacheName('u', 'business', data.avatarUpdatedAt)}
+                  key={shown.cacheKey}
+                  url={shown.url}
+                  cacheKey={shown.cacheKey}
                   label={data.customerFacingName}
                   size={40}
                 />
@@ -187,8 +216,16 @@ export function BusinessProfileScreen() {
               <Text style={[typography.bodyMedium, { color: colors.textPrimary }]} numberOfLines={1}>
                 {data.customerFacingName}
               </Text>
-              <Text style={[typography.caption, { color: colors.textSecondary }]}>
-                {data.avatarUpdatedAt ? 'online · hold the photo to remove it' : 'online · tap the circle to add a photo'}
+              <Text style={[typography.caption, { color: colors.textSecondary }]} numberOfLines={2}>
+                {data.avatarUpdatedAt
+                  ? 'online · hold the photo to remove it'
+                  : facing?.source === 'member'
+                    ? // Says WHOSE photo this is. Without it, someone who
+                      // never set a workspace photo sees one anyway and
+                      // has no idea where it came from or how to change
+                      // it.
+                      'online · using your VOXO profile picture — tap to set a different one'
+                    : 'online · tap the circle to add a photo'}
               </Text>
             </View>
           </View>

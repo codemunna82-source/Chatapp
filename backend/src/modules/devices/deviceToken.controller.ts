@@ -28,7 +28,8 @@ export const registerDeviceHandler = asyncHandler(async (req: Request, res: Resp
  * a shared device.
  */
 export const unregisterDeviceHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
   const { token } = req.body as { token: string };
-  await unregisterDeviceToken(token);
+  await unregisterDeviceToken(token, { tenantId: auth.tenantId, userId: auth.userId });
   res.status(200).json({ success: true, data: { registered: false } });
 });

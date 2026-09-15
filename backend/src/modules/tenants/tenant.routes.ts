@@ -15,6 +15,7 @@ import { AVATAR_MAX_SIZE_BYTES } from '../media/avatarAsset';
 import {
   getTenantAvatar,
   removeTenantAvatar,
+  resolveBusinessAvatar,
   tenantAvatarVersion,
   updateTenantAvatar,
 } from './tenantAvatar.service';
@@ -153,6 +154,18 @@ tenantRouter.get(
         // Absent means no photo, which is what stops a client asking for
         // one — the same contract every other avatar here uses.
         avatarUpdatedAt: await tenantAvatarVersion(auth.tenantId),
+        /**
+         * What the CUSTOMER actually sees, which is not always the field
+         * above: with no workspace photo set, the window shows the
+         * profile picture of the person answering the number — the same
+         * person whose name it already shows.
+         *
+         * Reported separately so the settings preview can be honest
+         * about which it is, the way it already is about the name.
+         */
+        customerFacingAvatar: firstNumber
+          ? await resolveBusinessAvatar(auth.tenantId, String(firstNumber._id))
+          : null,
         autoGuestLink: {
           enabled: tenant.autoGuestLink?.enabled ?? false,
           /**
@@ -293,6 +306,9 @@ tenantRouter.patch(
         customerFacingNameSource: resolved.source,
         whatsappVerifiedName: firstNumber?.verifiedName ?? '',
         avatarUpdatedAt: await tenantAvatarVersion(auth.tenantId),
+        customerFacingAvatar: firstNumber
+          ? await resolveBusinessAvatar(auth.tenantId, String(firstNumber._id))
+          : null,
       },
     });
   }),

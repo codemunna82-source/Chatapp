@@ -32,8 +32,24 @@ export async function registerDeviceToken(input: RegisterDeviceInput): Promise<D
   );
 }
 
-export async function unregisterDeviceToken(token: string): Promise<void> {
-  await DeviceToken.deleteOne({ token });
+/**
+ * Detaches one install from the workspace, on sign-out.
+ *
+ * Scoped to the caller. It used to delete by token alone, which meant any
+ * signed-in user of any workspace could remove any device's
+ * notifications by presenting its token — not easily guessable, but not a
+ * check that should be missing either, and the caller always knows its
+ * own token so scoping costs nothing.
+ *
+ * The scope is safe as well as tighter: registration UPSERTS on the token
+ * (see above), so the row always belongs to whoever is signed in on that
+ * install right now — which is exactly who is signing out of it.
+ */
+export async function unregisterDeviceToken(
+  token: string,
+  owner: { tenantId: string; userId: string },
+): Promise<void> {
+  await DeviceToken.deleteOne({ token, tenantId: owner.tenantId, userId: owner.userId });
 }
 
 /** Every device belonging to this tenant — the fan-out target for a new

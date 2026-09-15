@@ -276,23 +276,64 @@ export async function findUserIdsWhoCanSeePhoneNumber(
  * stranger, so there is no reason for the email, the phone or anything
  * else on the document to travel with it.
  */
+export interface CustomerFacingIdentity {
+  userId: string;
+  displayName: string | null;
+  /** When their profile picture last changed, or null when they have
+   *  none. The cache-buster every avatar URL is keyed on. */
+  avatarUpdatedAt: string | null;
+}
+
+/**
+ * The person a customer writing to this number is actually talking to.
+ *
+ * Returns the whole identity rather than just the name, because the web
+ * chat window shows their PICTURE as well now — and the picture has to be
+ * the same person's as the name, or the window introduces one person and
+ * shows another.
+ *
+ * The assigned member first, then the workspace owner: a customer writing
+ * to one number is talking to one person, and if nobody is assigned to it
+ * that person is whoever runs the workspace.
+ */
+export async function findCustomerFacingIdentityForPhoneNumber(
+  tenantId: string,
+  whatsappPhoneNumberId: string,
+): Promise<CustomerFacingIdentity | null> {
+  const project = (doc: {
+    _id: unknown;
+    displayName?: string | null;
+    avatarUpdatedAt?: Date | null;
+  }): CustomerFacingIdentity => ({
+    userId: String(doc._id),
+    displayName: doc.displayName ?? null,
+    avatarUpdatedAt: doc.avatarUpdatedAt ? doc.avatarUpdatedAt.toISOString() : null,
+  });
+
+  if (Types.ObjectId.isValid(whatsappPhoneNumberId)) {
+    const assigned = await User.findOne({
+      tenantId,
+      whatsappPhoneNumberId,
+      status: 'ACTIVE',
+    })
+      .select('displayName avatarUpdatedAt')
+      .lean();
+    // Only when they are usable AS the customer-facing identity, which
+    // means having a name — an account with neither name nor photo is
+    // not an answer, and falling through to the owner is.
+    if (assigned?.displayName) return project(assigned);
+  }
+
+  const owner = await User.findOne({ tenantId, role: 'MASTER_ADMIN', status: 'ACTIVE' })
+    .select('displayName avatarUpdatedAt')
+    .lean();
+  return owner ? project(owner) : null;
+}
+
 export async function findCustomerFacingNameForPhoneNumber(
   tenantId: string,
   whatsappPhoneNumberId: string,
 ): Promise<string | null> {
-  if (!Types.ObjectId.isValid(whatsappPhoneNumberId)) return null;
-
-  const assigned = await User.findOne({
-    tenantId,
-    whatsappPhoneNumberId,
-    status: 'ACTIVE',
-  })
-    .select('displayName')
-    .lean();
-  if (assigned?.displayName) return assigned.displayName;
-
-  const owner = await User.findOne({ tenantId, role: 'MASTER_ADMIN', status: 'ACTIVE' })
-    .select('displayName')
-    .lean();
-  return owner?.displayName ?? null;
+  const identity = await findCustomerFacingIdentityForPhoneNumber(tenantId, whatsappPhoneNumberId);
+  return identity?.displayName ?? null;
 }

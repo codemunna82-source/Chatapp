@@ -7,6 +7,7 @@ import type { AuthTokens, AuthUser } from '../api/types';
 import { setSentryUser } from '../lib/sentry';
 import { clearChatCache } from '../storage/chatCache';
 import { clearMediaShapes } from '../storage/mediaShape';
+import { unregisterForPushNotifications } from '../notifications/pushRegistration';
 
 const CACHED_USER_KEY = 'voxo.cachedUser';
 
@@ -78,6 +79,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   clearSession: async (reason?: string) => {
+    /**
+     * FIRST, while the access token this call needs is still valid.
+     *
+     * And here rather than in the Sign out button, because this function
+     * is where every way out of a session converges: the button, an
+     * expired refresh token, an admin revoking access, the socket
+     * reporting the same. Only the button used to detach the device, so
+     * the other three left the install registered — and it kept ringing
+     * for calls and messages in a workspace nobody on that phone was
+     * signed into any more. On a shared phone that is not a glitch, it
+     * is someone else's customers.
+     *
+     * Awaited, but it never throws and never blocks on a slow network
+     * beyond its own request: signing out locally must not depend on
+     * reaching the server, which is exactly the case where the session
+     * ended because the server could not be reached.
+     */
+    await unregisterForPushNotifications();
+
     await clearStoredTokens();
     removeCached(CACHED_USER_KEY);
     // The on-disk chat cache holds customer message content. Leaving it

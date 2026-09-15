@@ -31,7 +31,7 @@ import {
 import { revokeAndBroadcast } from '../messages/message.service';
 import { Message, type MessageLean } from '../messages/message.model';
 import { refusalToRevoke, messageChannel, REVOKE_REFUSAL_MESSAGE } from '../messages/messageRevoke';
-import { getTenantAvatar, tenantAvatarVersion } from '../tenants/tenantAvatar.service';
+import { getBusinessAvatar, resolveBusinessAvatar } from '../tenants/tenantAvatar.service';
 import { pushIncomingMessage } from '../notifications/push.service';
 import { getRealtimeEmitter } from '../../realtime/events';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
@@ -632,7 +632,9 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
      * so a link holder never receives an address that outlives their
      * link.
      */
-    businessAvatarUpdatedAt: await tenantAvatarVersion(guest.tenantId),
+    businessAvatarUpdatedAt: (
+      await resolveBusinessAvatar(guest.tenantId, guest.whatsappPhoneNumberId)
+    )?.version ?? null,
     verifiedByWhatsApp,
     businessPhone: phoneNumber?.displayPhoneNumber ?? undefined,
     blocked: Boolean(guest.blockedAt),
@@ -1373,13 +1375,17 @@ export async function deleteGuestMessage(
  * The business's photo, for the customer holding this link.
  *
  * Takes no id of any kind: the link says which conversation this is, the
- * conversation says which workspace, and the workspace has exactly one
- * photo. A customer therefore cannot ask for anyone else's — which is the
- * same shape every other guest route has, and the reason none of them
- * accept a conversation id either.
+ * conversation says which workspace AND which number, and that pair
+ * resolves to exactly one photo. A customer therefore cannot ask for
+ * anyone else's — which is the same shape every other guest route has,
+ * and the reason none of them accept a conversation id either.
+ *
+ * Which photo is resolveBusinessAvatar's decision: the workspace's if an
+ * admin set one, otherwise the profile picture of the person answering
+ * this number — the same person whose name the window already shows.
  */
 export async function getGuestBusinessAvatar(
   guest: GuestContext,
 ): Promise<{ data: Buffer; contentType: string }> {
-  return getTenantAvatar(guest.tenantId);
+  return getBusinessAvatar(guest.tenantId, guest.whatsappPhoneNumberId);
 }

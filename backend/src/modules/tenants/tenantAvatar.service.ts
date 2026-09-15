@@ -7,6 +7,8 @@ import {
   uploadBufferToCloudinary,
 } from '../media/avatarAsset';
 import { Tenant } from './tenant.model';
+import { findCustomerFacingIdentityForPhoneNumber } from '../users/user.repository';
+import { getUserAvatarForTenant } from '../users/user.service';
 
 /**
  * The workspace's photo — what a customer sees at the top of the web chat
@@ -124,4 +126,56 @@ export async function getTenantAvatar(tenantId: string): Promise<{ data: Buffer;
 export async function tenantAvatarVersion(tenantId: string): Promise<string | null> {
   const tenant = await Tenant.findById(tenantId).select('avatarUpdatedAt').lean();
   return tenant?.avatarUpdatedAt ? tenant.avatarUpdatedAt.toISOString() : null;
+}
+
+/**
+ * The photo a customer should see above their chat, and where it comes
+ * from.
+ *
+ * The same order the NAME resolves in (businessName.ts), and for the same
+ * reason: whatever the admin set explicitly wins, and otherwise it is the
+ * person answering this number — the one whose name the window is already
+ * showing. A window that introduces one person and shows another's face
+ * is worse than showing none.
+ *
+ * In practice the second case is the one that matters. A one-person
+ * workspace has already set a profile picture in VOXO and reasonably
+ * expects the customer to see it; asking them to upload the same photo a
+ * second time under a different name is the sort of thing that just does
+ * not get done.
+ *
+ * Null when neither has one, which is what stops the window asking.
+ */
+export async function resolveBusinessAvatar(
+  tenantId: string,
+  whatsappPhoneNumberId: string,
+): Promise<{ version: string; source: 'workspace' | 'member'; userId?: string } | null> {
+  const workspace = await tenantAvatarVersion(tenantId);
+  if (workspace) return { version: workspace, source: 'workspace' };
+
+  const identity = await findCustomerFacingIdentityForPhoneNumber(tenantId, whatsappPhoneNumberId);
+  if (identity?.avatarUpdatedAt) {
+    return { version: identity.avatarUpdatedAt, source: 'member', userId: identity.userId };
+  }
+  return null;
+}
+
+/**
+ * Its bytes, from whichever of the two it turned out to be.
+ *
+ * Resolved again here rather than trusting a caller to say which: the
+ * guest route has no id to pass and must not be given one, and resolving
+ * twice costs a projection against a document the request has already
+ * touched.
+ */
+export async function getBusinessAvatar(
+  tenantId: string,
+  whatsappPhoneNumberId: string,
+): Promise<{ data: Buffer; contentType: string }> {
+  const resolved = await resolveBusinessAvatar(tenantId, whatsappPhoneNumberId);
+  if (!resolved) {
+    throw ApiError.notFound('AVATAR_NOT_FOUND', 'No photo set for this workspace');
+  }
+  if (resolved.source === 'workspace') return getTenantAvatar(tenantId);
+  return getUserAvatarForTenant(tenantId, resolved.userId!);
 }

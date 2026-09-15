@@ -6,6 +6,7 @@ import { handleCallAction } from '../calling/callActions';
 import { displayMessageNotification } from './messageNotification';
 import { handleMessageAction } from './messageActions';
 import { forgetThread } from './messageThread';
+import { shouldShowPush } from './signedOutGuard';
 
 /**
  * Everything a push needs while the app is NOT running.
@@ -75,6 +76,17 @@ function isStale(data: CallData): boolean {
 }
 
 async function onPushData(data: PushData): Promise<void> {
+  /**
+   * Nothing is drawn for an install nobody is signed into.
+   *
+   * Checked here rather than per type, because it applies to all of
+   * them: a call, a message and a cancellation are equally not this
+   * phone's business once its session has ended. See signedOutGuard for
+   * the case that makes this necessary — a refresh token that expired
+   * leaves no credential to detach the device with.
+   */
+  if (!(await shouldShowPush())) return;
+
   if (data.type === 'message' || data.type === 'reaction') {
     if (!data.conversationId) return;
     const sentAt = Number(data.sentAt);
