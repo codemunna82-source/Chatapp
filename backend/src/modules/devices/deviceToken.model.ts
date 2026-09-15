@@ -25,6 +25,19 @@ const deviceTokenSchema = new Schema(
      * waiting for a send to fail.
      */
     lastSeenAt: { type: Date, default: Date.now },
+    /**
+     * The Android notification channel this install wants ringing calls on.
+     *
+     * Stored per DEVICE because that is where the choice lives: a channel's
+     * sound is fixed the moment Android creates it, so "use a different
+     * ringtone" can only ever mean "use a different channel", and which
+     * channel exists is a fact about one phone.
+     *
+     * Absent for iOS, for the web, and for any Android build older than the
+     * picker — push.service falls back to the default channel for those,
+     * which is the one every such install already has.
+     */
+    callChannelId: { type: String },
   },
   { timestamps: true },
 );

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Vibration } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { useAlertPreferenceStore } from '../store/alertPreferenceStore';
+import { currentRingtone } from '../store/ringtoneStore';
 
 /**
  * The ring — sound and vibration — while a call is waiting to be answered.
@@ -15,6 +16,9 @@ import { useAlertPreferenceStore } from '../store/alertPreferenceStore';
 const VIBRATION_PATTERN = [0, 700, 900];
 
 let player: AudioPlayer | null = null;
+/** Which ringtone `player` holds, so a changed choice rebuilds it and an
+ *  unchanged one does not. */
+let loadedRingtoneId: string | null = null;
 
 function startSound(): void {
   try {
@@ -22,12 +26,18 @@ function startSound(): void {
     // playsInSilentMode: a phone on silent should not start ringing out
     // loud. The vibration below is what reaches the user there.
     void setAudioModeAsync({ playsInSilentMode: false });
-    if (!player) {
-      player = createAudioPlayer(require('../../assets/ringtone.wav'));
-      // The file already carries its own trailing silence, so looping it
-      // produces a repeating ring rather than a continuous tone.
+    const ringtone = currentRingtone();
+    // Rebuilt only when the choice changed. A player holds a decoded
+    // file, and creating one per call would leak eight of them through an
+    // afternoon of picking ringtones in Settings.
+    if (!player || loadedRingtoneId !== ringtone.id) {
+      player?.remove();
+      player = createAudioPlayer(ringtone.asset);
+      // Every file carries its own trailing silence, so looping produces a
+      // repeating ring rather than one unbroken tone.
       player.loop = true;
       player.volume = 0.7;
+      loadedRingtoneId = ringtone.id;
     }
     player.seekTo(0);
     player.play();

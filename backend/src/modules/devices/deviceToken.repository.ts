@@ -5,6 +5,8 @@ export interface RegisterDeviceInput {
   userId: string;
   token: string;
   platform: DevicePlatform;
+  /** Which call channel this install created. See the model. */
+  callChannelId?: string;
 }
 
 /**
@@ -21,6 +23,9 @@ export async function registerDeviceToken(input: RegisterDeviceInput): Promise<D
         userId: input.userId,
         platform: input.platform,
         lastSeenAt: new Date(),
+        // $set only when the client sent one: an older build that omits it
+        // must not wipe the channel this phone is already ringing on.
+        ...(input.callChannelId ? { callChannelId: input.callChannelId } : {}),
       },
     },
     { new: true, upsert: true },

@@ -7,7 +7,7 @@ import {
   deleteTokens,
 } from '../devices/deviceToken.repository';
 import { findUserIdsWhoCanSeePhoneNumber } from '../users/user.repository';
-import type { PushPayload } from '../../integrations/fcm';
+import type { PushPayload, SendResult } from '../../integrations/fcm';
 
 /** Matches the channel the Android app creates at startup. If these ever
  *  drift, Android silently drops the notification. */
@@ -73,7 +73,23 @@ export function previewForMessage(type: string, text: string | undefined): strin
 async function sendToTenant(
   tenantId: string,
   payload: PushPayload,
-  opts: { excludeUserId?: string; whatsappPhoneNumberId?: string } = {},
+  opts: {
+    excludeUserId?: string;
+    whatsappPhoneNumberId?: string;
+    /**
+     * Send on each device's OWN channel rather than the payload's.
+     *
+     * For ringing calls, where the channel is how the ringtone is chosen
+     * — see DeviceToken.callChannelId. Devices are grouped by channel and
+     * one send goes out per group, because a single FCM message carries a
+     * single channel id and two phones may want different sounds.
+     *
+     * The payload's channelId is the fallback for anything with none
+     * stored: iOS, the web, and Android builds older than the picker,
+     * all of which already have that channel.
+     */
+    perDeviceCallChannel?: boolean;
+  } = {},
 ): Promise<void> {
   const gateway = getPushGateway();
   if (!gateway.isConfigured()) return;
@@ -91,10 +107,31 @@ async function sendToTenant(
     }
     if (devices.length === 0) return;
 
-    const result = await gateway.send(
-      devices.map((d) => d.token),
-      payload,
-    );
+    /**
+     * One send per distinct channel, not one per device.
+     *
+     * In practice a workspace's phones nearly all sit on the default, so
+     * this is usually a single group and a single send — the grouping
+     * exists so that the one agent who picked "Marimba" gets Marimba,
+     * without costing everyone else a separate request.
+     */
+    const groups = new Map<string | undefined, string[]>();
+    for (const device of devices) {
+      const channelId = opts.perDeviceCallChannel
+        ? (device.callChannelId ?? payload.channelId)
+        : payload.channelId;
+      const bucket = groups.get(channelId);
+      if (bucket) bucket.push(device.token);
+      else groups.set(channelId, [device.token]);
+    }
+
+    const result: SendResult = { invalidTokens: [], successCount: 0, failureCount: 0 };
+    for (const [channelId, tokens] of groups) {
+      const sent = await gateway.send(tokens, { ...payload, channelId });
+      result.invalidTokens.push(...sent.invalidTokens);
+      result.successCount += sent.successCount;
+      result.failureCount += sent.failureCount;
+    }
 
     if (result.invalidTokens.length > 0) {
       await deleteTokens(result.invalidTokens);
@@ -254,6 +291,6 @@ export async function pushIncomingCall(input: IncomingCallPushInput): Promise<vo
         contactId: input.contactId,
       },
     },
-    { whatsappPhoneNumberId: input.whatsappPhoneNumberId },
+    { whatsappPhoneNumberId: input.whatsappPhoneNumberId, perDeviceCallChannel: true },
   );
 }

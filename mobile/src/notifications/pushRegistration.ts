@@ -2,26 +2,46 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { registerDevice, unregisterDevice } from '../api/endpoints/devices';
+import { RINGTONES, channelConfigFor, type Ringtone } from '../calling/ringtones';
+import { currentRingtone } from '../store/ringtoneStore';
 
 /** Must match CHAT_CHANNEL_ID in the backend's push.service.ts. A payload
  *  naming a channel that does not exist is silently dropped by Android. */
 export const CHAT_CHANNEL_ID = 'voxo-messages';
 
 /**
- * Ringing calls, on a channel of their own.
+ * Ringing calls live on a channel of their own — see calling/ringtones.ts,
+ * which owns the ids because each ringtone owns a channel.
  *
- * Not because the code is tidier that way — because an Android channel's
- * sound and importance are FIXED at creation and only the user can change
- * them afterwards. A call and a message sharing one channel can never
- * sound different, however the payload is written. Two channels is the
- * only way a call can ring while a message chimes.
- *
- * It also hands the choice to the person whose phone it is: Android shows
- * these separately in system settings, so someone who wants calls loud
- * and messages silent can say so, and someone who wants the ringtone
- * changed can change it without touching the app.
+ * Not for tidiness: an Android channel's sound and importance are FIXED at
+ * creation and only the user can change them afterwards. A call and a
+ * message sharing one channel can never sound different, however the
+ * payload is written.
  */
-export const CALL_CHANNEL_ID = 'voxo-calls';
+/**
+ * Makes this phone's chosen ringtone the one Android rings with.
+ *
+ * Creates the channel for the selected ringtone and deletes the channels
+ * belonging to the others, so system settings lists ONE "Incoming calls"
+ * entry rather than eight.
+ *
+ * Deleting is safe here only because each ringtone owns a DIFFERENT
+ * channel id. Android remembers a deleted channel's settings and restores
+ * them if a channel with the same id is created again — so the obvious
+ * implementation, one channel re-created with a new sound, silently keeps
+ * the old sound forever. Different ids side-step that entirely.
+ */
+export async function applyRingtoneChannel(ringtone: Ringtone): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync(ringtone.channelId, channelConfigFor(ringtone));
+  await Promise.all(
+    RINGTONES.filter((r) => r.channelId !== ringtone.channelId).map((r) =>
+      Notifications.deleteNotificationChannelAsync(r.channelId).catch(() => {
+        // Never created on this device, which is the normal case.
+      }),
+    ),
+  );
+}
 
 let currentToken: string | null = null;
 
@@ -41,23 +61,7 @@ async function ensureChannel(): Promise<void> {
     lightColor: '#26344D',
   });
 
-  await Notifications.setNotificationChannelAsync(CALL_CHANNEL_ID, {
-    name: 'Incoming calls',
-    description: 'Rings when a customer calls you.',
-    // MAX, not HIGH: a ringing call is the one notification worth
-    // interrupting whatever is on screen, and HIGH does not do that.
-    importance: Notifications.AndroidImportance.MAX,
-    // res/raw/ringtone.wav, by filename. Android resolves it from the
-    // APK — a path or a URL here silently falls back to the default
-    // notification chime, which is exactly the sound this exists to
-    // replace.
-    sound: 'ringtone.wav',
-    // A phone-like cadence rather than the short triple-buzz a message
-    // gets: long, gap, long, so it reads as ringing even in a pocket.
-    vibrationPattern: [0, 800, 600, 800, 600, 800],
-    lightColor: '#26344D',
-    enableVibrate: true,
-  });
+  await applyRingtoneChannel(currentRingtone());
 }
 
 /**
@@ -176,7 +180,15 @@ export async function registerForPushNotifications(): Promise<PushStatus> {
   }
 
   try {
-    await registerDevice(token, Platform.OS === 'ios' ? 'ios' : 'android');
+    await registerDevice(
+      token,
+      Platform.OS === 'ios' ? 'ios' : 'android',
+      // Sent on every registration, so changing the ringtone and letting
+      // the app re-register is all it takes for calls to arrive on the new
+      // channel — there is no separate "update my ringtone" call to get
+      // out of step with this one.
+      Platform.OS === 'android' ? currentRingtone().channelId : undefined,
+    );
   } catch (err) {
     lastDetail = err instanceof Error ? err.message : String(err);
     lastStatus = 'server-rejected';

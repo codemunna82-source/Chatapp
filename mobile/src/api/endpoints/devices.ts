@@ -2,8 +2,20 @@ import { apiClient } from '../client';
 
 export type DevicePlatform = 'android' | 'ios';
 
-export async function registerDevice(token: string, platform: DevicePlatform): Promise<void> {
-  await apiClient.post('/devices', { token, platform });
+export async function registerDevice(
+  token: string,
+  platform: DevicePlatform,
+  /**
+   * Which Android channel this phone wants ringing calls on.
+   *
+   * The server sends calls on it rather than on its own default, which is
+   * how a ringtone picked here is heard while the app is CLOSED — an
+   * Android channel's sound is fixed at creation, so choosing a ringtone
+   * is choosing a channel.
+   */
+  callChannelId?: string,
+): Promise<void> {
+  await apiClient.post('/devices', { token, platform, callChannelId });
 }
 
 /**

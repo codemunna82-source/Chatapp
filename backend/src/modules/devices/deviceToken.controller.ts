@@ -6,8 +6,18 @@ import type { DevicePlatform } from './deviceToken.model';
 
 export const registerDeviceHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  const { token, platform } = req.body as { token: string; platform: DevicePlatform };
-  await registerDeviceToken({ tenantId: auth.tenantId, userId: auth.userId, token, platform });
+  const { token, platform, callChannelId } = req.body as {
+    token: string;
+    platform: DevicePlatform;
+    callChannelId?: string;
+  };
+  await registerDeviceToken({
+    tenantId: auth.tenantId,
+    userId: auth.userId,
+    token,
+    platform,
+    callChannelId,
+  });
   res.status(200).json({ success: true, data: { registered: true } });
 });
 

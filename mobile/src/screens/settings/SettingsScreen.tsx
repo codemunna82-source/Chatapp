@@ -2,6 +2,8 @@ import React, { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import { RingtoneSheet, ringtoneLabel } from './RingtoneSheet';
+import { useRingtoneStore } from '../../store/ringtoneStore';
 import {
   registerForPushNotifications,
   getPushStatus,
@@ -330,6 +332,8 @@ function AlertsSection() {
       setChecking(false);
     }
   }, []);
+  const ringtoneId = useRingtoneStore((s) => s.ringtoneId);
+  const [ringtoneOpen, setRingtoneOpen] = useState(false);
   const sound = useAlertPreferenceStore((s) => s.sound);
   const vibrate = useAlertPreferenceStore((s) => s.vibrate);
   const setSound = useAlertPreferenceStore((s) => s.setSound);
@@ -369,6 +373,39 @@ function AlertsSection() {
       <Text style={[typography.caption, { color: colors.textTertiary, marginTop: spacing.xs }]}>
         These play while VOXO is open.
       </Text>
+
+      {/* Its own row rather than a third switch: this is a choice among
+          eight, and the only honest way to present a sound is to let
+          someone hear it. */}
+      <Pressable
+        onPress={() => setRingtoneOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`Call ringtone, currently ${ringtoneLabel(ringtoneId)}`}
+        style={({ pressed }) => [
+          styles.alertRow,
+          {
+            marginTop: spacing.sm,
+            paddingHorizontal: spacing.md,
+            backgroundColor: pressed ? colors.surfaceElevated : colors.surfaceAlt,
+            borderRadius: radius.md,
+          },
+        ]}
+      >
+        <Text style={[typography.body, { color: colors.textPrimary }]}>Call ringtone</Text>
+        <View style={styles.ringtoneValue}>
+          <Text style={[typography.body, { color: colors.textSecondary }]}>
+            {ringtoneLabel(ringtoneId)}
+          </Text>
+          <Ionicons
+            name="chevron-forward"
+            size={18}
+            color={colors.textTertiary}
+            style={{ marginLeft: spacing.xs }}
+          />
+        </View>
+      </Pressable>
+
+      <RingtoneSheet visible={ringtoneOpen} onClose={() => setRingtoneOpen(false)} />
 
       {/* And the other half: whether anything arrives when it is closed.
           Tappable on every state except success, because every failing
@@ -598,6 +635,7 @@ export function SettingsScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  ringtoneValue: { flexDirection: 'row', alignItems: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   subscriptionCard: {},
   subscriptionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
