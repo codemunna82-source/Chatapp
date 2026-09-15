@@ -13,6 +13,7 @@ import { visibleWhatsAppPhoneNumberId } from '../../modules/conversations/conver
 import { findContactByIdAndTenant } from '../../modules/contacts/contact.repository';
 import { pushGuestIncomingCall } from '../../modules/guest/guestPush.service';
 import { resolveBusinessNameForConversation } from '../../modules/guest/businessName';
+import { contactDisplayName } from '../../lib/phone';
 import { pushIncomingCall, pushCallCancelled } from '../../modules/notifications/push.service';
 import {
   isConversationBlockedByGuest,
@@ -145,7 +146,7 @@ export function registerGuestCallHandlers(io: AppServer, socket: AppSocket, gues
     const callId = String(call._id);
 
     const contact = await findContactByIdAndTenant(guest.contactId, guest.tenantId);
-    const contactName = contact?.name || contact?.phone || 'Web chat';
+    const contactName = contactDisplayName(contact);
 
     agentAudience(io, guest.tenantId, guest.whatsappPhoneNumberId).emit('web:call:incoming', {
       callId,

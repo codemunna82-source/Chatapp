@@ -57,3 +57,76 @@ export function phoneVariants(raw: string | null | undefined): string[] {
 export function toWhatsAppId(phone: string): string {
   return (normalizePhone(phone) ?? phone).replace(/^\+/, '');
 }
+
+/**
+ * A phone number as a person would read it, for the places a name is
+ * expected but none was saved.
+ *
+ * A notification title is the one place `+919876543210` really hurts: it
+ * is the first thing an agent sees on a ringing phone, and twelve
+ * unbroken digits are read one at a time or not at all. Grouped, the same
+ * number is recognised at a glance.
+ *
+ * Deliberately approximate. Proper national formatting is a country-by-
+ * country dataset — libphonenumber is ~250kB of it — and this is a
+ * display nicety, not a validation or a dialling string: nothing is ever
+ * stored, matched or sent to Meta in this form. So the four codes this
+ * deployment actually serves get their real grouping, and everything else
+ * gets even blocks, which is still far easier to read than none. Storage
+ * and lookup stay on `normalizePhone`.
+ */
+const DISPLAY_GROUPS: Record<string, number[]> = {
+  '91': [5, 5], // India — 98765 43210
+  '1': [3, 3, 4], // US/Canada — 415 555 0123
+  '44': [4, 6], // UK — 7700 900123
+  '971': [2, 3, 4], // UAE — 50 123 4567
+};
+
+export function formatPhoneForDisplay(raw: string | null | undefined): string | null {
+  const canonical = normalizePhone(raw);
+  if (!canonical) return raw ? String(raw).trim() || null : null;
+
+  const digits = canonical.slice(1);
+
+  // Longest code first, so +1 never claims a number that is really +971.
+  for (const code of Object.keys(DISPLAY_GROUPS).sort((a, b) => b.length - a.length)) {
+    if (!digits.startsWith(code)) continue;
+    const rest = digits.slice(code.length);
+    const groups = DISPLAY_GROUPS[code] ?? [];
+    if (rest.length !== groups.reduce((sum, n) => sum + n, 0)) break; // Not the length this pattern is for.
+    const parts: string[] = [];
+    let at = 0;
+    for (const size of groups) {
+      parts.push(rest.slice(at, at + size));
+      at += size;
+    }
+    return `+${code} ${parts.join(' ')}`;
+  }
+
+  // Unknown country: blocks of four from the right, which keeps the last
+  // digits — the ones people actually recognise a number by — together.
+  const blocks: string[] = [];
+  for (let end = digits.length; end > 0; end -= 4) {
+    blocks.unshift(digits.slice(Math.max(0, end - 4), end));
+  }
+  return `+${blocks.join(' ')}`;
+}
+
+/**
+ * What to call a contact on screen: their name, or their number written
+ * so it can be read, or a last resort.
+ *
+ * One function because six call sites had each written
+ * `contact?.name || contact?.phone || 'Web chat'` by hand, and a push
+ * title that disagrees with the conversation header about who a person is
+ * is the kind of difference nobody notices until a customer is on the
+ * phone.
+ */
+export function contactDisplayName(
+  contact: { name?: string | null; phone?: string | null } | null | undefined,
+  fallback = 'Web chat',
+): string {
+  const name = contact?.name?.trim();
+  if (name) return name;
+  return formatPhoneForDisplay(contact?.phone) ?? fallback;
+}

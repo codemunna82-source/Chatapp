@@ -22,6 +22,7 @@ import { pushIncomingMessage, pushReaction } from '../notifications/push.service
 import { handleInboundCallEvent } from '../calls/call.service';
 import { createMedia } from '../media/media.repository';
 import type { MessageStatus } from '../messages/message.model';
+import { contactDisplayName } from '../../lib/phone';
 import { getRealtimeEmitter } from '../../realtime/events';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
 
@@ -120,7 +121,7 @@ async function handleIncomingMessage(
   // every open app over the socket. A push failure must not fail this
   // handler, because Meta would then retry the whole delivery and the
   // message would be processed twice.
-  const contactName = contact.name || contact.phone;
+  const contactName = contactDisplayName(contact);
   // No push either, for the same reason: a notification about a message
   // the inbox is deliberately not showing would send an agent looking for
   // a conversation that is not there.

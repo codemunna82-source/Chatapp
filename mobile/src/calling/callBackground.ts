@@ -39,9 +39,17 @@ interface CallData {
  *  the clock is the second, for a message delivered just inside it. */
 const RING_STALE_AFTER_MS = 60_000;
 
-function isStale(data: CallData): boolean {
+/** The server's ring clock, or undefined when it did not send one (an
+ *  older backend). Never a guess: the chronometer counting from the wrong
+ *  moment is worse than it counting from now. */
+function ringingSince(data: CallData): number | undefined {
   const since = Number(data.ringingSince);
-  return Number.isFinite(since) && Date.now() - since > RING_STALE_AFTER_MS;
+  return Number.isFinite(since) && since > 0 ? since : undefined;
+}
+
+function isStale(data: CallData): boolean {
+  const since = ringingSince(data);
+  return since !== undefined && Date.now() - since > RING_STALE_AFTER_MS;
 }
 
 async function onCallData(data: CallData): Promise<void> {
@@ -56,9 +64,10 @@ async function onCallData(data: CallData): Promise<void> {
 
   await displayIncomingCall({
     callId: data.callId,
-    callerName: data.callerName ?? 'Incoming call',
+    callerName: data.callerName,
     callType: data.callType === 'video' ? 'video' : 'audio',
     channelId: data.channelId,
+    ringingSince: ringingSince(data),
   });
 }
 

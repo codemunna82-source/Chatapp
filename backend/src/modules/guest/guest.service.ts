@@ -5,7 +5,7 @@ import { trace } from '../../lib/perfTrace';
 import type { AuthContext } from '../../types/express';
 import { Tenant } from '../tenants/tenant.model';
 import { findContactByIdAndTenant, findOrCreateContactByPhone } from '../contacts/contact.repository';
-import { normalizePhone } from '../../lib/phone';
+import { contactDisplayName, normalizePhone } from '../../lib/phone';
 import type { GuestMediaKind } from './guestMedia.service';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
 import { refreshNumberHealthIfStale } from '../whatsapp/whatsapp.service';
@@ -672,7 +672,7 @@ export async function postGuestMessage(
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
-    contactName: contact?.name || contact?.phone || 'Web chat',
+    contactName: contactDisplayName(contact),
     messageType: 'text',
     text,
   }).catch(() => {});
@@ -894,7 +894,7 @@ export async function postGuestMediaMessage(
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
-    contactName: contact?.name || contact?.phone || 'Web chat',
+    contactName: contactDisplayName(contact),
     messageType: kind,
   }).catch(() => {});
 
@@ -961,7 +961,7 @@ export async function postGuestLocationMessage(
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
-    contactName: contact?.name || contact?.phone || 'Web chat',
+    contactName: contactDisplayName(contact),
     messageType: 'location',
     text,
   }).catch(() => {});

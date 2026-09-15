@@ -1,12 +1,14 @@
 import notifee, {
   AndroidCategory,
   AndroidImportance,
+  AndroidStyle,
   AndroidVisibility,
   type Notification,
 } from '@notifee/react-native';
 import { Platform } from 'react-native';
 import { DEFAULT_RINGTONE_ID, ringtoneById } from './ringtones';
 import { useRingtoneStore } from '../store/ringtoneStore';
+import { chatDarkColors } from '../theme/chatTheme';
 
 /**
  * The incoming-call notification — the one with Accept and Reject on it.
@@ -30,6 +32,32 @@ export const CALL_ACCEPT_ACTION = 'VOXO_CALL_ACCEPT';
 export const CALL_REJECT_ACTION = 'VOXO_CALL_REJECT';
 
 /**
+ * How long the notification stays before Android removes it itself.
+ *
+ * Matched to RINGING_TTL_MS on the server, which is what decides a call
+ * has gone unanswered. They have to agree: shorter here and the phone
+ * stops ringing at a call still waiting; longer and a notification
+ * outlives the call it was for, which is the one thing a ring must never
+ * do. A belt to the server's braces — the cancellation push is what
+ * normally clears it, and this is what clears it when that push cannot
+ * be delivered.
+ */
+const RING_TIMEOUT_MS = 60_000;
+
+/**
+ * The colour of the whole notification.
+ *
+ * The app's own success green (chatTheme) rather than the VOXO navy every
+ * other notification uses, and deliberately: green is what Android's own
+ * dialler and every phone app uses for a ringing call, and it is what
+ * makes this one notification readable as a call rather than as another
+ * message — which is the difference an agent is deciding in the second
+ * before they answer. Taken from the theme rather than written out here
+ * so the ring and the app agree on what green means.
+ */
+const CALL_COLOR = chatDarkColors.success;
+
+/**
  * The notification id IS the call id.
  *
  * Which makes every display idempotent for free: FCM retries, a duplicate
@@ -43,11 +71,17 @@ export function callNotificationId(callId: string): string {
 
 export interface IncomingCallNotification {
   callId: string;
-  callerName: string;
+  /** Optional so every caller can hand over whatever the server sent
+   *  without inventing a placeholder of its own — the fallback below is
+   *  the only one, and so the only one to keep in step. */
+  callerName?: string;
   callType: 'audio' | 'video';
   /** The ringtone channel this device chose — see ringtones.ts. Falls back
    *  to the default when a push predates the picker. */
   channelId?: string;
+  /** When it started ringing, for the chronometer. The server's clock, so
+   *  a slow delivery does not make the call look newer than it is. */
+  ringingSince?: number;
 }
 
 /**
@@ -65,13 +99,47 @@ export async function displayIncomingCall(call: IncomingCallNotification): Promi
   const channelId =
     call.channelId ?? ringtoneById(useRingtoneStore.getState().ringtoneId ?? DEFAULT_RINGTONE_ID).channelId;
 
+  const caller = call.callerName?.trim() || 'Unknown caller';
+  const line = call.callType === 'video' ? 'Incoming video call' : 'Incoming audio call';
+
   const notification: Notification = {
     id: callNotificationId(call.callId),
-    title: call.callerName || 'Incoming call',
-    body: call.callType === 'video' ? 'Incoming video call' : 'Incoming audio call',
+    // The NAME is the headline, and the kind of call the subtitle — the
+    // order every phone uses, because who is calling is what decides
+    // whether to answer and the rest is detail.
+    title: caller,
+    body: line,
     data: { type: 'incoming_call', callId: call.callId, callType: call.callType },
     android: {
       channelId,
+      // Fully coloured, the way Android dresses a phone call. Among a
+      // column of grey notifications this is the one that reads as
+      // urgent without anybody having to look twice.
+      color: CALL_COLOR,
+      colorized: true,
+      // The app mark, round, where a phone puts the caller's photo. Not
+      // the contact's own avatar: those are served from an authenticated
+      // endpoint and the system's image loader has no token to present —
+      // a broken image is worse than a consistent one.
+      largeIcon: require('../../assets/icon.png'),
+      circularLargeIcon: true,
+      // Wakes the screen, like a call. The one notification in this app
+      // that has earned it; a message must never do this.
+      lightUpScreen: true,
+      // Keeps ringing rather than chiming once and giving up on someone
+      // who is in another room.
+      loopSound: true,
+      // A live count of how long it has been ringing — the only honest
+      // motion a notification can have, and it answers the question
+      // someone glancing at a missed-looking ring actually has.
+      showChronometer: true,
+      chronometerDirection: 'up',
+      // Android removes it on its own if nothing else does. See
+      // RING_TIMEOUT_MS.
+      timeoutAfter: RING_TIMEOUT_MS,
+      // Expanded, the name gets a full line instead of being cut to fit
+      // beside the icon.
+      style: { type: AndroidStyle.BIGTEXT, text: `${line}\n${caller}` },
       // CALL is what tells Android this is a phone call: it ranks above
       // other notifications, survives some Do Not Disturb modes, and is
       // what a car or watch uses to decide how to present it.
@@ -93,13 +161,18 @@ export async function displayIncomingCall(call: IncomingCallNotification): Promi
       // Reject first, Accept second — the same order as the phone app, so
       // muscle memory does not hang up on a customer.
       actions: [
-        { title: 'Reject', pressAction: { id: CALL_REJECT_ACTION } },
-        { title: 'Accept', pressAction: { id: CALL_ACCEPT_ACTION, launchActivity: 'default' } },
+        { title: 'Decline', pressAction: { id: CALL_REJECT_ACTION } },
+        { title: 'Answer', pressAction: { id: CALL_ACCEPT_ACTION, launchActivity: 'default' } },
       ],
       // The sound and vibration belong to the channel, not here: Android
       // fixes both when a channel is created, which is why each ringtone
       // owns one.
-      timestamp: Date.now(),
+      //
+      // The timestamp is what the chronometer counts from, so it is the
+      // moment the ring STARTED rather than the moment this was drawn —
+      // a push that took three seconds to arrive should not reset the
+      // clock and tell the agent a call is newer than it is.
+      timestamp: call.ringingSince ?? Date.now(),
       showTimestamp: true,
     },
   };

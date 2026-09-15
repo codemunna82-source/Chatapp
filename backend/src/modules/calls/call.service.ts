@@ -16,7 +16,7 @@ import type { CallLogDoc } from './callLog.model';
 import type { WhatsAppPhoneNumberDoc } from '../whatsapp/whatsappPhoneNumber.model';
 import type { NormalizedCallItem } from '../../integrations/meta/webhookPayload';
 import type { ContactLean } from '../contacts/contact.model';
-import { toWhatsAppId } from '../../lib/phone';
+import { contactDisplayName, toWhatsAppId } from '../../lib/phone';
 
 const WHATSAPP_DEEPLINK_PROVIDER = 'whatsapp_deeplink';
 
@@ -127,7 +127,7 @@ export async function initiateWhatsAppCall(
     tenantId,
     actorUserId,
     actorName: actor?.displayName || actor?.email || 'A teammate',
-    contactName: contact.name || contact.phone,
+    contactName: contactDisplayName(contact),
     contactId: String(contact._id),
   });
 
@@ -197,7 +197,7 @@ export async function handleInboundCallEvent(
       tenantId,
       whatsappPhoneNumberId,
       contactId: String(contact._id),
-      contactName: contact.name ?? item.from,
+      contactName: contactDisplayName(contact),
       callId: item.callId,
     });
 

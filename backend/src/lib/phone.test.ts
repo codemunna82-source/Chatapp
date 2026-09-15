@@ -1,4 +1,10 @@
-import { normalizePhone, phoneVariants, toWhatsAppId } from './phone';
+import {
+  contactDisplayName,
+  formatPhoneForDisplay,
+  normalizePhone,
+  phoneVariants,
+  toWhatsAppId,
+} from './phone';
 
 /**
  * No database: this is the rule that decides whether a customer's web-chat
@@ -77,5 +83,62 @@ describe('toWhatsAppId', () => {
     for (const input of ['+919876543210', '00919876543210', '+1 (415) 555-1234']) {
       expect(toWhatsAppId(input).startsWith('+')).toBe(false);
     }
+  });
+});
+
+/**
+ * What a notification calls a customer who has no saved name. This is the
+ * first thing an agent reads on a ringing phone, so the only real
+ * requirement is that it can be read at all — and that it never comes out
+ * empty, because a nameless notification is one nobody answers.
+ */
+describe('formatPhoneForDisplay', () => {
+  it('groups an Indian number the way an Indian number is written', () => {
+    expect(formatPhoneForDisplay('+919876543210')).toBe('+91 98765 43210');
+  });
+
+  it('groups a US number the way a US number is written', () => {
+    expect(formatPhoneForDisplay('+14155550123')).toBe('+1 415 555 0123');
+  });
+
+  it('does not let +1 swallow a number that is really +971', () => {
+    expect(formatPhoneForDisplay('+971501234567')).toBe('+971 50 123 4567');
+  });
+
+  it('still breaks up a country it has no pattern for', () => {
+    // Spain: no entry in the table, so even blocks rather than a wall of
+    // digits. Readable is the whole bar here, not correct national format.
+    expect(formatPhoneForDisplay('+34612345678')).toBe('+346 1234 5678');
+  });
+
+  it('falls back to even blocks when the length does not match the pattern', () => {
+    // A +91 number with the wrong digit count is not an Indian mobile, and
+    // forcing 5+5 onto it would invent digits or drop them.
+    expect(formatPhoneForDisplay('+911234567')).toBe('+9 1123 4567');
+  });
+
+  it('returns null for nothing at all', () => {
+    expect(formatPhoneForDisplay(undefined)).toBeNull();
+    expect(formatPhoneForDisplay('')).toBeNull();
+  });
+
+  it('hands back an unparseable string rather than losing it', () => {
+    // Better a strange notification title than a blank one.
+    expect(formatPhoneForDisplay('extension 4021')).toBe('extension 4021');
+  });
+});
+
+describe('contactDisplayName', () => {
+  it('prefers the saved name', () => {
+    expect(contactDisplayName({ name: 'Priya Sharma', phone: '+919876543210' })).toBe('Priya Sharma');
+  });
+
+  it('ignores a name that is only whitespace', () => {
+    expect(contactDisplayName({ name: '   ', phone: '+919876543210' })).toBe('+91 98765 43210');
+  });
+
+  it('falls back for a web guest with neither', () => {
+    expect(contactDisplayName(null)).toBe('Web chat');
+    expect(contactDisplayName({}, 'Unknown caller')).toBe('Unknown caller');
   });
 });

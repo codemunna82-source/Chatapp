@@ -25,6 +25,7 @@ interface PushData {
   callerName?: string;
   callType?: string;
   channelId?: string;
+  ringingSince?: string;
 }
 
 interface PushNotificationSyncProps {
@@ -124,11 +125,13 @@ export function PushNotificationSync({ navigationRef }: PushNotificationSyncProp
       if (data.type === 'incoming_call' && data.callId) {
         const live = useCallStore.getState();
         if (live.callId === data.callId && live.phase !== 'idle') return;
+        const since = Number(data.ringingSince);
         void displayIncomingCall({
           callId: data.callId,
-          callerName: data.callerName ?? 'Incoming call',
+          callerName: data.callerName,
           callType: data.callType === 'video' ? 'video' : 'audio',
           channelId: data.channelId,
+          ringingSince: Number.isFinite(since) && since > 0 ? since : undefined,
         });
         return;
       }
