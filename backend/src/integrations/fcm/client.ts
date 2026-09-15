@@ -22,7 +22,30 @@ function parseServiceAccount(): ServiceAccount | null {
   try {
     const parsed = JSON.parse(env.FCM_SERVICE_ACCOUNT_JSON) as Partial<ServiceAccount>;
     if (!parsed.project_id || !parsed.client_email || !parsed.private_key) {
-      logger.error('FCM_SERVICE_ACCOUNT_JSON is missing project_id, client_email or private_key');
+      /**
+       * The FIELD NAMES that are there, so the next person can see which
+       * file this actually is.
+       *
+       * Firebase hands out two JSON files and they are easy to confuse:
+       * the service account key belongs here, and google-services.json
+       * belongs in the Android build. Both are valid JSON, so the only
+       * symptom of swapping them was this sentence — which named what was
+       * missing and never what was present, and so could not tell "you
+       * pasted the wrong file" from "your key is truncated".
+       *
+       * Names only. No values, no lengths, no prefixes: `private_key` is
+       * a credential and its own name is the only safe thing about it.
+       * google-services.json shows up as project_info/client, a real key
+       * as type/project_id/private_key_id/…
+       */
+      logger.error(
+        { keysPresent: Object.keys(parsed as Record<string, unknown>).sort() },
+        'FCM_SERVICE_ACCOUNT_JSON is missing project_id, client_email or private_key. ' +
+          'If keysPresent shows project_info/client, this is google-services.json — that ' +
+          'file belongs in the Android build, not here. The server needs the SERVICE ' +
+          'ACCOUNT key: Firebase console, Project settings, Service accounts, Generate ' +
+          'new private key.',
+      );
       return null;
     }
     return {
