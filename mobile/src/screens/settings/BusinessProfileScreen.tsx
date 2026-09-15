@@ -1,14 +1,23 @@
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../theme/ThemeProvider';
 import { Screen } from '../../components/Screen';
 import { TextField } from '../../components/TextField';
 import { Button } from '../../components/Button';
 import { InlineBanner } from '../../components/InlineBanner';
 import { LoadingIndicator } from '../../components/LoadingIndicator';
-import { useTenantSettings, useUpdateBusinessProfile } from '../../queries/useTenantSettings';
-import type { BusinessNameSource } from '../../api/endpoints/tenant';
+import {
+  useRemoveBusinessAvatar,
+  useTenantSettings,
+  useUpdateBusinessProfile,
+  useUploadBusinessAvatar,
+} from '../../queries/useTenantSettings';
+import { AvatarPhoto } from '../../components/Avatar';
+import { businessAvatarUrl, type BusinessNameSource } from '../../api/endpoints/tenant';
+import { avatarCacheName } from '../../media/avatarCache';
+import { getApiErrorMessage } from '../../api/client';
 
 /**
  * Where the customer-facing name is coming from, said plainly.
@@ -33,6 +42,55 @@ export function BusinessProfileScreen() {
   const { colors, spacing, radius, typography } = useTheme();
   const settings = useTenantSettings();
   const update = useUpdateBusinessProfile();
+  const uploadAvatar = useUploadBusinessAvatar();
+  const removeAvatar = useRemoveBusinessAvatar();
+
+  /**
+   * Setting the workspace's photo.
+   *
+   * The web chat window had a name and a coloured circle with a letter in
+   * it, so every business looked the same to the stranger deciding
+   * whether to keep talking. This is where that photo comes from, and it
+   * sits on the preview rather than in a row of its own: the thing being
+   * changed is what the customer sees, and it is right there.
+   */
+  const pickPhoto = useCallback(async () => {
+    if (uploadAvatar.isPending) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      // Square, because it is drawn in a circle everywhere it appears.
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset) return;
+
+    uploadAvatar.mutate(
+      {
+        uri: asset.uri,
+        // The picker can return a uri with no filename at all; multipart
+        // still requires one, and the mime type does the real work.
+        name: asset.fileName ?? 'business.jpg',
+        mimeType: asset.mimeType ?? 'image/jpeg',
+      },
+      { onError: (err) => Alert.alert('Could not update the photo', getApiErrorMessage(err)) },
+    );
+  }, [uploadAvatar]);
+
+  const confirmRemovePhoto = useCallback(() => {
+    Alert.alert('Remove photo?', 'Customers will see your initials instead.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () =>
+          removeAvatar.mutate(undefined, {
+            onError: (err) => Alert.alert('Could not remove the photo', getApiErrorMessage(err)),
+          }),
+      },
+    ]);
+  }, [removeAvatar]);
 
   /**
    * What has been typed, or null while the field is still showing the
@@ -85,21 +143,53 @@ export function BusinessProfileScreen() {
             CUSTOMERS SEE
           </Text>
           <View style={styles.previewRow}>
-            <View
-              style={[
-                styles.avatar,
-                { backgroundColor: colors.primary, borderRadius: 20, marginRight: spacing.sm },
-              ]}
+            {/* Tappable, and it says so: a picture with no affordance
+                round it reads as decoration, and the only other way to
+                set one would be a row somewhere else that never mentions
+                the preview it changes. */}
+            <Pressable
+              onPress={() => void pickPhoto()}
+              onLongPress={data.avatarUpdatedAt ? confirmRemovePhoto : undefined}
+              accessibilityRole="button"
+              accessibilityLabel={
+                data.avatarUpdatedAt ? 'Change your business photo' : 'Add a business photo'
+              }
+              style={[styles.avatarWrap, { marginRight: spacing.sm }]}
             >
-              <Text style={[typography.bodyMedium, { color: colors.textOnPrimary }]}>
-                {data.customerFacingName.slice(0, 1).toUpperCase()}
-              </Text>
-            </View>
+              {data.avatarUpdatedAt ? (
+                <AvatarPhoto
+                  // Remounted per photo, so a new upload starts from a
+                  // clean state rather than showing the previous one.
+                  key={data.avatarUpdatedAt}
+                  url={businessAvatarUrl(data.avatarUpdatedAt)}
+                  cacheKey={avatarCacheName('u', 'business', data.avatarUpdatedAt)}
+                  label={data.customerFacingName}
+                  size={40}
+                />
+              ) : (
+                <View style={[styles.avatar, { backgroundColor: colors.primary, borderRadius: 20 }]}>
+                  <Text style={[typography.bodyMedium, { color: colors.textOnPrimary }]}>
+                    {data.customerFacingName.slice(0, 1).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              {uploadAvatar.isPending || removeAvatar.isPending ? (
+                <View style={[styles.avatarBusy, { backgroundColor: colors.overlay }]}>
+                  <ActivityIndicator size="small" color={colors.textOnPrimary} />
+                </View>
+              ) : (
+                <View style={[styles.avatarBadge, { backgroundColor: colors.primary }]}>
+                  <Ionicons name="camera" size={11} color={colors.textOnPrimary} />
+                </View>
+              )}
+            </Pressable>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.textPrimary }]} numberOfLines={1}>
                 {data.customerFacingName}
               </Text>
-              <Text style={[typography.caption, { color: colors.textSecondary }]}>online</Text>
+              <Text style={[typography.caption, { color: colors.textSecondary }]}>
+                {data.avatarUpdatedAt ? 'online · hold the photo to remove it' : 'online · tap the circle to add a photo'}
+              </Text>
             </View>
           </View>
           <View style={[styles.sourceRow, { marginTop: spacing.sm }]}>
@@ -162,5 +252,28 @@ const styles = StyleSheet.create({
   preview: {},
   previewRow: { flexDirection: 'row', alignItems: 'center' },
   avatar: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  avatarWrap: { width: 40, height: 40 },
+  // Bottom-right of the circle, the way every app marks a photo you can
+  // change.
+  avatarBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarBusy: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sourceRow: { flexDirection: 'row', alignItems: 'flex-start' },
 });

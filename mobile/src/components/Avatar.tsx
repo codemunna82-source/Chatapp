@@ -32,11 +32,15 @@ function InitialsCircle({ label, size }: { label: string; size: number }) {
  * recommended way to reset state on a prop change without a setState-in-
  * effect (see react-hooks/set-state-in-effect).
  *
+ * Exported as well as used by Avatar below, because not every photo
+ * belongs to a user or a contact: the workspace has one too, behind its
+ * own route. The subject-specific wrappers pick the URL; this draws it.
+ *
  * Only ever mounted for someone who actually HAS a photo — see Avatar
  * below. Its `failed` fallback is for a photo that has since been deleted
  * or cannot be fetched right now, not for the ordinary no-photo case.
  */
-function AvatarPhoto({
+export function AvatarPhoto({
   url,
   cacheKey,
   label,

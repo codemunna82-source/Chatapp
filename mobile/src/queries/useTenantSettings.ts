@@ -26,3 +26,27 @@ export function useUpdateBusinessProfile() {
     },
   });
 }
+
+/**
+ * The workspace's photo.
+ *
+ * Invalidates rather than patching the cache: the response carries only
+ * the new version, and the screen has to re-read the settings anyway for
+ * the preview to change. One refetch of a rarely-touched query is
+ * cheaper than a patch that has to know the whole shape.
+ */
+export function useUploadBusinessAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.uploadBusinessAvatar,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.tenantSettings }),
+  });
+}
+
+export function useRemoveBusinessAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.removeBusinessAvatar,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.tenantSettings }),
+  });
+}

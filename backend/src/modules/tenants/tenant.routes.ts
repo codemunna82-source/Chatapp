@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/rbac.middleware';
@@ -10,6 +11,13 @@ import { env } from '../../config/env';
 import { Tenant, DEFAULT_AUTO_GUEST_LINK_TEXT, DEFAULT_AUTO_GUEST_WELCOME } from './tenant.model';
 import { resolveBusinessName, resolveBusinessNameForConversation } from '../guest/businessName';
 import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
+import { AVATAR_MAX_SIZE_BYTES } from '../media/avatarAsset';
+import {
+  getTenantAvatar,
+  removeTenantAvatar,
+  tenantAvatarVersion,
+  updateTenantAvatar,
+} from './tenantAvatar.service';
 
 /**
  * Workspace-wide settings. MASTER_ADMIN only — these change what every
@@ -18,6 +26,59 @@ import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
 export const tenantRouter = Router();
 
 tenantRouter.use(requireAuth, requireRole('MASTER_ADMIN'));
+
+// In memory, never local disk: the bytes go straight to Cloudinary, and a
+// deployment can be replaced between two requests.
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: AVATAR_MAX_SIZE_BYTES },
+});
+
+/**
+ * The workspace's photo, shown to every customer above their chat window.
+ *
+ * Its own routes rather than a field on the profile PATCH below, because
+ * it is bytes: a multipart body and a JSON one cannot share a handler,
+ * and bundling them would mean re-uploading the photo to rename the
+ * business.
+ */
+tenantRouter.patch(
+  '/settings/profile/avatar',
+  avatarUpload.single('file'),
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    if (!req.file) throw ApiError.badRequest('FILE_REQUIRED', 'Choose an image to upload');
+    const result = await updateTenantAvatar(
+      auth.tenantId,
+      auth.userId,
+      req.file.buffer,
+      req.file.mimetype,
+    );
+    res.status(200).json({ success: true, data: result });
+  }),
+);
+
+tenantRouter.delete(
+  '/settings/profile/avatar',
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    await removeTenantAvatar(auth.tenantId, auth.userId);
+    res.status(200).json({ success: true, data: { avatarUpdatedAt: null } });
+  }),
+);
+
+tenantRouter.get(
+  '/settings/profile/avatar',
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const { data, contentType } = await getTenantAvatar(auth.tenantId);
+    res.setHeader('Content-Type', contentType);
+    // Keyed by ?v=<avatarUpdatedAt>, so a long cache is safe: a new photo
+    // is a new URL.
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.status(200).send(data);
+  }),
+);
 
 const autoGuestLinkSchema = z
   .object({
@@ -89,6 +150,9 @@ tenantRouter.get(
         customerFacingNameSource: resolved.source,
         /** Meta's approved name for the workspace's first number, if it has one. */
         whatsappVerifiedName: firstNumber?.verifiedName ?? '',
+        // Absent means no photo, which is what stops a client asking for
+        // one — the same contract every other avatar here uses.
+        avatarUpdatedAt: await tenantAvatarVersion(auth.tenantId),
         autoGuestLink: {
           enabled: tenant.autoGuestLink?.enabled ?? false,
           /**
@@ -228,6 +292,7 @@ tenantRouter.patch(
         customerFacingName: resolved.name,
         customerFacingNameSource: resolved.source,
         whatsappVerifiedName: firstNumber?.verifiedName ?? '',
+        avatarUpdatedAt: await tenantAvatarVersion(auth.tenantId),
       },
     });
   }),

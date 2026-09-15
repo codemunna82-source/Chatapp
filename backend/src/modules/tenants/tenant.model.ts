@@ -25,6 +25,26 @@ const tenantSchema = new Schema(
      * order the two are tried in.
      */
     displayName: { type: String, trim: true, maxlength: 120 },
+    /**
+     * The workspace's photo, as a customer sees it at the top of the web
+     * chat window.
+     *
+     * Mirrors the User and Contact avatar fields exactly, including
+     * select:false — the bytes live in Cloudinary and only the routes
+     * that serve them need the reference. avatarUpdatedAt is public and
+     * is the cache-buster every client keys its copy on.
+     *
+     * A workspace photo rather than the answering member's own, and that
+     * is the whole reason it exists here: the customer-facing NAME
+     * already falls back to a member's (see businessName.ts), but a
+     * person's photograph is a different kind of thing to hand to a
+     * stranger than the name they chose to trade under. This is set
+     * deliberately, by an admin, or there is none.
+     */
+    avatarUrl: { type: String, select: false },
+    avatarContentType: { type: String, select: false },
+    avatarCloudinaryPublicId: { type: String, select: false },
+    avatarUpdatedAt: { type: Date },
     slug: { type: String, required: true, trim: true, lowercase: true },
     status: { type: String, enum: TENANT_STATUSES, default: 'ACTIVE', required: true },
     masterAdminId: { type: Schema.Types.ObjectId, ref: 'User' },

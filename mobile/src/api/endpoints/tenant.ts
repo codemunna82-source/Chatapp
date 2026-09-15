@@ -1,4 +1,6 @@
 import { apiClient } from '../client';
+import { apiBaseUrl } from '../../utils/env';
+import type { PickedPhoto } from './contacts';
 import type { ApiSuccess } from '../types';
 
 /**
@@ -21,6 +23,13 @@ export interface TenantSettings {
   customerFacingNameSource: BusinessNameSource;
   /** Meta's approved name for the workspace's first number, if it has one. */
   whatsappVerifiedName: string;
+  /**
+   * When the workspace's photo last changed, or null when it has none.
+   *
+   * Doubles as the cache-buster, exactly like a contact's — see
+   * businessAvatarUrl below.
+   */
+  avatarUpdatedAt: string | null;
 }
 
 /**
@@ -42,7 +51,38 @@ function normalize(s: Partial<TenantSettings>): TenantSettings {
     customerFacingName: s.customerFacingName || displayName || name || 'Support',
     customerFacingNameSource: s.customerFacingNameSource ?? 'fallback',
     whatsappVerifiedName: s.whatsappVerifiedName ?? '',
+    // An older server sends nothing here, which reads as "no photo" —
+    // the safe answer, since it only ever withholds a picture.
+    avatarUpdatedAt: s.avatarUpdatedAt ?? null,
   };
+}
+
+/**
+ * The workspace's photo, as a customer sees it above their chat window.
+ *
+ * Read through the same authenticated proxy every other avatar uses — the
+ * Cloudinary URL never reaches a client, so one place decides who may see
+ * this and it is the server. `version` is avatarUpdatedAt, so a newly
+ * uploaded photo is a new URL rather than a stale one from a cache.
+ */
+export function businessAvatarUrl(version: string): string {
+  return `${apiBaseUrl}/tenant/settings/profile/avatar?v=${encodeURIComponent(version)}`;
+}
+
+export async function uploadBusinessAvatar(file: PickedPhoto): Promise<{ avatarUpdatedAt: string }> {
+  const form = new FormData();
+  // RN's FormData takes this {uri,name,type} shape rather than a Blob.
+  form.append('file', { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob);
+  const res = await apiClient.patch<ApiSuccess<{ avatarUpdatedAt: string }>>(
+    '/tenant/settings/profile/avatar',
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  );
+  return res.data.data;
+}
+
+export async function removeBusinessAvatar(): Promise<void> {
+  await apiClient.delete('/tenant/settings/profile/avatar');
 }
 
 export async function getTenantSettings(): Promise<TenantSettings> {

@@ -22,6 +22,7 @@ import {
   markGuestReadHandler,
   postGuestReactionHandler,
   deleteGuestMessageHandler,
+  getGuestBusinessAvatarHandler,
   postGuestLocationHandler,
   postGuestReportHandler,
   setGuestBlockHandler,
@@ -64,6 +65,10 @@ guestRouter.get('/console.js', guestRateLimiter, guestConsoleScriptHandler);
 guestRouter.use(guestRateLimiter, requireGuest);
 
 guestRouter.get('/session', getGuestSessionHandler);
+// The business's photo, for the window header. Takes no id: the link
+// already says which workspace this is, so a customer cannot ask for
+// anyone else's.
+guestRouter.get('/business-avatar', getGuestBusinessAvatarHandler);
 guestRouter.get('/messages', validate({ query: guestMessagesQuerySchema }), listGuestMessagesHandler);
 guestRouter.post('/messages', validate({ body: guestMessageSchema }), postGuestMessageHandler);
 guestRouter.post('/reactions', validate({ body: guestReactionSchema }), postGuestReactionHandler);

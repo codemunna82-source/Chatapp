@@ -31,6 +31,7 @@ import {
 import { revokeAndBroadcast } from '../messages/message.service';
 import { Message, type MessageLean } from '../messages/message.model';
 import { refusalToRevoke, messageChannel, REVOKE_REFUSAL_MESSAGE } from '../messages/messageRevoke';
+import { getTenantAvatar, tenantAvatarVersion } from '../tenants/tenantAvatar.service';
 import { pushIncomingMessage } from '../notifications/push.service';
 import { getRealtimeEmitter } from '../../realtime/events';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
@@ -556,6 +557,15 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
   businessName: string;
   contactName?: string;
   /**
+   * When the business's photo last changed, or null when it has none.
+   *
+   * A version, not a URL. The bytes come from a route behind this
+   * customer's own link, so a link holder never receives an address that
+   * outlives their link — and null is what stops the window asking for a
+   * picture that is not there.
+   */
+  businessAvatarUpdatedAt?: string | null;
+  /**
    * Whether Meta has reviewed and approved this business's display name.
    *
    * Reported so the window can show a verification badge that means
@@ -613,6 +623,16 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
       tenantName: tenant?.name,
     }).name,
     contactName: contact?.name ?? undefined,
+    /**
+     * When the business's photo last changed, or absent when there is
+     * none — which is what tells the window not to ask for one.
+     *
+     * A version rather than a URL: the bytes are served from a route
+     * behind this customer's own link (see GET /api/guest/business-avatar),
+     * so a link holder never receives an address that outlives their
+     * link.
+     */
+    businessAvatarUpdatedAt: await tenantAvatarVersion(guest.tenantId),
     verifiedByWhatsApp,
     businessPhone: phoneNumber?.displayPhoneNumber ?? undefined,
     blocked: Boolean(guest.blockedAt),
@@ -1346,4 +1366,20 @@ export async function deleteGuestMessage(
   await revokeAndBroadcast(guest.tenantId, guest.conversationId, messageId, 'customer');
 
   return { id: messageId, scope };
+}
+
+
+/**
+ * The business's photo, for the customer holding this link.
+ *
+ * Takes no id of any kind: the link says which conversation this is, the
+ * conversation says which workspace, and the workspace has exactly one
+ * photo. A customer therefore cannot ask for anyone else's — which is the
+ * same shape every other guest route has, and the reason none of them
+ * accept a conversation id either.
+ */
+export async function getGuestBusinessAvatar(
+  guest: GuestContext,
+): Promise<{ data: Buffer; contentType: string }> {
+  return getTenantAvatar(guest.tenantId);
 }

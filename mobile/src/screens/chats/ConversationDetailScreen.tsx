@@ -23,6 +23,7 @@ import { TypingIndicator } from './TypingIndicator';
 import { Composer } from './Composer';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { MessageActionSheet } from './MessageActionSheet';
+import { ChatHeaderMenu } from './ChatHeaderMenu';
 import { TemplatePickerSheet } from './TemplatePickerSheet';
 import * as ImagePicker from 'expo-image-picker';
 import { ChatHeaderTitle } from './ChatHeaderTitle';
@@ -35,6 +36,7 @@ import { AttachmentSheet } from './AttachmentSheet';
 import { ForwardSheet, buildForwardBody } from './ForwardSheet';
 import { ImageViewerModal, type ViewerPhoto } from './ImageViewerModal';
 import { canDeleteForEveryone } from './messageRevoke';
+import { contactDisplayName } from '../../utils/formatPhone';
 import { clearMessageNotification } from '../../notifications/messageNotification';
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
@@ -427,6 +429,8 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // --- scroll-to-bottom + new-message count --------------------------------
   // The list is inverted, so "at the bottom" is scroll offset ~0.
   const listRef = useRef<FlashListRef<RenderItem>>(null);
+  /** The header's overflow menu — search, the private link, the photo. */
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   /** The message something just jumped to, marked until the timer clears it. */
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -612,7 +616,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const handleCall = useCallback(
     (media: 'audio' | 'video' = 'audio') => {
       if (guestActive) {
-        const name = conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Customer';
+        // The same name the header shows, so the call overlay and the
+        // chat behind it never disagree about who is being called.
+        const name = contactDisplayName(conversationQuery.data?.contact, 'Customer');
         // Whether the customer is actually IN the window decides what the
         // overlay says. With the page open there is a device to ring and
         // "Ringing…" is true; without it the invitation is going out to
@@ -851,8 +857,10 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       return;
     }
 
-    const contactLabel =
-      conversationQuery.data?.contact?.name || conversationQuery.data?.contact?.phone || 'Conversation';
+    // A customer with no saved name IS their number here, so it is worth
+    // writing so it can be read: "+91 98765 43210" rather than twelve
+    // unbroken digits nobody takes in at a glance.
+    const contactLabel = contactDisplayName(conversationQuery.data?.contact);
     navigation.setOptions({
       headerLeft: undefined,
       title: contactLabel,
@@ -883,47 +891,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       headerTitleStyle: { color: headerFg },
       headerRight: () => (
         <View style={styles.headerActions}>
-          <Pressable
-            onPress={() => setSearchOpen(true)}
-            style={styles.headerAction}
-            accessibilityRole="button"
-            accessibilityLabel="Search in this chat"
-          >
-            {({ pressed }) => (
-              <Ionicons name="search" size={21} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />
-            )}
-          </Pressable>
-          <Pressable
-            onPress={handleGuestLink}
-            style={styles.headerAction}
-            accessibilityRole="button"
-            accessibilityLabel={guestActive ? 'Replace private chat link' : 'Send a private chat link'}
-          >
-            {({ pressed }) => (
-              <Ionicons
-                // Filled once a window is live, so the state is readable
-                // without opening anything.
-                name={guestActive ? 'link' : 'link-outline'}
-                size={21}
-                color={headerFg}
-                style={{ opacity: pressed ? 0.5 : 1 }}
-              />
-            )}
-          </Pressable>
-          {/* Always available, so long as there is someone to call.
-              It used to appear only while the customer had the private
-              window open, which meant the one control people look for
-              kept vanishing — and it was wrong anyway: without the window
-              the call goes out over WhatsApp instead, which needs nothing
-              open at the other end. What the window changes is not
-              whether the call can be placed but what can honestly be said
-              while it is being placed, which handleCall passes on. */}
-          {/* Video only while the customer has the private window open.
-              Unlike the audio button above, this one genuinely cannot
-              fall back: without the window the call goes out over
-              WhatsApp, and Meta's calling API has no video. A camera
-              button that silently placed a voice call would be worse than
-              no button. */}
+          {/* Video first, then call, then the rest behind a menu.
+              Four icons side by side left about ninety pixels for the
+              name, so a contact called "Chandan Kumar" read as "C…" —
+              and whose chat this is is the one thing a chat header has
+              to get right. The two that are reached for constantly stay
+              out; the occasional ones moved into the menu. */}
           {guestActive ? (
             <Pressable
               onPress={() => handleCall('video')}
@@ -944,24 +917,39 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
             </Pressable>
           ) : null}
           {contactId ? (
+            <Pressable
+              onPress={() => handleCall('audio')}
+              disabled={callPending}
+              style={styles.headerAction}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: callPending }}
+              accessibilityLabel="Call this customer"
+            >
+              {({ pressed }) => (
+                <Ionicons
+                  name="call"
+                  size={22}
+                  color={callPending ? `${headerFg}80` : headerFg}
+                  style={{ opacity: pressed ? 0.5 : 1 }}
+                />
+              )}
+            </Pressable>
+          ) : null}
           <Pressable
-            onPress={() => handleCall('audio')}
-            disabled={callPending}
+            onPress={() => setHeaderMenuOpen(true)}
             style={styles.headerAction}
             accessibilityRole="button"
-            accessibilityState={{ disabled: callPending }}
-            accessibilityLabel="Call this customer in the private chat"
+            accessibilityLabel="More options"
           >
             {({ pressed }) => (
               <Ionicons
-                name="call"
-                size={22}
-                color={callPending ? `${headerFg}80` : headerFg}
+                name="ellipsis-vertical"
+                size={20}
+                color={headerFg}
                 style={{ opacity: pressed ? 0.5 : 1 }}
               />
             )}
           </Pressable>
-          ) : null}
         </View>
       ),
     });
@@ -1215,6 +1203,21 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         </Animated.View>
 
         <MessageInfoSheet message={infoTarget} onClose={() => setInfoTarget(null)} />
+
+        <ChatHeaderMenu
+          visible={headerMenuOpen}
+          onClose={() => setHeaderMenuOpen(false)}
+          onSearch={() => setSearchOpen(true)}
+          onGuestLink={handleGuestLink}
+          guestActive={guestActive}
+          // The photo moved in here too: tapping the avatar still sets
+          // one, but that was never discoverable — nothing about a
+          // picture says "tap me to replace this".
+          onContactPhoto={contactId ? pickContactPhoto : undefined}
+          contactPhotoLabel={
+            conversationQuery.data?.contact?.avatarUpdatedAt ? 'Change photo' : 'Set a photo'
+          }
+        />
 
         <MessageActionSheet
           visible={Boolean(actionTarget)}

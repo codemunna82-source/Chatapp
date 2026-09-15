@@ -55,6 +55,21 @@ export const postGuestReactionHandler = asyncHandler(async (req: Request, res: R
   res.status(200).json({ success: true, data: await guestService.postGuestReaction(guest, messageId, emoji) });
 });
 
+/**
+ * The business's photo.
+ *
+ * Long-cached: the window only asks for it with ?v=<businessAvatarUpdatedAt>
+ * from the session, so a new photo is a new URL and a stale one is never
+ * served under the address of the current one.
+ */
+export const getGuestBusinessAvatarHandler = asyncHandler(async (req: Request, res: Response) => {
+  const guest = getGuestContext(req);
+  const { data, contentType } = await guestService.getGuestBusinessAvatar(guest);
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.status(200).send(data);
+});
+
 export const deleteGuestMessageHandler = asyncHandler(async (req: Request, res: Response) => {
   const guest = getGuestContext(req);
   const { messageId, scope } = req.body as { messageId: string; scope: 'me' | 'everyone' };
