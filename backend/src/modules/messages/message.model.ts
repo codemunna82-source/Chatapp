@@ -30,6 +30,17 @@ export type MessageType = (typeof MESSAGE_TYPES)[number];
 export const MESSAGE_STATUSES = ['QUEUED', 'SENT', 'DELIVERED', 'READ', 'FAILED'] as const;
 export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 
+/** The two wires a message can travel on — Meta's, or this app's own
+ *  private web chat. See the `channel` field. */
+export const MESSAGE_CHANNELS = ['whatsapp', 'web'] as const;
+export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
+
+/** Who withdrew a message. Deliberately the two sides of the chat rather
+ *  than a user id: the customer has no account, and the line the other
+ *  side reads says "the customer deleted this", never who they are. */
+export const MESSAGE_REVOKERS = ['agent', 'customer'] as const;
+export type MessageRevoker = (typeof MESSAGE_REVOKERS)[number];
+
 const messageSchema = new Schema(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
@@ -125,6 +136,48 @@ const messageSchema = new Schema(
      * one useful signal behind whose account you happen to be in.
      */
     starredAt: { type: Date },
+    /**
+     * Which wire this message actually travelled on.
+     *
+     * Recorded rather than recomputed, because the rule that decides it
+     * (webChatRouting.ts) reads the customer's live session and gives a
+     * different answer a week later than it did at the moment of sending.
+     * What it is used for — whether a message can be unsent — must not
+     * change under a message that is already delivered.
+     *
+     * Absent on every row written before this field existed. Read through
+     * messageChannel() rather than directly: it falls back to Meta's own
+     * id, which only a message that really went through Meta ever has.
+     */
+    channel: { type: String, enum: MESSAGE_CHANNELS },
+    /**
+     * Deleted for everyone.
+     *
+     * Only ever set on a `channel: 'web'` message, and that is the whole
+     * reason this exists separately from `deletedAt`: the private web chat
+     * is this app's own channel on both ends, so a message really can be
+     * withdrawn from the other side. A WhatsApp message cannot — Meta's
+     * Cloud API has no recall — and pretending otherwise would take a
+     * message off the agent's screen while the customer still had it.
+     *
+     * The content is cleared when this is set, not merely hidden. A
+     * message the sender has withdrawn should not survive in the database
+     * for an admin to read later; what remains is the fact that something
+     * was sent and taken back, which is what both sides are shown.
+     */
+    revokedAt: { type: Date },
+    /** Who withdrew it, for the line each side reads. */
+    revokedBy: { type: String, enum: MESSAGE_REVOKERS },
+    /**
+     * The customer's own "delete for me" — the mirror of `deletedAt`,
+     * which is the workspace's.
+     *
+     * Two fields rather than one because the two sides are genuinely
+     * separate audiences: an agent hiding a message from the shared inbox
+     * must not take it off the customer's screen, and vice versa. Only
+     * `revokedAt` acts on both.
+     */
+    hiddenForGuestAt: { type: Date },
   },
   { timestamps: true },
 );

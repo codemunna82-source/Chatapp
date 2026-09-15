@@ -42,6 +42,22 @@ export const guestReactionSchema = z.object({
 });
 
 /**
+ * The customer removing one of their messages.
+ *
+ * A POST rather than a DELETE with a body, matching every other action on
+ * this router — the window is a browser page and a DELETE body is the one
+ * request shape that intermediaries are still entitled to drop.
+ *
+ * `scope` has no default here, unlike the agent side: the web window
+ * always sends it, and a missing value should be a plain 400 rather than
+ * a silent "delete for me" the customer did not choose.
+ */
+export const guestDeleteMessageSchema = z.object({
+  messageId: messageIdSchema,
+  scope: z.enum(['me', 'everyone']),
+});
+
+/**
  * A place the customer shared.
  *
  * The bounds are the real ones: latitude past ±90 and longitude past ±180

@@ -1,5 +1,11 @@
 import { ApiError } from '../../lib/ApiError';
-import { findConversationByIdAndTenant, isWithinCustomerServiceWindow, recordOutboundActivity } from '../conversations/conversation.repository';
+import { recordAudit } from '../audit/auditLog.service';
+import {
+  findConversationByIdAndTenant,
+  isWithinCustomerServiceWindow,
+  markConversationPreviewRevoked,
+  recordOutboundActivity,
+} from '../conversations/conversation.repository';
 import { findContactByIdAndTenant } from '../contacts/contact.repository';
 import {
   createMessage,
@@ -8,6 +14,7 @@ import {
   attachMetaMessageId,
   markMessageFailed,
   softDeleteMessage,
+  revokeMessage,
   setMessageStarred,
 } from './message.repository';
 import { findMediaByIdAndTenant } from '../media/media.repository';
@@ -18,7 +25,8 @@ import { mockMetaGateway } from '../../integrations/meta/mock/mockMetaGateway';
 import { getRealtimeEmitter } from '../../realtime/events';
 import { trace, type PerfTrace } from '../../lib/perfTrace';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
-import type { MessageDoc } from './message.model';
+import type { MessageDoc, MessageLean } from './message.model';
+import { refusalToRevoke, REVOKE_REFUSAL_MESSAGE } from './messageRevoke';
 import { toWhatsAppId } from '../../lib/phone';
 import { findActiveSessionForConversation } from '../guest/guestSession.repository';
 import { resolveReplyChannel } from '../guest/webChatRouting';
@@ -100,23 +108,100 @@ export interface SendOutboundMessageInput {
  * that route will call.
  */
 /**
- * Hides a message from this workspace's inbox ("delete for me").
+ * Removes a message, for this workspace or for both sides.
  *
- * Deliberately has no delete-for-everyone counterpart: Meta's WhatsApp
- * Cloud API exposes no delete or recall endpoint, so a message that has
- * already been delivered cannot be withdrawn from the customer's WhatsApp.
- * Offering that would remove it here while leaving it visible to them.
+ * 'me' hides it from the shared inbox and nothing more — the customer's
+ * copy is untouched, whichever channel it went out on.
+ *
+ * 'everyone' genuinely withdraws it, and is possible only on the private
+ * web chat. Meta's Cloud API exposes no delete or recall, so a WhatsApp
+ * message that has been delivered cannot be taken back; offering it there
+ * would clear the message here while the customer still had it on their
+ * phone, which is worse than not offering it at all. messageRevoke.ts
+ * holds that rule and the rest of them.
  */
 export async function deleteMessageForTenant(
   tenantId: string,
   conversationId: string,
   messageId: string,
+  scope: 'me' | 'everyone' = 'me',
+  /** Whoever pressed it, for the audit entry a revoke leaves behind. */
+  actorUserId?: string,
 ): Promise<void> {
   const message = await findMessageByIdAndTenant(messageId, tenantId);
   if (!message || String(message.conversationId) !== conversationId) {
     throw ApiError.notFound('MESSAGE_NOT_FOUND', 'That message does not exist.');
   }
-  await softDeleteMessage(messageId, tenantId);
+
+  if (scope === 'me') {
+    await softDeleteMessage(messageId, tenantId);
+    return;
+  }
+
+  const refusal = refusalToRevoke(message, 'agent');
+  if (refusal) {
+    throw ApiError.badRequest(`REVOKE_${refusal}`, REVOKE_REFUSAL_MESSAGE[refusal]);
+  }
+
+  const applied = await revokeAndBroadcast(tenantId, conversationId, messageId, 'agent');
+
+  // Who withdrew what, and when. The tombstone deliberately says only
+  // "you" — this is a shared inbox and naming a colleague on a bubble
+  // everyone can see is not the bubble's job — so this is the record
+  // that answers the question when it is actually asked. The content is
+  // NOT recorded: writing it here would keep a copy of exactly the thing
+  // the delete was meant to remove.
+  if (applied && actorUserId) {
+    await recordAudit({
+      tenantId,
+      actorUserId,
+      action: 'message.revoke',
+      targetType: 'Message',
+      targetId: messageId,
+      metadata: { conversationId },
+    });
+  }
+}
+
+/**
+ * Withdraws a message and tells everyone looking at it.
+ *
+ * Shared by the agent-side delete above and the customer's own, in
+ * guest.service.ts, because the fan-out is the part that is easy to do
+ * half of: the bubble has to become a tombstone on both sides, the chat
+ * list has to stop previewing text that no longer exists, and both have
+ * to happen whichever side pressed the button.
+ *
+ * Returns false when the message was already gone — a second tap, or the
+ * other side revoking it in the same moment. Not an error: what the
+ * caller asked for is true either way.
+ */
+export async function revokeAndBroadcast(
+  tenantId: string,
+  conversationId: string,
+  messageId: string,
+  by: 'agent' | 'customer',
+): Promise<boolean> {
+  const revoked = await revokeMessage(messageId, tenantId, by);
+  if (!revoked) return false;
+
+  const conversation = await findConversationByIdAndTenant(conversationId, tenantId);
+  if (!conversation) return true;
+  const phoneNumberId = String(conversation.whatsappPhoneNumberId);
+
+  // The chat list previews the last message's text, and that text is now
+  // deleted — a list still showing it would be the one place the content
+  // survived.
+  const updated = await markConversationPreviewRevoked(conversationId, tenantId, revoked.createdAt);
+
+  // One event to both audiences: agents are in the tenant and number
+  // rooms, the customer's window is in the conversation room, and every
+  // one of them has to replace the bubble with a tombstone.
+  const emitter = getRealtimeEmitter();
+  emitter.emitMessageUpdated(tenantId, toRealtimeMessage(revoked as unknown as MessageLean), phoneNumberId);
+  if (updated) emitter.emitConversationUpdated(tenantId, toRealtimeConversation(updated));
+
+  return true;
 }
 
 /**
@@ -268,6 +353,10 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     senderId: input.senderId,
     recipientPhone: contact.phone,
     direction: 'OUT',
+    // Recorded now, while the routing decision is still the true one —
+    // see the model's `channel` note. This branch is the Meta one, so
+    // this message can never be unsent.
+    channel: 'whatsapp',
     type: input.type,
     text:
       input.type === 'reaction'
@@ -420,6 +509,9 @@ async function deliverToWebChat(
     senderId: input.senderId,
     recipientPhone: contact.phone,
     direction: 'OUT',
+    // This app's own channel on both ends, which is what makes delete
+    // for everyone possible here and nowhere else.
+    channel: 'web',
     type: input.type,
     text:
       input.type === 'reaction'

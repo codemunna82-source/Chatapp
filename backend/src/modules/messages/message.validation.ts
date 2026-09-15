@@ -98,3 +98,17 @@ export const messageIdParamSchema = z.object({
   conversationId: z.string().min(1),
   messageId: z.string().min(1),
 });
+
+/**
+ * Which delete this is. In the query rather than the body because DELETE
+ * bodies are dropped by enough proxies and HTTP clients to make them a
+ * bad place for the one field that decides whether the customer's copy
+ * disappears too.
+ *
+ * Defaults to 'me': the safe one. A client that has not been updated, or
+ * a request where the parameter went missing, hides the message from this
+ * workspace rather than withdrawing it from someone else's screen.
+ */
+export const deleteMessageQuerySchema = z.object({
+  scope: z.enum(['me', 'everyone']).default('me'),
+});

@@ -34,12 +34,15 @@ export const listMessagesHandler = asyncHandler(async (req: Request, res: Respon
 
 export const deleteMessageHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
+  const { scope } = req.query as { scope?: 'me' | 'everyone' };
   await deleteMessageForTenant(
     auth.tenantId,
     req.params.conversationId as string,
     req.params.messageId as string,
+    scope,
+    auth.userId,
   );
-  res.status(200).json({ success: true, data: { id: req.params.messageId } });
+  res.status(200).json({ success: true, data: { id: req.params.messageId, scope: scope ?? 'me' } });
 });
 
 export const starMessageHandler = asyncHandler(async (req: Request, res: Response) => {

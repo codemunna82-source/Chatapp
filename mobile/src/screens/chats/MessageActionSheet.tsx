@@ -37,10 +37,10 @@ interface MessageActionSheetProps {
  * Long-press action sheet — reactions, reply, forward, copy, star and
  * delete from one entry point.
  *
- * (An earlier version of this comment said there was deliberately no
- * Delete row, because the backend had no delete endpoint. It has one now —
- * DELETE /conversations/:id/messages/:messageId — and the row below is
- * "Delete for me" only, for the reason given at that row.)
+ * Delete opens a confirmation rather than acting, because there are two
+ * of them: hiding the message from this workspace, and — on the private
+ * web chat, within the hour — withdrawing it from the customer's window
+ * as well. See messageRevoke.ts for which is available when.
  */
 export function MessageActionSheet({
   visible,
@@ -112,10 +112,12 @@ export function MessageActionSheet({
                 onPress: onSelectMore,
                 enabled: canSelect,
               },
-              // "Delete for me" only. Meta's Cloud API has no delete or
-              // recall endpoint, so a delete-for-everyone would clear the
-              // message here while the customer still saw it in WhatsApp.
-              { key: 'delete', label: 'Delete for me', icon: 'trash-outline', onPress: onDelete, enabled: true },
+              // One row, two outcomes: which deletes are on offer depends
+              // on the message, and the confirmation that follows is
+              // where that is decided and explained. A sheet with two
+              // delete rows, one of them usually missing, would make the
+              // list jump around between messages.
+              { key: 'delete', label: 'Delete', icon: 'trash-outline', onPress: onDelete, enabled: true },
             ] as const
           )
             .filter((action) => action.enabled)

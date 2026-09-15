@@ -292,6 +292,47 @@ export function removeMessageFromCache(
   );
 }
 
+/**
+ * Turns a message in the cache into the tombstone both sides now see.
+ *
+ * Replaces rather than removes, unlike removeMessageFromCache above: a
+ * withdrawn message leaves a visible trace on the customer's screen, and
+ * a thread that silently loses a row here would disagree with the one
+ * they are looking at.
+ *
+ * The content fields are cleared explicitly even though the server has
+ * already deleted them, because the row in this cache is the one that
+ * was fetched before the revoke and still holds all of it.
+ */
+export function revokeMessageInCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string,
+  messageId: string,
+  revokedBy: 'agent' | 'customer',
+  revokedAt = new Date().toISOString(),
+): void {
+  patchMessages(queryClient, conversationId, (pages) =>
+    pages.map((page) => ({
+      ...page,
+      items: page.items.map((m) =>
+        m.id === messageId
+          ? {
+              ...m,
+              revokedAt,
+              revokedBy,
+              text: undefined,
+              mediaId: undefined,
+              localUri: undefined,
+              location: undefined,
+              starredAt: undefined,
+              uploadProgress: undefined,
+            }
+          : m,
+      ),
+    })),
+  );
+}
+
 let tempIdCounter = 0;
 function makeTempId(): string {
   tempIdCounter += 1;
@@ -304,13 +345,26 @@ function makeTempId(): string {
  * FAILED (not removed) on error so the composer/bubble can offer retry —
  * never silently drops a message the user believes they sent.
  */
-/** "Delete for me" — drops the message from the cache once the server confirms. */
+/**
+ * Deleting a message, for this workspace or for both sides.
+ *
+ * 'me' drops it from the cache; 'everyone' leaves a tombstone, matching
+ * what the customer is now looking at. Applied only once the server has
+ * confirmed — the 'everyone' request is the one that can legitimately be
+ * refused (wrong channel, too late, not ours), and an optimistic
+ * tombstone would have to be un-drawn in front of the agent.
+ */
 export function useDeleteMessage(conversationId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (messageId: string) => messagesApi.deleteMessage(conversationId, messageId),
-    onSuccess: (_result, messageId) => {
-      removeMessageFromCache(queryClient, conversationId, messageId);
+    mutationFn: ({ messageId, scope }: { messageId: string; scope: 'me' | 'everyone' }) =>
+      messagesApi.deleteMessage(conversationId, messageId, scope),
+    onSuccess: (_result, { messageId, scope }) => {
+      if (scope === 'everyone') {
+        revokeMessageInCache(queryClient, conversationId, messageId, 'agent');
+      } else {
+        removeMessageFromCache(queryClient, conversationId, messageId);
+      }
     },
   });
 }

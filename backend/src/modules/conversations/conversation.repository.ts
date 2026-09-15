@@ -403,6 +403,33 @@ export async function recordGuestInboundActivity(
   );
 }
 
+/**
+ * Rewrites the chat-list preview after a message was withdrawn.
+ *
+ * Conditional on nothing newer having arrived: `lastMessageAt` is stamped
+ * from each message's own timestamp, so a conversation still sitting at
+ * or before this message's is one where this message is the latest, and
+ * one that has moved past it has a newer preview that must not be
+ * overwritten. That test is also what makes this safe to run twice.
+ *
+ * Only the preview text changes. The direction, the unread count and the
+ * timestamp all still describe something that genuinely happened — a
+ * message was sent at that moment — and rewinding them would move the
+ * chat in the list and mark it unread again.
+ */
+export async function markConversationPreviewRevoked(
+  id: string,
+  tenantId: string,
+  messageCreatedAt: Date,
+  preview = 'This message was deleted',
+): Promise<ConversationDoc | null> {
+  return Conversation.findOneAndUpdate(
+    { _id: id, tenantId, lastMessageAt: { $lte: messageCreatedAt } },
+    { $set: { lastMessagePreview: preview } },
+    { new: true },
+  );
+}
+
 /** Called after successfully sending an outbound (business) message — does NOT touch the window. */
 export async function recordOutboundActivity(
   id: string,

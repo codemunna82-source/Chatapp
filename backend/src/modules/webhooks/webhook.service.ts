@@ -85,6 +85,7 @@ async function handleIncomingMessage(
     conversationId: String(conversation._id),
     recipientPhone: phoneNumberDoc.displayPhoneNumber,
     direction: 'IN',
+    channel: 'whatsapp',
     type: item.messageType,
     text: item.text,
     location: item.location,

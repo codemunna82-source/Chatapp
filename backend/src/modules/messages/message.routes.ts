@@ -8,6 +8,7 @@ import {
   listMessagesQuerySchema,
   conversationIdParamSchema,
   messageIdParamSchema,
+  deleteMessageQuerySchema,
   starMessageSchema,
 } from './message.validation';
 import {
@@ -38,12 +39,13 @@ messageRouter.patch(
   starMessageHandler,
 );
 
-// "Delete for me": hides the message from this workspace. There is no
-// delete-for-everyone counterpart because Meta's Cloud API cannot recall a
-// delivered message — see message.service.ts.
+// ?scope=me hides the message from this workspace; ?scope=everyone
+// withdraws it from the customer's screen too, and works only on the
+// private web chat — Meta's Cloud API cannot recall a delivered message.
+// See messageRevoke.ts for the full rule.
 messageRouter.delete(
   '/:messageId',
   requirePermission('CHAT_SEND'),
-  validate({ params: messageIdParamSchema }),
+  validate({ params: messageIdParamSchema, query: deleteMessageQuerySchema }),
   deleteMessageHandler,
 );

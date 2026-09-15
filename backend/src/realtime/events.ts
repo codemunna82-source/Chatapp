@@ -37,6 +37,26 @@ export interface RealtimeMessagePayload {
    * whole time; this is the hop it never made.
    */
   location?: { latitude: number; longitude: number; name?: string; address?: string };
+  /**
+   * Which wire this message travelled on.
+   *
+   * Sent because it is what decides whether the client may offer "delete
+   * for everyone" at all — a WhatsApp message can never be withdrawn,
+   * and a client that cannot tell them apart would offer a button the
+   * server always refuses. Absent on rows written before the field
+   * existed; a client treats that as WhatsApp, which is the safe read.
+   */
+  channel?: 'whatsapp' | 'web';
+  /**
+   * Set when the sender took this message back, and the reason every
+   * client draws a tombstone instead of a bubble. The content fields
+   * above are empty on such a message because the content is gone from
+   * the database, not merely withheld here.
+   */
+  revokedAt?: string;
+  /** Which side withdrew it, so each client can say "you deleted this"
+   *  or "this message was deleted" rather than guessing from direction. */
+  revokedBy?: 'agent' | 'customer';
   createdAt: string;
 }
 

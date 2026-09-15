@@ -158,6 +158,29 @@ export interface Message {
   replyToMessageId?: string;
   status: MessageStatus;
   senderId?: string;
+  /**
+   * Which wire this message travelled on.
+   *
+   * What decides whether "Delete for everyone" may be offered: the
+   * private web chat is this app's own channel on both ends, WhatsApp is
+   * Meta's and cannot be recalled. Absent on rows written before the
+   * field existed, which is read as WhatsApp — the safe direction, since
+   * being wrong that way only withholds a button.
+   */
+  channel?: 'whatsapp' | 'web';
+  /**
+   * Set when whoever sent this message took it back — "delete for
+   * everyone". `text`, `mediaId` and `location` are empty on such a
+   * message because the server deleted the content, not because the
+   * payload left it out.
+   *
+   * Only ever present on a private web-chat message: Meta's Cloud API
+   * cannot recall a delivered WhatsApp message, so nothing that went out
+   * that way can carry this.
+   */
+  revokedAt?: string;
+  /** Which side withdrew it, so the line can name them. */
+  revokedBy?: 'agent' | 'customer';
   createdAt: string;
 }
 

@@ -55,6 +55,12 @@ export const postGuestReactionHandler = asyncHandler(async (req: Request, res: R
   res.status(200).json({ success: true, data: await guestService.postGuestReaction(guest, messageId, emoji) });
 });
 
+export const deleteGuestMessageHandler = asyncHandler(async (req: Request, res: Response) => {
+  const guest = getGuestContext(req);
+  const { messageId, scope } = req.body as { messageId: string; scope: 'me' | 'everyone' };
+  res.status(200).json({ success: true, data: await guestService.deleteGuestMessage(guest, messageId, scope) });
+});
+
 export const postGuestLocationHandler = asyncHandler(async (req: Request, res: Response) => {
   const guest = getGuestContext(req);
   const body = req.body as {

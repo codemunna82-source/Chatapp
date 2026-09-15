@@ -37,6 +37,9 @@ export function toRealtimeMessage(doc: MessageLean): RealtimeMessagePayload {
             address: doc.location.address ?? undefined,
           }
         : undefined,
+    channel: doc.channel ?? undefined,
+    revokedAt: doc.revokedAt ? doc.revokedAt.toISOString() : undefined,
+    revokedBy: doc.revokedBy ?? undefined,
     createdAt: doc.createdAt.toISOString(),
   };
 }

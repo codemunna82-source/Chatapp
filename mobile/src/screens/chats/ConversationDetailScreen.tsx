@@ -34,6 +34,7 @@ import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { AttachmentSheet } from './AttachmentSheet';
 import { ForwardSheet, buildForwardBody } from './ForwardSheet';
 import { ImageViewerModal, type ViewerPhoto } from './ImageViewerModal';
+import { canDeleteForEveryone } from './messageRevoke';
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
@@ -715,8 +716,18 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     [selectionMode, toggleSelected],
   );
 
-  const handleReply = useCallback((message: Message) => setReplyingTo(message), []);
-  const handleForwardOne = useCallback((message: Message) => setForwardTargets([message]), []);
+  // A swipe-to-reply on a tombstone would quote a message whose content
+  // is gone — the same reason Reply is absent from the action sheet for
+  // one. The gesture is simply inert rather than showing an error: there
+  // is nothing the agent did wrong.
+  const handleReply = useCallback((message: Message) => {
+    if (message.revokedAt) return;
+    setReplyingTo(message);
+  }, []);
+  const handleForwardOne = useCallback((message: Message) => {
+    if (message.revokedAt) return;
+    setForwardTargets([message]);
+  }, []);
 
   const forwardSelected = useCallback(() => {
     // Preserve conversation order rather than tap order.
@@ -1115,12 +1126,17 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
         <MessageActionSheet
           visible={Boolean(actionTarget)}
-          canReact={Boolean(actionTarget && canReactTo(actionTarget))}
-          canCopy={Boolean(actionTarget?.text)}
-          canForward={Boolean(actionTarget && buildForwardBody(actionTarget))}
+          // Nothing acts on a message that has been taken back. Reacting
+          // to, quoting, forwarding or starring a tombstone would all be
+          // ways of keeping content alive that its sender withdrew — and
+          // Copy would put the literal words "This message was deleted"
+          // on the clipboard.
+          canReact={Boolean(actionTarget && !actionTarget.revokedAt && canReactTo(actionTarget))}
+          canCopy={Boolean(actionTarget?.text) && !actionTarget?.revokedAt}
+          canForward={Boolean(actionTarget && !actionTarget.revokedAt && buildForwardBody(actionTarget))}
           onClose={() => setActionTarget(null)}
           onCopy={handleCopy}
-          canSelect={Boolean(actionTarget && buildForwardBody(actionTarget))}
+          canSelect={Boolean(actionTarget && !actionTarget.revokedAt && buildForwardBody(actionTarget))}
           // Outgoing only, and never an optimistic row: a message that has
           // not reached the server has no delivery milestones to show.
           canShowInfo={Boolean(
@@ -1133,7 +1149,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           starred={Boolean(actionTarget?.starredAt)}
           // A reaction isn't a message anyone bookmarks, and an optimistic
           // row has no server id to star against yet.
-          canStar={Boolean(actionTarget && actionTarget.type !== 'reaction' && !actionTarget.id.startsWith('temp-'))}
+          canStar={Boolean(
+            actionTarget &&
+              !actionTarget.revokedAt &&
+              actionTarget.type !== 'reaction' &&
+              !actionTarget.id.startsWith('temp-'),
+          )}
           onToggleStar={() => {
             const target = actionTarget;
             setActionTarget(null);
@@ -1147,12 +1168,58 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
             const target = actionTarget;
             setActionTarget(null);
             if (!target) return;
+
+            /**
+             * Two deletes, offered as a choice rather than behind one
+             * confirmation, because they do genuinely different things —
+             * one tidies this inbox, the other reaches into the
+             * customer's window and removes what they were sent.
+             *
+             * "Delete for everyone" appears only when it will actually
+             * work: the customer's WhatsApp cannot be reached (Meta's API
+             * has no recall), and the private web chat only for an hour.
+             * The explanation says which of those applies rather than
+             * leaving a greyed-out button to be tapped at.
+             */
+            const forEveryone = canDeleteForEveryone(target);
+            const why =
+              target.direction !== 'OUT'
+                ? "This is the customer's own message, so only your copy can go."
+                : target.channel !== 'web'
+                  ? "It went out on WhatsApp, which Meta's API cannot recall — it stays on the customer's phone."
+                  : 'It has been more than an hour, so it can no longer be taken back.';
+
             Alert.alert(
-              'Delete for me?',
-              "This hides the message from VOXO. It can't be removed from the customer's WhatsApp — Meta's API has no way to recall a delivered message.",
+              'Delete message',
+              forEveryone
+                ? 'Delete for everyone removes it from the customer\u2019s chat window too. This cannot be undone.'
+                : `Hides it from VOXO only. ${why}`,
               [
                 { text: 'Cancel', style: 'cancel' },
-                { text: 'Delete', style: 'destructive', onPress: () => deleteMessage.mutate(target.id) },
+                ...(forEveryone
+                  ? [
+                      {
+                        text: 'Delete for everyone',
+                        style: 'destructive' as const,
+                        onPress: () =>
+                          deleteMessage.mutate(
+                            { messageId: target.id, scope: 'everyone' as const },
+                            {
+                              // The server refuses a revoke it will not
+                              // allow, and its reason is more useful than
+                              // anything this screen could guess at.
+                              onError: (err: unknown) =>
+                                showToast(err instanceof Error ? err.message : 'Could not delete that message'),
+                            },
+                          ),
+                      },
+                    ]
+                  : []),
+                {
+                  text: 'Delete for me',
+                  style: 'destructive' as const,
+                  onPress: () => deleteMessage.mutate({ messageId: target.id, scope: 'me' as const }),
+                },
               ],
             );
           }}

@@ -26,8 +26,11 @@ import {
   findMessagesByIds,
   findReactionsForMessages,
   listMessagesByConversation,
+  hideMessageForGuest,
 } from '../messages/message.repository';
+import { revokeAndBroadcast } from '../messages/message.service';
 import { Message, type MessageLean } from '../messages/message.model';
+import { refusalToRevoke, messageChannel, REVOKE_REFUSAL_MESSAGE } from '../messages/messageRevoke';
 import { pushIncomingMessage } from '../notifications/push.service';
 import { getRealtimeEmitter } from '../../realtime/events';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
@@ -110,6 +113,21 @@ export interface GuestMessageView {
    * they could act on.
    */
   status?: 'sent' | 'delivered' | 'read';
+  /**
+   * Which wire it travelled on — what decides whether the customer may
+   * offer to take it back. A message they sent from WhatsApp shows in
+   * this window too, and cannot be withdrawn from it.
+   */
+  channel?: 'whatsapp' | 'web';
+  /**
+   * Set when this message was taken back by whoever sent it. The window
+   * draws a tombstone; `text`, `mediaId` and `location` are absent
+   * because the content is gone from the database, not withheld here.
+   */
+  revokedAt?: string;
+  /** Which side withdrew it, so the window can say "you deleted this
+   *  message" rather than "this message was deleted". */
+  revokedBy?: 'agent' | 'customer';
 }
 
 /**
@@ -144,8 +162,16 @@ function toGuestMessage(doc: MessageLean): GuestMessageView {
     hasMedia: Boolean(doc.mediaId),
     mediaId: doc.mediaId ? String(doc.mediaId) : undefined,
     createdAt: doc.createdAt.toISOString(),
+    // Read through the same helper the server's own rule uses, so a row
+    // written before the field existed is classified identically on both
+    // sides rather than only here.
+    channel: messageChannel(doc),
   };
   if (doc.direction === 'IN') view.status = toGuestStatus(doc.status);
+  if (doc.revokedAt) {
+    view.revokedAt = doc.revokedAt.toISOString();
+    view.revokedBy = doc.revokedBy ?? undefined;
+  }
   // Only when the coordinates are actually there. A location that arrived
   // before this field existed, or through a path that never filled it, has
   // its text line and nothing else — which renders as an ordinary message
@@ -176,6 +202,10 @@ export function locationLine(input: { latitude: number; longitude: number; name?
 
 /** One line standing in for a message inside a quote. */
 function previewOf(doc: MessageLean): string {
+  // A reply that outlived the message it quoted. Checked first, before
+  // the fields below: those are all empty on a revoked row, so without
+  // this the quote would come back as the bare "[text]" of its type.
+  if (doc.revokedAt) return 'This message was deleted';
   // Before the text check, not after: a location's text is its full
   // coordinate line, and a quote showing "Location (12.971599, 77.594566)"
   // spends its one line on digits nobody reads.
@@ -571,6 +601,10 @@ export async function listGuestMessages(
     // Reactions are folded onto their targets below; counting them here
     // would return short pages.
     excludeReactions: true,
+    // The customer's own "delete for me" list, which is theirs alone —
+    // the workspace's deletions are a separate field and neither side
+    // sees the other's.
+    forGuest: true,
   });
   return {
     items: await toGuestMessagePage(guest.tenantId, guest.conversationId, page.items),
@@ -621,6 +655,10 @@ export async function postGuestMessage(
     // database, with no gateway in between that could still drop it.
     recipientPhone: phoneNumber?.displayPhoneNumber?.trim() || guest.whatsappPhoneNumberId,
     direction: 'IN',
+    // This app's own channel on both ends — see the model's `channel`
+    // note and messageRevoke.ts. It is what makes this message one the
+    // sender can take back.
+    channel: 'web',
     type: 'text',
     text,
     replyToMessageId: quoted ? String(quoted._id) : undefined,
@@ -717,6 +755,7 @@ async function postWelcomeMessage(guest: GuestContext): Promise<void> {
       // their name on a greeting they never typed.
       recipientPhone: await guestRecipientPhone(guest),
       direction: 'OUT',
+      channel: 'web',
       type: 'text',
       text,
       status: 'DELIVERED',
@@ -806,11 +845,11 @@ export async function postGuestReaction(
 
   if (emoji.length === 0) {
     await deleteGuestReactions(guest.tenantId, guest.conversationId, messageId);
-    // Nothing is emitted for a removal. There is no message-deleted event
-    // anywhere in this system — the agent app picks the change up on its
-    // next fetch — and inventing a half-wired one for this single case
-    // would leave a second way for messages to vanish that only reactions
-    // ever use.
+    // Nothing is emitted for a removal. A cleared reaction is not a
+    // deleted message: message:updated (which deleteGuestMessage below
+    // does send) carries a whole message and would arrive here with the
+    // reaction's own row rather than the message it was attached to. The
+    // agent app picks a cleared reaction up on its next fetch.
     return { messageId, emoji: null };
   }
 
@@ -867,6 +906,7 @@ export async function postGuestMediaMessage(
     conversationId: guest.conversationId,
     recipientPhone: phoneNumber?.displayPhoneNumber?.trim() || guest.whatsappPhoneNumberId,
     direction: 'IN',
+    channel: 'web',
     type: kind,
     mediaId,
     status: 'DELIVERED',
@@ -936,6 +976,7 @@ export async function postGuestLocationMessage(
     conversationId: guest.conversationId,
     recipientPhone: phoneNumber?.displayPhoneNumber?.trim() || guest.whatsappPhoneNumberId,
     direction: 'IN',
+    channel: 'web',
     type: 'location',
     text,
     location: {
@@ -1112,6 +1153,7 @@ export async function sendGuestReply(
     senderId: auth.userId,
     recipientPhone: phoneNumber?.displayPhoneNumber?.trim() || String(conversation.whatsappPhoneNumberId),
     direction: 'OUT',
+    channel: 'web',
     type: 'text',
     text,
     // SENT, not QUEUED: there is no gateway to wait on. It reaches the
@@ -1225,4 +1267,48 @@ export async function markBusinessMessagesRead(guest: GuestContext): Promise<{ r
   }
 
   return { read: ids.length };
+}
+
+
+/**
+ * The customer deleting one of the messages in their window.
+ *
+ * 'me' takes it off their screen only; the agent's thread is unchanged,
+ * which is the same asymmetry the workspace already has in the other
+ * direction. 'everyone' withdraws it from the agent's thread too, and is
+ * allowed only on their own messages and only for an hour — see
+ * messageRevoke.ts, which holds the whole rule and is shared with the
+ * agent-side delete so the two sides cannot drift apart.
+ *
+ * Not gated on assertGuestNotBlocked: someone who has blocked the chat
+ * can still tidy up what they said before they did. Blocking stops new
+ * messages, it is not a punishment.
+ */
+export async function deleteGuestMessage(
+  guest: GuestContext,
+  messageId: string,
+  scope: 'me' | 'everyone',
+): Promise<{ id: string; scope: 'me' | 'everyone' }> {
+  const [target] = await findMessagesByIds(guest.tenantId, guest.conversationId, [messageId]);
+  if (!target) {
+    throw ApiError.notFound('MESSAGE_NOT_FOUND', 'That message is no longer here.');
+  }
+
+  if (scope === 'me') {
+    await hideMessageForGuest(messageId, guest.tenantId, guest.conversationId);
+    return { id: messageId, scope };
+  }
+
+  const refusal = refusalToRevoke(target, 'customer');
+  if (refusal) {
+    throw ApiError.badRequest(`REVOKE_${refusal}`, REVOKE_REFUSAL_MESSAGE[refusal]);
+  }
+
+  // The same fan-out the agent side uses — tombstone to both audiences,
+  // and the chat-list preview rewritten. A second tap that got there
+  // first returns false, which is not an error: what was asked for has
+  // happened.
+  await revokeAndBroadcast(guest.tenantId, guest.conversationId, messageId, 'customer');
+
+  return { id: messageId, scope };
 }

@@ -59,11 +59,26 @@ export async function sendMessage(conversationId: string, body: SendMessageBody)
 }
 
 /**
- * "Delete for me" — hides the message from this workspace only. There is no
- * delete-for-everyone: Meta's Cloud API cannot recall a delivered message.
+ * Removes a message.
+ *
+ * 'me' hides it from this workspace and nothing more. 'everyone'
+ * withdraws it from the customer's screen too, and the server allows
+ * that only for this workspace's own recent messages on the private web
+ * chat — Meta's Cloud API cannot recall a delivered WhatsApp message, so
+ * the server refuses those with a reason worth showing.
+ *
+ * The scope travels in the query string rather than a body: a DELETE
+ * with a body is dropped by enough intermediaries to be a bad place for
+ * the field that decides whether someone else's copy disappears.
  */
-export async function deleteMessage(conversationId: string, messageId: string): Promise<void> {
-  await apiClient.delete(`/conversations/${conversationId}/messages/${messageId}`);
+export async function deleteMessage(
+  conversationId: string,
+  messageId: string,
+  scope: 'me' | 'everyone' = 'me',
+): Promise<void> {
+  await apiClient.delete(`/conversations/${conversationId}/messages/${messageId}`, {
+    params: { scope },
+  });
 }
 
 /**

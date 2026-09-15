@@ -10,6 +10,7 @@ import { MediaImage } from './MediaImage';
 import { LocationBubble } from './LocationBubble';
 import { MediaFileChip } from './MediaFileChip';
 import { VideoMessageBubble } from './VideoMessageBubble';
+import { revokedLine } from './messageRevoke';
 import { AudioMessageBubble } from './AudioMessageBubble';
 import type { Message } from '../../api/types';
 import { impactLight, impactMedium } from '../../utils/haptics';
@@ -167,7 +168,10 @@ function MessageBubbleImpl({
   const bubbleColor = isOut ? colors.bubbleSent : colors.bubbleReceived;
   const textColor = isOut ? colors.bubbleSentText : colors.bubbleReceivedText;
   const isFailed = message.status === 'FAILED';
-  const bleed = isEdgeToEdgeMedia(message);
+  const revoked = Boolean(message.revokedAt);
+  // Never bleed a tombstone to the bubble edge: the media it was sized
+  // for is gone, and the line that replaced it needs ordinary padding.
+  const bleed = !revoked && isEdgeToEdgeMedia(message);
   // Applied to the caption, the reply quote and the footer when the media
   // is edge-to-edge, so they sit on the same left margin they would have
   // had in a plain text bubble.
@@ -350,29 +354,51 @@ function MessageBubbleImpl({
           </View>
         ) : null}
 
-        <MessageContent
-          message={message}
-          textColor={textColor}
-          onOpenImage={onOpenImage}
-          onLongPress={handleLongPress}
-        />
+        {revoked ? (
+          /* A message whoever sent it took back. The server really
+             deleted the content, so every branch below would render an
+             empty bubble — this is what goes in its place. Italic and
+             dimmed, with the blocked icon, because it is not a message:
+             it is the shape one used to occupy, kept so the thread still
+             reads as the conversation that happened.
 
-        {/* The caption is its own block under the media rather than text
-            crammed against the photo's bottom edge — which is what made a
-            captioned photo read as one undifferentiated smudge. For a
-            plain text message this IS the message, and the branch is the
-            same either way. */}
-        {message.text && !rendersOwnText(message) ? (
-          <View style={insetWhenBleeding}>
-            <Text style={[typography.body, { color: textColor }]}>{message.text}</Text>
+             Rendered for any message carrying revokedAt rather than only
+             for a web-chat one: today nothing else can ever carry it,
+             and the day that changes a bubble quietly showing nothing
+             would be the failure. */
+          <View style={[styles.revoked, insetWhenBleeding]}>
+            <Ionicons name="ban-outline" size={14} color={textColor} style={{ opacity: 0.6 }} />
+            <Text style={[typography.body, { color: textColor, opacity: 0.6, fontStyle: 'italic' }]}>
+              {revokedLine(message)}
+            </Text>
           </View>
-        ) : null}
+        ) : (
+          <>
+            <MessageContent
+              message={message}
+              textColor={textColor}
+              onOpenImage={onOpenImage}
+              onLongPress={handleLongPress}
+            />
 
-        {/* A media message with no caption still needs something in the
-            bubble when the media type isn't one this app can render. */}
-        {!message.text && !hasRenderableMedia(message) ? (
-          <Text style={[typography.body, { color: textColor }]}>{`[${message.type}]`}</Text>
-        ) : null}
+            {/* The caption is its own block under the media rather than text
+                crammed against the photo's bottom edge — which is what made a
+                captioned photo read as one undifferentiated smudge. For a
+                plain text message this IS the message, and the branch is the
+                same either way. */}
+            {message.text && !rendersOwnText(message) ? (
+              <View style={insetWhenBleeding}>
+                <Text style={[typography.body, { color: textColor }]}>{message.text}</Text>
+              </View>
+            ) : null}
+
+            {/* A media message with no caption still needs something in the
+                bubble when the media type isn't one this app can render. */}
+            {!message.text && !hasRenderableMedia(message) ? (
+              <Text style={[typography.body, { color: textColor }]}>{`[${message.type}]`}</Text>
+            ) : null}
+          </>
+        )}
 
         <View style={[styles.footer, insetWhenBleeding]}>
           {message.starredAt ? (
@@ -423,6 +449,7 @@ const styles = StyleSheet.create({
   // Sits with the timestamp rather than over the text: it marks the message
   // without competing with what the message says.
   starMark: { marginRight: 4, opacity: 0.75 },
+  revoked: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   row: { flexDirection: 'row' },
   bubble: { maxWidth: '100%' },
   bubbleShift: { maxWidth: '80%' },

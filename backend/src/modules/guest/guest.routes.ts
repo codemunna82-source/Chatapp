@@ -11,6 +11,7 @@ import {
   guestMessageSchema,
   guestMessagesQuerySchema,
   guestReactionSchema,
+  guestDeleteMessageSchema,
   guestPushSchema,
   guestReportSchema,
 } from './guest.validation';
@@ -20,6 +21,7 @@ import {
   postGuestMessageHandler,
   markGuestReadHandler,
   postGuestReactionHandler,
+  deleteGuestMessageHandler,
   postGuestLocationHandler,
   postGuestReportHandler,
   setGuestBlockHandler,
@@ -65,6 +67,10 @@ guestRouter.get('/session', getGuestSessionHandler);
 guestRouter.get('/messages', validate({ query: guestMessagesQuerySchema }), listGuestMessagesHandler);
 guestRouter.post('/messages', validate({ body: guestMessageSchema }), postGuestMessageHandler);
 guestRouter.post('/reactions', validate({ body: guestReactionSchema }), postGuestReactionHandler);
+// Removing a message the customer sent — for themselves, or for both
+// sides. POST rather than DELETE because a DELETE body is the one request
+// shape intermediaries may still drop; see guestDeleteMessageSchema.
+guestRouter.post('/messages/delete', validate({ body: guestDeleteMessageSchema }), deleteGuestMessageHandler);
 guestRouter.post('/location', validate({ body: guestLocationSchema }), postGuestLocationHandler);
 // Reporting and blocking stay reachable from a blocked window, unlike the
 // send routes: the switch that turns the block off is the one thing

@@ -6,6 +6,8 @@ import {
   type MessageStatus,
   type MessageType,
   type MessageDirection,
+  type MessageChannel,
+  type MessageRevoker,
 } from './message.model';
 
 export interface CreateMessageInput {
@@ -26,6 +28,9 @@ export interface CreateMessageInput {
   internal?: boolean;
   /** The client's own id for this send, stable across its retries. */
   clientMessageId?: string;
+  /** Which wire it went out on — see the model. Set at send time because
+   *  the rule that decides it answers differently later. */
+  channel?: MessageChannel;
 }
 
 /**
@@ -83,6 +88,9 @@ export interface ListMessagesOptions {
   search?: string;
   /** Restrict to starred messages only. */
   starredOnly?: boolean;
+  /** Reading as the customer rather than as the workspace — applies their
+   *  own hidden list instead of the workspace's. */
+  forGuest?: boolean;
 }
 
 /**
@@ -236,6 +244,12 @@ export async function listMessagesByConversation(
   if (opts.excludeReactions) {
     filter.type = { $ne: 'reaction' };
   }
+  // The customer's own hidden list. Separate from `deletedAt` above: the
+  // two sides hide messages from themselves independently, and only a
+  // revoke acts on both.
+  if (opts.forGuest) {
+    filter.hiddenForGuestAt = { $exists: false };
+  }
   if (opts.cursor && Types.ObjectId.isValid(opts.cursor)) {
     filter._id = { $lt: new Types.ObjectId(opts.cursor) };
   }
@@ -267,6 +281,58 @@ export async function listMessagesByConversation(
 export async function softDeleteMessage(id: string, tenantId: string): Promise<MessageDoc | null> {
   if (!Types.ObjectId.isValid(id)) return null;
   return Message.findOneAndUpdate({ _id: id, tenantId }, { $set: { deletedAt: new Date() } }, { new: true });
+}
+
+/**
+ * Withdraws one message from both sides, and takes its content with it.
+ *
+ * The content is `$unset`, not merely flagged: "delete for everyone" that
+ * leaves the text sitting in the database for an admin to read later is
+ * not a delete, it is a hidden message. Unsetting `mediaId` also closes
+ * the customer's access to any attachment for free — getGuestMediaBytes
+ * serves a file only while some message in the conversation still points
+ * at it.
+ *
+ * `replyToMessageId` stays. A reply quoting a withdrawn message still has
+ * to render, as a quote of "this message was deleted" rather than as a
+ * reply to nothing.
+ *
+ * Conditional on the message not already being revoked, so two taps
+ * arriving together cannot overwrite the first revoker with the second.
+ * Returns null when it did not apply.
+ */
+export async function revokeMessage(
+  id: string,
+  tenantId: string,
+  by: MessageRevoker,
+): Promise<MessageDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Message.findOneAndUpdate(
+    { _id: id, tenantId, revokedAt: { $exists: false } },
+    {
+      $set: { revokedAt: new Date(), revokedBy: by },
+      $unset: { text: '', mediaId: '', location: '', starredAt: '' },
+    },
+    { new: true },
+  );
+}
+
+/**
+ * The customer's "delete for me" — the mirror of softDeleteMessage, which
+ * is the workspace's. Scoped to the conversation because a guest token
+ * grants one chat and nothing else.
+ */
+export async function hideMessageForGuest(
+  id: string,
+  tenantId: string,
+  conversationId: string,
+): Promise<MessageDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Message.findOneAndUpdate(
+    { _id: id, tenantId, conversationId },
+    { $set: { hiddenForGuestAt: new Date() } },
+    { new: true },
+  );
 }
 
 /** Hard-deletes every message in a conversation — used when the chat itself is deleted. */
