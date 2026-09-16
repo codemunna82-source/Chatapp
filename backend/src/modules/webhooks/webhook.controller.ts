@@ -162,6 +162,8 @@ export const receiveWebhookHandler = asyncHandler(async (req: Request, res: Resp
   const ref = req.params.ref as string | undefined;
   const { appSecret, appName } = await resolveWebhookCredentials(ref);
 
+  logDeliveryShape(ref, req.body);
+
   const signature = checkSignature(rawBody, signatureHeader, appSecret);
   if (!signature.ok) {
     // Logged rather than only returned, because this is the one failure
@@ -217,3 +219,34 @@ export const receiveWebhookHandler = asyncHandler(async (req: Request, res: Resp
 
   res.status(200).json({ success: true });
 });
+
+/**
+ * What Meta sent, at the delivery level.
+ *
+ * Distinct from the per-item log in webhook.service: this one fires even
+ * when the payload produces NO items — a field nobody subscribed to, a
+ * shape the parser does not recognise, a `statuses` block when a message
+ * was expected. That case used to be completely silent: a 200 in the
+ * access log and nothing else, indistinguishable from a message that
+ * arrived and worked.
+ *
+ * Field names and counts only, never the payload — it contains a
+ * customer's phone number and their words.
+ */
+function logDeliveryShape(ref: string | undefined, body: unknown): void {
+  const entry = (body as { entry?: { changes?: { field?: string; value?: Record<string, unknown> }[] }[] })
+    ?.entry;
+  const changes = Array.isArray(entry) ? entry.flatMap((e) => e?.changes ?? []) : [];
+  logger.info(
+    {
+      webhookRef: ref ?? null,
+      fields: changes.map((c) => c?.field ?? 'unknown'),
+      // Which block each change carried, which is the answer to "did a
+      // message arrive, or only a delivery receipt?"
+      blocks: changes.map((c) =>
+        ['messages', 'statuses', 'errors', 'calls'].filter((k) => Array.isArray(c?.value?.[k])),
+      ),
+    },
+    'Meta webhook delivery received',
+  );
+}

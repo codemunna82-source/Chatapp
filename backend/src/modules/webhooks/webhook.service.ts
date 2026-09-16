@@ -252,6 +252,29 @@ async function processWebhookItem(item: NormalizedWebhookItem): Promise<void> {
   // own WhatsAppPhoneNumber record, never from anything else in the payload.
   const tenantId = String(phoneNumberDoc.tenantId);
 
+  /**
+   * What actually arrived.
+   *
+   * The happy path was the only one that logged nothing. A bad signature,
+   * an unknown number, a failed job — each says so; a delivery that
+   * worked said nothing at all, which made "did the customer's message
+   * reach us?" unanswerable from the logs. Hours went into inferring it
+   * from response sizes and the absence of other lines.
+   *
+   * Identifiers and fixed enums only — no message text, which is a
+   * customer's words and does not belong in a log aggregator.
+   */
+  logger.info(
+    {
+      tenantId,
+      kind: item.kind,
+      messageType: item.kind === 'message' ? item.messageType : undefined,
+      phoneNumberId: item.phoneNumberId,
+      displayPhoneNumber: phoneNumberDoc.displayPhoneNumber,
+    },
+    'Meta webhook item accepted',
+  );
+
   try {
     if (item.kind === 'message') {
       await handleIncomingMessage(tenantId, phoneNumberDoc, item);
