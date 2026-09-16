@@ -608,6 +608,18 @@ export async function registerNumberForCloudApi(
   // of one of them ending in silence.
   const account = await WhatsAppAccount.findById(number.whatsappAccountId).select('wabaId').lean();
   let subscribed = false;
+  /**
+   * What to say about the subscription, when there is something to say.
+   *
+   * Silence here was a real trap. Subscribing the WhatsApp account to the
+   * app is what makes Meta DELIVER anything; without it a number
+   * registers, reports CONNECTED, sends perfectly, and never receives a
+   * single message. And the step is skipped whenever the WABA id is
+   * missing — a field the form calls optional — with nothing anywhere
+   * saying so. Everything looked configured and inbound simply never
+   * started.
+   */
+  let subscriptionNote = '';
   if (account?.wabaId) {
     try {
       await subscribeAppToWaba(credentials.accessToken, account.wabaId);
@@ -618,7 +630,19 @@ export async function registerNumberForCloudApi(
       // Registration below is the more important half, and saying so in
       // the result beats failing the whole call.
       logger.warn({ err, wabaId: account.wabaId }, 'subscribed_apps failed during manual registration');
+      subscriptionNote =
+        ' Meta refused to subscribe this WhatsApp account to your app, so INBOUND MESSAGES WILL NOT ARRIVE. ' +
+        'Usually the access token is missing whatsapp_business_management, or the System User does not have ' +
+        'the WhatsApp account assigned as an asset.';
     }
+  } else {
+    logger.warn(
+      { numberId: String(number._id), accountId: String(number.whatsappAccountId) },
+      'No WABA id on this account, so the app was not subscribed — inbound will not arrive',
+    );
+    subscriptionNote =
+      ' No WhatsApp Business Account ID is set for this number, so it was NOT subscribed to your app — ' +
+      'INBOUND MESSAGES WILL NOT ARRIVE. Add the WABA ID and register again.';
   }
 
   try {
@@ -631,7 +655,7 @@ export async function registerNumberForCloudApi(
       return {
         registered: true,
         message: `This number was already registered for the Cloud API.${
-          subscribed ? ' Its WhatsApp account is now subscribed to your app.' : ''
+          subscribed ? ' Its WhatsApp account is now subscribed to your app.' : subscriptionNote
         }`,
       };
     }
@@ -653,7 +677,7 @@ export async function registerNumberForCloudApi(
           'Already connected, so no registration was needed. Meta did reject the PIN — this number ' +
           'has a different two-step verification PIN than META_REGISTER_PIN. Nothing is broken now, ' +
           'but align them before adding another number.' +
-          (subscribed ? ' Its WhatsApp account is now subscribed to your app.' : ''),
+          (subscribed ? ' Its WhatsApp account is now subscribed to your app.' : subscriptionNote),
       };
     }
     throw ApiError.badRequest('WHATSAPP_REGISTER_FAILED', `Meta refused the registration: ${message}`);
@@ -667,7 +691,7 @@ export async function registerNumberForCloudApi(
     registered: true,
     message: subscribed
       ? 'Registered, and this WhatsApp account now sends its messages to your app. It may take a minute to leave "Pending".'
-      : 'Registered for the Cloud API. It may take a minute to leave "Pending".',
+      : `Registered for the Cloud API. It may take a minute to leave "Pending".${subscriptionNote}`,
   };
 }
 
