@@ -18,6 +18,7 @@ import {
 } from './queues/subscriptionExpiry.queue';
 import { startSocketServer, stopSocketServer } from './sockets/socketServer';
 import { migrateWabaIndexAtBoot } from './modules/whatsapp/wabaIndexMigration';
+import { migrateConversationNumberIndexAtBoot } from './modules/conversations/conversationNumberIndexMigration';
 import { domainPool } from './modules/tenants/guestDomain.service';
 import { encryptionKeyStatus } from './lib/crypto';
 
@@ -69,6 +70,11 @@ async function main(): Promise<void> {
   // same WhatsApp Business Account, which is exactly the moment nobody is
   // thinking about indexes. Idempotent, and never fatal.
   await migrateWabaIndexAtBoot();
+
+  // Same reasoning, different index: the constraint being replaced is the
+  // one that files a customer's message to a second WhatsApp number into
+  // the first number's thread. Idempotent, and never fatal.
+  await migrateConversationNumberIndexAtBoot();
 
   if (isRedisConfigured()) {
     startWebhookWorker();

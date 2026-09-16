@@ -69,8 +69,24 @@ const conversationSchema = new Schema(
   { timestamps: true },
 );
 
-// One conversation per (tenant, contact) — matches spec's Conversation-per-Contact model.
-conversationSchema.index({ tenantId: 1, contactId: 1 }, { unique: true });
+// One conversation per (tenant, contact, WhatsApp number).
+//
+// It used to be one per (tenant, contact), which read as "a customer has a
+// chat" — but a workspace with several WhatsApp numbers has several
+// businesses in it, one per number, and each agent only sees their own.
+// Under the old key the FIRST number a customer ever wrote to owned them
+// forever: a message to the second number was filed into the first
+// number's thread, where the agent who owns the second number is not
+// allowed to look. Their inbox stayed empty while the message sat in a
+// colleague's.
+//
+// Keying on the number as well gives each (customer, number) pair its own
+// thread, which is what the customer sees on their side too — they have
+// one WhatsApp conversation per business they wrote to, not one merged
+// one. The migration in conversationNumberIndexMigration.ts drops the old
+// index; Mongoose would otherwise leave it in place and it would reject
+// the second thread with a duplicate-key error.
+conversationSchema.index({ tenantId: 1, contactId: 1, whatsappPhoneNumberId: 1 }, { unique: true });
 // The chat list, exactly as it is sorted and paginated: pinned first, then
 // most recent, with _id breaking ties and carrying the keyset cursor (see
 // listConversationsByTenant). All four fields in the sort's own order and

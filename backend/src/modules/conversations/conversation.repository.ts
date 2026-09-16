@@ -61,12 +61,27 @@ export function afterCursor(cursor: ConversationCursor): Record<string, unknown>
   ];
 }
 
+/**
+ * The thread for this customer ON THIS NUMBER, opening it if it is new.
+ *
+ * The number is part of the key, not just a field set at creation. A
+ * workspace with several WhatsApp numbers runs several businesses, and an
+ * agent is scoped to one of them; a customer who writes to two of those
+ * numbers is holding two separate conversations and gets two threads here,
+ * mirroring the two threads they see on their own phone.
+ *
+ * This used to look up on (tenant, contact) alone and return whatever
+ * thread already existed, keeping its original number. That quietly filed
+ * a message sent to number B into number A's thread — invisible to B's
+ * agent, who is not allowed to see A. See the index comment in
+ * conversation.model.ts.
+ */
 export async function findOrCreateConversation(
   tenantId: string,
   contactId: string,
   whatsappPhoneNumberId: string,
 ): Promise<ConversationDoc> {
-  const existing = await Conversation.findOne({ tenantId, contactId });
+  const existing = await Conversation.findOne({ tenantId, contactId, whatsappPhoneNumberId });
   if (existing) return existing;
   return Conversation.create({ tenantId, contactId, whatsappPhoneNumberId });
 }

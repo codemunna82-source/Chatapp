@@ -1,7 +1,7 @@
 import { logger } from '../../lib/logger';
 import { normalizePhone } from '../../lib/phone';
 import { Contact, type ContactLean } from './contact.model';
-import { Conversation } from '../conversations/conversation.model';
+import { Conversation, type ConversationDoc } from '../conversations/conversation.model';
 import { Message } from '../messages/message.model';
 import { CallLog } from '../calls/callLog.model';
 import { GuestSession } from '../guest/guestSession.model';
@@ -83,17 +83,28 @@ async function mergeGroup(group: ContactLean[]): Promise<Omit<MergeReport, 'grou
     guestSessionsMoved: 0,
   };
 
-  const survivorConversation = await Conversation.findOne({ tenantId, contactId: survivorId });
+  // Keyed by WhatsApp number, because a contact has one thread per number
+  // they wrote to — merging is per number, not per contact. Two threads on
+  // two different numbers are two different conversations and stay apart;
+  // only threads on the SAME number are the same conversation split across
+  // two contact rows, which is what this repairs.
+  const survivorConversations = new Map<string, ConversationDoc>();
+  for (const existing of await Conversation.find({ tenantId, contactId: survivorId })) {
+    survivorConversations.set(String(existing.whatsappPhoneNumberId), existing);
+  }
 
   for (const duplicate of duplicates) {
     const duplicateId = String(duplicate._id);
 
-    const duplicateConversation = await Conversation.findOne({ tenantId, contactId: duplicateId });
-    if (duplicateConversation) {
+    for (const duplicateConversation of await Conversation.find({ tenantId, contactId: duplicateId })) {
+      const numberId = String(duplicateConversation.whatsappPhoneNumberId);
+      const survivorConversation = survivorConversations.get(numberId);
+
       if (survivorConversation) {
-        // Both sides have a thread, so the messages move rather than the
-        // conversation — the unique (tenant, contact) index means the
-        // survivor cannot simply acquire a second one.
+        // Both contact rows have a thread on this number, so the messages
+        // move rather than the conversation — the unique
+        // (tenant, contact, number) index means the survivor cannot hold
+        // two threads on one number.
         const moved = await Message.updateMany(
           { tenantId, conversationId: duplicateConversation._id },
           { $set: { conversationId: survivorConversation._id } },
@@ -116,9 +127,12 @@ async function mergeGroup(group: ContactLean[]): Promise<Omit<MergeReport, 'grou
         await Conversation.deleteOne({ _id: duplicateConversation._id });
         counts.conversationsMerged += 1;
       } else {
-        // Nothing to merge into — the thread simply changes owner.
+        // The survivor has nothing on this number, so the thread simply
+        // changes owner. Recorded in the map so a third contact row with a
+        // thread on the same number merges into it rather than colliding.
         duplicateConversation.contactId = survivor._id;
         await duplicateConversation.save();
+        survivorConversations.set(numberId, duplicateConversation);
       }
     }
 
@@ -153,7 +167,7 @@ async function mergeGroup(group: ContactLean[]): Promise<Omit<MergeReport, 'grou
     await Contact.updateOne({ _id: survivorId }, { $set: { phone: canonical } });
   }
 
-  if (survivorConversation) await survivorConversation.save();
+  for (const conversation of survivorConversations.values()) await conversation.save();
   return counts;
 }
 

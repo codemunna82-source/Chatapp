@@ -264,16 +264,20 @@ export async function resolveSendingPhoneNumberId(tenantId: string, actorUserId:
 /**
  * Opens the conversation with a contact, creating it if this is the first
  * time — the app's "new chat" entry point. Idempotent by design: the repo's
- * findOrCreate keys on (tenant, contact), so tapping the same contact twice
- * returns the same thread rather than a duplicate.
+ * findOrCreate keys on (tenant, contact, number), so tapping the same
+ * contact twice returns the same thread rather than a duplicate.
  *
- * The conversation is attached to a WhatsApp number at creation, since an
- * outbound-initiated chat has no inbound webhook to say which one it
- * belongs to. Note the idempotency cuts both ways: an existing conversation
- * keeps the number it was created with, so reassigning a user does not move
- * their open chats — deliberate, since the customer's own thread is with
- * that number and moving it mid-conversation would look like a stranger
- * taking over.
+ * The number comes from this user, since an outbound-initiated chat has no
+ * inbound webhook to say which one it belongs to. It is part of the key,
+ * so a contact this workspace already talks to on another number gets a
+ * NEW thread here rather than the existing one — right on both counts: the
+ * customer sees two separate WhatsApp threads too, and the other number's
+ * thread may belong to a colleague this user cannot see.
+ *
+ * Reassigning a user therefore does not move their open chats: those stay
+ * with the number the customer is actually talking to, and new chats start
+ * on the new one. Moving a live thread mid-conversation would look, from
+ * the customer's side, like a stranger taking over.
  */
 export async function startConversationForTenant(
   auth: AuthContext,
@@ -296,10 +300,12 @@ export async function startConversationForTenant(
 
   const conversation = await repo.findOrCreateConversation(tenantId, contactId, phoneNumberId);
 
-  // findOrCreate is keyed on (tenant, contact), so an existing chat comes
-  // back on whatever number it was created with — possibly a colleague's.
-  // Without this check, "start a chat" would be a way to open one you are
-  // not allowed to see.
+  // A safety net, not the main defence: findOrCreate is keyed on the
+  // number, and the number came from this user's own assignment, so a
+  // scoped agent can only ever get their own thread back. Kept because the
+  // two facts live in different files — if resolveSendingPhoneNumberId ever
+  // returns something outside this user's scope, "start a chat" would
+  // otherwise become a way to open one they are not allowed to see.
   const scope = visibleWhatsAppPhoneNumberId(auth);
   if (scope && String(conversation.whatsappPhoneNumberId) !== scope) {
     throw ApiError.forbidden(

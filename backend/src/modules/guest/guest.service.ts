@@ -438,10 +438,12 @@ export async function issueGuestLinkForPhone(
     sendingNumberId,
   );
 
-  // findOrCreate is keyed on (tenant, contact), so an existing chat comes
-  // back on whatever number it was created with — possibly a colleague's.
-  // Issuing a link for it would be a way to read a conversation this agent
-  // is not allowed to see.
+  // A safety net, not the main defence: findOrCreate is keyed on the
+  // number, and the number came from this agent's own assignment, so a
+  // scoped agent can only ever get their own thread back. Kept because the
+  // two facts live in different files — if the sending number ever resolved
+  // outside this agent's scope, issuing a link would become a way to read a
+  // conversation they are not allowed to see.
   const scope = visibleWhatsAppPhoneNumberId(auth);
   if (scope && String(conversation.whatsappPhoneNumberId) !== scope) {
     throw ApiError.forbidden(

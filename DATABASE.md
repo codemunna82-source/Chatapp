@@ -15,7 +15,7 @@ All 17 models register cleanly with no duplicate/conflicting index declarations 
 | WhatsAppAccount | ✅ | One tenant ↔ one-or-more Meta WABAs |
 | WhatsAppPhoneNumber | ✅ | Phone numbers under a WABA; **the webhook tenant-resolution key** |
 | Contact | ✅ | A tenant's WhatsApp end-customers |
-| Conversation | ✅ | One per (tenant, contact); carries the 24h window state |
+| Conversation | ✅ | One per (tenant, contact, WhatsApp number); carries the 24h window state |
 | Message | ✅ | Chat messages, in and out |
 | Media | ✅ | Uploaded/received media metadata |
 | MessageTemplate | ✅ | Local mirror of Meta-approved templates |
@@ -57,7 +57,7 @@ All 17 models register cleanly with no duplicate/conflicting index declarations 
 - `{tenantId:1, createdAt:-1}` — default recent-first contact list.
 
 **Conversation**
-- `{tenantId:1, contactId:1}` unique — one conversation per (tenant, contact); also the lookup `findOrCreateConversation` uses on every inbound message.
+- `{tenantId:1, contactId:1, whatsappPhoneNumberId:1}` unique — one conversation per (tenant, contact, number); also the lookup `findOrCreateConversation` uses on every inbound message. A customer who writes to two of the workspace's numbers gets two threads, matching the two threads they see on their own phone — and keeping each one visible to the agent scoped to that number. Replaces an older `{tenantId:1, contactId:1}` unique index, dropped at boot by `migrateConversationNumberIndexAtBoot` (`npm run migrate:conversation-number-index` to retry by hand).
 - `{tenantId:1, updatedAt:-1}` — default chat-list ordering (most recently active first).
 - `{tenantId:1, pinned:1, lastMessageAt:-1}` — pinned-first chat list (spec §19), so pinned conversations don't require a full collection scan to surface.
 
