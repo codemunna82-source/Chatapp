@@ -6,6 +6,7 @@ import axios, {
 } from 'axios';
 import { apiBaseUrl } from '../utils/env';
 import type { ApiFailure } from './types';
+import { getStoredTokens } from '../storage/secureStorage';
 
 /**
  * The API client never imports the Zustand auth store directly — that
@@ -75,7 +76,26 @@ let refreshPromise: Promise<string | null> | null = null;
 
 export async function refreshAccessToken(): Promise<string | null> {
   if (!authHandlers) return null;
-  const refreshToken = authHandlers.getRefreshToken();
+
+  /**
+   * Read from STORAGE, not from the in-memory store.
+   *
+   * `refreshPromise` above stops two refreshes racing inside one
+   * JavaScript context. This app has more than one: the UI, and the
+   * headless handler that wakes for a call or a message push. Each has
+   * its own module instance and therefore its own guard, so a push
+   * landing while the UI refreshed sent two rotations — and the server,
+   * which rotates on every use, later read the loser's token as reuse and
+   * revoked the whole session family. The user was signed out for good.
+   *
+   * Storage is the one thing both contexts share, so whichever refreshed
+   * a moment ago has already written the new token there and this one
+   * picks it up instead of spending the stale one. It narrows the window
+   * rather than closing it; the server's grace period is what actually
+   * closes it (auth.service.ts, REFRESH_RACE_GRACE_MS).
+   */
+  const stored = await getStoredTokens().catch(() => null);
+  const refreshToken = stored?.refreshToken ?? authHandlers.getRefreshToken();
   if (!refreshToken) return null;
 
   if (!refreshPromise) {

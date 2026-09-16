@@ -3,7 +3,7 @@ import { User, computeSubscriptionStatus } from '../users/user.model';
 import { WhatsAppPhoneNumber } from '../whatsapp/whatsappPhoneNumber.model';
 import { findUserByPhone } from '../users/user.repository';
 import { normalizePhone } from '../../lib/phone';
-import { RefreshToken } from './refreshToken.model';
+import { RefreshToken, type RefreshTokenDoc } from './refreshToken.model';
 import { invalidateAuthContext } from './authContext.service';
 import { isSessionReplaced } from './singleDevice';
 import { hashPassword, verifyPassword } from '../../lib/password';
@@ -244,6 +244,41 @@ export async function login(identifier: string, password: string, meta: RequestM
   };
 }
 
+/**
+ * How long after a rotation the previous token is still forgiven.
+ *
+ * Rotation plus reuse detection is the right design and it has one blind
+ * spot: two refreshes racing are indistinguishable from a stolen token
+ * replayed. The app has more than one JavaScript context — the UI and the
+ * headless push handler, which wakes for a call or a message — and each
+ * has its own in-flight-refresh guard, so a push landing while the UI
+ * refreshes produced two rotations seconds apart. The loser's token was
+ * then presented once more, read as theft, and the whole family revoked:
+ * the user was signed out for good, with re-login the only way back.
+ *
+ * Observed in production exactly that way — two refreshes 0.8s apart,
+ * both 200, then TOKEN_REUSE_DETECTED on every attempt afterwards.
+ *
+ * A minute is far longer than any race and far shorter than a useful
+ * attack. Real theft shows up as a token replayed long after its
+ * rotation, or from another address, and that still revokes the family.
+ */
+const REFRESH_RACE_GRACE_MS = 60_000;
+
+/**
+ * Whether a revoked token is a racing sibling rather than a replay.
+ *
+ * Both conditions are required. Recently revoked, because a token
+ * replayed later is exactly what reuse detection is for; and replaced by
+ * a token that is ITSELF still live, because if the replacement has also
+ * been revoked the lineage is already in trouble and forgiving this one
+ * would paper over it.
+ */
+function isConcurrentRefresh(record: RefreshTokenDoc): boolean {
+  if (!record.revokedAt || !record.replacedByJti) return false;
+  return Date.now() - record.revokedAt.getTime() <= REFRESH_RACE_GRACE_MS;
+}
+
 export async function refresh(refreshTokenRaw: string, meta: RequestMeta): Promise<AuthTokens> {
   let claims;
   try {
@@ -257,7 +292,7 @@ export async function refresh(refreshTokenRaw: string, meta: RequestMeta): Promi
     throw ApiError.unauthorized('INVALID_TOKEN', 'Refresh token is invalid or expired');
   }
 
-  if (record.revokedAt) {
+  if (record.revokedAt && !isConcurrentRefresh(record)) {
     // Reuse of an already-rotated token: possible theft. Revoke the whole
     // family so every device sharing this session lineage is signed out.
     await RefreshToken.updateMany(
@@ -390,3 +425,12 @@ export async function revokeAllSessionsForUser(userId: string, tenantId: string)
     { $set: { revokedAt: new Date() } },
   );
 }
+
+/**
+ * Exposed for the race test only.
+ *
+ * The rule it guards is pure and the path it sits on is not: reaching it
+ * through refresh() needs a database, two rotations and a clock, which is
+ * three things that can fail for reasons other than the rule being wrong.
+ */
+export const __testing = { isConcurrentRefresh, REFRESH_RACE_GRACE_MS };
