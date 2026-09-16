@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppBottomSheet, type AppBottomSheetRef } from '../../components/AppBottomSheet';
 import { Avatar } from '../../components/Avatar';
@@ -7,7 +7,7 @@ import { SearchBar } from '../../components/SearchBar';
 import { ContactFormSheet } from '../contacts/ContactFormSheet';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
-import { useContacts, flattenContacts } from '../../queries/useContacts';
+import { useContacts, flattenContacts, useDeleteContact } from '../../queries/useContacts';
 import { useStartConversation } from '../../queries/useConversations';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { getApiErrorMessage } from '../../api/client';
@@ -39,6 +39,8 @@ export function NewChatSheet({ visible, onClose, onOpenConversation }: NewChatSh
   const [error, setError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [contactFormOpen, setContactFormOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deleteContact = useDeleteContact();
 
   const contactsQuery = useContacts({ search: debouncedSearch || undefined });
   const contacts = useMemo(() => flattenContacts(contactsQuery.data), [contactsQuery.data]);
@@ -70,6 +72,46 @@ export function NewChatSheet({ visible, onClose, onOpenConversation }: NewChatSh
     [openingId, startConversation, onOpenConversation],
   );
 
+  /**
+   * Removing a contact from the workspace.
+   *
+   * Confirmed, and the confirmation says plainly that the chat goes with
+   * them — because it does: the server deletes the contact's
+   * conversations and every message in them (contact.service.ts). That is
+   * not obvious from a button labelled "delete contact", and it cannot be
+   * undone, so it is spelled out before rather than discovered after.
+   *
+   * Only VOXO's copy. The customer's own WhatsApp thread is untouched —
+   * nothing can recall what Meta has already delivered.
+   */
+  const handleDelete = useCallback(
+    (contact: Contact) => {
+      const label = contact.name || contact.phone;
+      Alert.alert(
+        `Delete ${label}?`,
+        'This removes the contact AND the whole chat with them — every message, from this app only. ' +
+          'Their own WhatsApp is not affected. This cannot be undone.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () => {
+              setDeletingId(contact.id);
+              deleteContact.mutate(contact.id, {
+                onError: (err) => {
+                  Alert.alert('Not deleted', getApiErrorMessage(err, 'Could not delete that contact.'));
+                },
+                onSettled: () => setDeletingId(null),
+              });
+            },
+          },
+        ],
+      );
+    },
+    [deleteContact],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: Contact }) => {
       const label = item.name || item.phone;
@@ -95,12 +137,37 @@ export function NewChatSheet({ visible, onClose, onOpenConversation }: NewChatSh
                 ) : null}
               </View>
               {openingId === item.id ? <ActivityIndicator color={colors.primary} size="small" /> : null}
+
+              {/* Its own control rather than a swipe or a long press: the
+                  row's job is to open a chat, and a second action nobody
+                  can see is a second action nobody uses. */}
+              {deletingId === item.id ? (
+                <ActivityIndicator color={colors.danger} size="small" />
+              ) : (
+                <Pressable
+                  onPress={() => handleDelete(item)}
+                  disabled={Boolean(openingId) || Boolean(deletingId)}
+                  hitSlop={10}
+                  style={styles.deleteButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${label} and the chat with them`}
+                >
+                  {({ pressed: deletePressed }) => (
+                    <Ionicons
+                      name="trash-outline"
+                      size={20}
+                      color={colors.danger}
+                      style={{ opacity: deletePressed ? 0.5 : 1 }}
+                    />
+                  )}
+                </Pressable>
+              )}
             </View>
           )}
         </Pressable>
       );
     },
-    [handlePick, openingId, colors, spacing, typography],
+    [handlePick, handleDelete, openingId, deletingId, colors, spacing, typography],
   );
 
   return (
@@ -172,6 +239,10 @@ export function NewChatSheet({ visible, onClose, onOpenConversation }: NewChatSh
 }
 
 const styles = StyleSheet.create({
+  // Padded well past the icon so a mis-tap opens the chat rather than
+  // offering to delete it — the destructive action is the one that must
+  // be harder to hit by accident, not easier.
+  deleteButton: { paddingVertical: 8, paddingLeft: 14, paddingRight: 2 },
   list: { flex: 1 },
   row: { minHeight: touchTarget.min + 12, justifyContent: 'center' },
   rowInner: { flexDirection: 'row', alignItems: 'center' },
