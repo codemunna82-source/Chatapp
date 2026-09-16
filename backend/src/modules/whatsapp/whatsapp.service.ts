@@ -193,6 +193,17 @@ export interface PublicWhatsAppNumber {
   /** When quality and tier were last read from Meta — null if never. */
   healthCheckedAt?: string;
   /**
+   * The Business Manager this number answers on, or null for the
+   * server's default configuration.
+   *
+   * Reported because it decides everything else and was invisible: the
+   * BM's token is what sends from this number, and its webhook URL is
+   * where inbound arrives. A number under the wrong one sends fine and
+   * never receives, and nothing on the screen said which it was under.
+   */
+  metaAppId?: string | null;
+  metaAppName?: string | null;
+  /**
    * The rating turned into something actionable. Computed here rather than
    * in each client so every surface says the same thing about the same
    * number.
@@ -201,8 +212,13 @@ export interface PublicWhatsAppNumber {
 }
 
 /** Exported for its test: `enabled` defaulting wrong locks out a workspace. */
-export function toPublicWhatsAppNumber(n: WhatsAppPhoneNumberDoc): PublicWhatsAppNumber {
+export function toPublicWhatsAppNumber(
+  n: WhatsAppPhoneNumberDoc,
+  app?: { id: string; name: string } | null,
+): PublicWhatsAppNumber {
   return {
+    metaAppId: app?.id ?? null,
+    metaAppName: app?.name ?? null,
     id: String(n._id),
     phoneNumberId: n.phoneNumberId,
     displayPhoneNumber: n.displayPhoneNumber,
@@ -314,7 +330,116 @@ export async function listPhoneNumbersForTenant(tenantId: string): Promise<Publi
 
   for (const number of numbers) void refreshNumberHealthIfStale(number);
 
-  return numbers.map(toPublicWhatsAppNumber);
+  // Two queries for the whole list rather than two per number: a number
+  // points at an account and the account names the Business Manager, and
+  // doing that per row is a pair of round trips each against a database
+  // that is not local.
+  const appOfNumber = await resolveBusinessManagerOfNumbers(tenantId, numbers);
+  return numbers.map((n) => toPublicWhatsAppNumber(n, appOfNumber.get(String(n.whatsappAccountId)) ?? null));
+}
+
+/** account id → the Business Manager it belongs to, for a tenant's numbers. */
+async function resolveBusinessManagerOfNumbers(
+  tenantId: string,
+  numbers: WhatsAppPhoneNumberDoc[],
+): Promise<Map<string, { id: string; name: string } | null>> {
+  const accountIds = [...new Set(numbers.map((n) => String(n.whatsappAccountId)))];
+  if (accountIds.length === 0) return new Map();
+
+  const accounts = await WhatsAppAccount.find({ _id: { $in: accountIds }, tenantId })
+    .select('metaAppId')
+    .lean();
+  const appIds = [...new Set(accounts.map((a) => a.metaAppId).filter(Boolean).map(String))];
+  const apps = appIds.length > 0 ? await MetaApp.find({ _id: { $in: appIds }, tenantId }).select('name').lean() : [];
+  const nameOfApp = new Map(apps.map((a) => [String(a._id), a.name]));
+
+  return new Map(
+    accounts.map((a) => {
+      const appId = a.metaAppId ? String(a.metaAppId) : null;
+      const name = appId ? nameOfApp.get(appId) : undefined;
+      return [String(a._id), appId && name ? { id: appId, name } : null];
+    }),
+  );
+}
+
+/**
+ * Move a number onto a different Business Manager.
+ *
+ * The case this exists for: a number added under one BM that has to end up
+ * under another — a workspace splitting numbers across BMs to stay under
+ * Meta's per-BM cap, or a BM being retired.
+ *
+ * Verified against Meta BEFORE anything is written, and that is the whole
+ * value of the endpoint. A token from BM 1 cannot see a number in BM 2, so
+ * a move done blindly leaves a row that looks perfectly configured and a
+ * number that sends nothing — which is exactly the failure this module's
+ * account scoping was introduced to prevent. If the target BM's token
+ * cannot read the number's profile, the move is refused and Meta's own
+ * reason is passed through.
+ *
+ * The number is repointed at an account under the target BM rather than
+ * the account's own metaAppId being rewritten: an account can carry
+ * several numbers, and moving one must not silently move its siblings.
+ */
+export async function moveNumberToBusinessManager(
+  tenantId: string,
+  numberId: string,
+  metaAppId: string | null,
+): Promise<PublicWhatsAppNumber> {
+  const number = await findPhoneNumberByIdAndTenant(numberId, tenantId);
+  if (!number) throw ApiError.notFound('WHATSAPP_NUMBER_NOT_FOUND', 'That number is not in this workspace.');
+
+  let metaApp = null;
+  if (metaAppId) {
+    metaApp = await findMetaAppByIdAndTenant(metaAppId, tenantId);
+    if (!metaApp) {
+      throw ApiError.badRequest('META_APP_NOT_FOUND', 'That Business Manager does not belong to this workspace.');
+    }
+    if (metaApp.status !== 'ACTIVE') {
+      throw ApiError.badRequest('META_APP_DISABLED', `"${metaApp.name}" is disabled, so numbers cannot be moved onto it.`);
+    }
+  }
+
+  const accessToken = metaApp
+    ? (readAppSecret(metaApp.accessTokenEnc) ??
+      (() => {
+        throw ApiError.badRequest(
+          'META_APP_TOKEN_MISSING',
+          `"${metaApp.name}" has no access token saved, so it cannot claim this number. Add one first.`,
+        );
+      })())
+    : resolveAccessToken(undefined);
+
+  // The check that makes this safe. Meta answering for this number under
+  // the target token is the only proof the move will actually work.
+  let profile;
+  try {
+    profile = await getMetaGateway().fetchPhoneNumberProfile(accessToken, number.phoneNumberId);
+  } catch (err) {
+    throw ApiError.badRequest(
+      'WHATSAPP_NUMBER_VERIFICATION_FAILED',
+      `${metaApp ? `"${metaApp.name}"` : 'The server’s default configuration'} cannot see this number at Meta: ` +
+        `${err instanceof Error ? err.message : 'unknown error'}. Check that the Business Manager owns it and that ` +
+        'its System User has the WhatsApp account assigned as an asset.',
+    );
+  }
+
+  const currentAccount = await WhatsAppAccount.findOne({ _id: number.whatsappAccountId, tenantId })
+    .select('wabaId')
+    .lean();
+  const account = await findOrCreateRealAccount(
+    tenantId,
+    currentAccount?.wabaId,
+    metaApp ? String(metaApp._id) : undefined,
+  );
+
+  number.whatsappAccountId = account._id;
+  number.displayPhoneNumber = profile.displayPhoneNumber;
+  number.qualityRating = profile.qualityRating;
+  if (profile.verifiedName) number.verifiedName = profile.verifiedName;
+  await number.save();
+
+  return toPublicWhatsAppNumber(number, metaApp ? { id: String(metaApp._id), name: metaApp.name } : null);
 }
 
 /**

@@ -24,3 +24,15 @@ export const numberEnabledSchema = z.object({ enabled: z.boolean() });
 
 /** Switching WhatsApp voice calling on or off at Meta. */
 export const numberCallingSchema = z.object({ enabled: z.boolean() });
+
+/**
+ * Which Business Manager a number should answer on.
+ *
+ * null is a real, meaningful value — "the server's default configuration",
+ * the single-BM setup everything here grew out of — so it is nullable
+ * rather than optional: omitting the field and asking for the default have
+ * to be distinguishable.
+ */
+export const numberBusinessManagerSchema = z.object({
+  metaAppId: z.string().trim().min(1).nullable(),
+});

@@ -7,6 +7,7 @@ import {
   registerNumberForCloudApi,
   setNumberEnabled,
   setCallingEnabled,
+  moveNumberToBusinessManager,
 } from './whatsapp.service';
 import {
   connectWhatsAppForUser,
@@ -83,6 +84,20 @@ export const setCallingEnabledHandler = asyncHandler(async (req: Request, res: R
   const auth = getTenantContext(req);
   const { enabled } = req.body as { enabled: boolean };
   const number = await setCallingEnabled(auth.tenantId, req.params.id as string, enabled);
+  res.status(200).json({ success: true, data: number });
+});
+
+/**
+ * Move a number onto a different Business Manager.
+ *
+ * Refuses unless Meta answers for the number under the TARGET BM's token,
+ * because a move that cannot work is indistinguishable, in the database,
+ * from one that can — see moveNumberToBusinessManager.
+ */
+export const setNumberBusinessManagerHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const { metaAppId } = req.body as { metaAppId: string | null };
+  const number = await moveNumberToBusinessManager(auth.tenantId, req.params.id as string, metaAppId);
   res.status(200).json({ success: true, data: number });
 });
 

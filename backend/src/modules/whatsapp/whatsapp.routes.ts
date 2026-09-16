@@ -7,6 +7,7 @@ import {
   connectWhatsAppSchema,
   numberIdParamSchema,
   numberEnabledSchema,
+  numberBusinessManagerSchema,
   numberCallingSchema,
 } from './whatsapp.validation';
 import {
@@ -18,6 +19,7 @@ import {
   registerNumberForCloudApiHandler,
   setNumberEnabledHandler,
   setCallingEnabledHandler,
+  setNumberBusinessManagerHandler,
 } from './whatsapp.controller';
 import { whatsappSignupPageHandler, whatsappSignupCallbackHandler } from './signupPage.controller';
 
@@ -72,4 +74,13 @@ whatsappRouter.patch(
   '/numbers/:id/calling',
   validate({ params: numberIdParamSchema, body: numberCallingSchema }),
   setCallingEnabledHandler,
+);
+
+// Moving a number between Business Managers. Verified against Meta with
+// the TARGET BM's token before anything is written — a move the token
+// cannot back leaves a number that sends nothing and looks fine.
+whatsappRouter.patch(
+  '/numbers/:id/business-manager',
+  validate({ params: numberIdParamSchema, body: numberBusinessManagerSchema }),
+  setNumberBusinessManagerHandler,
 );
