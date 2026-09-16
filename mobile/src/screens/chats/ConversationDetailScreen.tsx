@@ -729,12 +729,22 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   }, [guestActive, issueGuestLink, revokeGuestLink, shareGuestLink]);
 
   const handleSendText = useCallback(
-    (text: string) => {
+    (text: string, nudgeIndex?: number) => {
       // One path for both channels. The server decides which one this
       // leaves on, so the composer no longer has to — and cannot get it
       // wrong, which it did: choosing WhatsApp while the window was open
       // delivered the message to the customer twice.
-      submitSend({ type: 'text', text, replyToMessageId: replyingTo?.id });
+      //
+      // nudgeIndex rides along when this is one of the workspace's fixed
+      // WhatsApp messages. The server uses it to pick the wording from
+      // its own copy, so an app a version behind still sends what the
+      // admin set today.
+      submitSend({
+        type: 'text',
+        text,
+        replyToMessageId: replyingTo?.id,
+        ...(nudgeIndex !== undefined ? { nudgeIndex } : {}),
+      });
     },
     [submitSend, replyingTo],
   );
@@ -1216,6 +1226,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               onUseTemplate={() => setTemplateSheetOpen(true)}
               replyToMessageId={replyingTo?.id}
               onSent={() => setReplyingTo(null)}
+              // Present only while the customer is still outside their
+              // private chat and the workspace has fixed the wording —
+              // the composer then offers that one message instead of a
+              // text box it cannot actually send from.
+              nextNudge={conversationQuery.data?.nextNudge}
             />
 
             {/* See keyboardGapStyle. */}

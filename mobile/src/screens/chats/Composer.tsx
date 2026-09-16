@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -45,7 +46,17 @@ interface ComposerProps {
   conversationId: string;
   whatsappPhoneNumberId: string | undefined;
   withinWindow: boolean;
-  onSendText: (text: string) => void;
+  onSendText: (text: string, nudgeIndex?: number) => void;
+  /**
+   * The one message that may go out over WhatsApp right now.
+   *
+   * Present only while the customer has not opened their private chat and
+   * the workspace has fixed the wording (backend nudgeTemplates.ts). The
+   * composer then shows that message instead of a text box, because a
+   * field the agent can type into but whose contents the server will
+   * refuse is worse than no field at all.
+   */
+  nextNudge?: { index: number; position: number; total: number; text: string } | null;
   onAttach: () => void;
   onUseTemplate: () => void;
   sending: boolean;
@@ -161,6 +172,7 @@ export function Composer({
   sending,
   replyToMessageId,
   onSent,
+  nextNudge,
 }: ComposerProps) {
   const { colors, spacing, radius, typography } = useTheme();
   // The bottom inset is owned by the screen's keyboard-tracking wrapper
@@ -749,6 +761,65 @@ export function Composer({
     );
   }
 
+  /**
+   * The customer has not opened their private chat yet, so the workspace
+   * decides what is said.
+   *
+   * Shown instead of the whole composer rather than alongside it: with
+   * the wording fixed, an attach button, a microphone and a text field
+   * are three ways to have a send refused. The one thing that works is
+   * the one thing offered.
+   */
+  if (nextNudge) {
+    return (
+      <View style={shellStyle}>
+        {errorText ? (
+          <Text style={[typography.caption, { color: colors.danger, marginBottom: 4 }]}>{errorText}</Text>
+        ) : null}
+
+        <View
+          style={[
+            styles.nudgeCard,
+            { backgroundColor: colors.surfaceAlt, borderColor: colors.border, borderRadius: radius.lg },
+          ]}
+        >
+          <Text style={[typography.caption, { color: colors.textSecondary }]}>
+            WhatsApp message {nextNudge.position} of {nextNudge.total} · only this can be sent until they
+            open the private chat
+          </Text>
+
+          <ScrollView style={styles.nudgeScroll} nestedScrollEnabled>
+            <Text style={[typography.body, { color: colors.textPrimary }]}>{nextNudge.text}</Text>
+          </ScrollView>
+
+          <Pressable
+            onPress={() => {
+              if (sending || sendingRef.current) return;
+              impactLight();
+              onSendText(nextNudge.text, nextNudge.index);
+            }}
+            disabled={sending}
+            style={({ pressed }) => [
+              styles.nudgeSend,
+              {
+                backgroundColor: colors.primary,
+                borderRadius: radius.lg,
+                opacity: sending || pressed ? 0.6 : 1,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={`Send WhatsApp message ${nextNudge.position} of ${nextNudge.total}`}
+          >
+            <Ionicons name="send" size={16} color={colors.textOnPrimary} />
+            <Text style={[typography.label, { color: colors.textOnPrimary, fontSize: 14 }]}>
+              {sending ? 'Sending…' : 'Send this message'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   // --- idle: [attach] [input] [camera] [mic | send] ---
   return (
     <View style={shellStyle}>
@@ -877,6 +948,18 @@ export function Composer({
 }
 
 const styles = StyleSheet.create({
+  nudgeCard: { borderWidth: 1, padding: 12, gap: 10 },
+  // Capped rather than free: the longer message is a dozen lines, and a
+  // composer that grows to fill the screen pushes the conversation it
+  // belongs to out of view.
+  nudgeScroll: { maxHeight: 132 },
+  nudgeSend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 11,
+  },
   shell: { borderTopWidth: StyleSheet.hairlineWidth },
   row: { flexDirection: 'row', alignItems: 'flex-end' },
   // Every control is a real 48dp touch square regardless of its icon size —

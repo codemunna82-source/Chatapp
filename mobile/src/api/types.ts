@@ -95,6 +95,21 @@ export interface Conversation {
    */
   whatsappRepliesLeft?: number | null;
   /**
+   * The exact message that may be sent next over WhatsApp.
+   *
+   * Present only while the customer has not opened their private chat AND
+   * the workspace has fixed the wording. The composer shows this instead
+   * of a text box: with the message decided, an empty field the agent
+   * cannot actually use is worse than showing them what will be sent.
+   */
+  nextNudge?: {
+    index: number;
+    /** 1-based, for "message 1 of 2". */
+    position: number;
+    total: number;
+    text: string;
+  } | null;
+  /**
    * Seeded sample data. The 24-hour window UI is dropped entirely for these
    * — the number is not on WhatsApp, so neither the countdown nor the
    * template prompt describes anything real (the backend treats them as a

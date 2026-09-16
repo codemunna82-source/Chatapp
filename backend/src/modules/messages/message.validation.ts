@@ -16,6 +16,15 @@ const base = {
    * behaviour: no protection, same as before.
    */
   clientMessageId: z.string().trim().min(1).max(128).optional(),
+  /**
+   * Which of the workspace's set WhatsApp messages this is, by position.
+   *
+   * Only read while the customer is outside their private window, where
+   * the wording is the workspace's and not the agent's — see
+   * nudgeTemplates.ts. Optional, so a client that does not know about it
+   * still works by sending the exact text.
+   */
+  nudgeIndex: z.coerce.number().int().min(0).max(20).optional(),
 };
 
 const textMessage = z.object({ type: z.literal('text'), text: z.string().trim().min(1).max(4096), ...base });

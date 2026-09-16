@@ -48,6 +48,25 @@ const tenantSchema = new Schema(
     avatarUpdatedAt: { type: Date },
     slug: { type: String, required: true, trim: true, lowercase: true },
     /**
+     * What may be said over WhatsApp before the customer opens their
+     * private chat, and how many times.
+     *
+     * `enforced` on means an agent can send only these, in this order,
+     * and nothing else — see nudgeTemplates.ts for why that is stricter
+     * than a simple count. The number of messages IS the allowance: two
+     * entries means two WhatsApp messages, then the private link is the
+     * only way through.
+     *
+     * `messages` unset means the defaults, not "none". A workspace that
+     * has never opened this screen and one that deliberately wants no
+     * restriction are different things, and the second is said with the
+     * switch.
+     */
+    whatsappNudges: {
+      enforced: { type: Boolean, default: true },
+      messages: { type: [String], default: undefined },
+    },
+    /**
      * The domain this workspace's private-chat links are built on.
      *
      * Unset means the shared GUEST_LINK_BASE_URL, which is where every

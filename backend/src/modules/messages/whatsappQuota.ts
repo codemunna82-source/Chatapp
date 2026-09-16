@@ -20,7 +20,7 @@ import type { GuestSessionDoc } from '../guest/guestSession.model';
  * talked past is a cap nobody plans around, and the whole point is that
  * the private link is the way through.
  */
-export const WHATSAPP_NUDGE_LIMIT = 3;
+export const WHATSAPP_NUDGE_LIMIT = 2;
 
 /**
  * When the allowance last restarted.
@@ -71,8 +71,8 @@ export function countsAgainstNudgeQuota(input: {
 }
 
 /** How many are left, never negative. */
-export function nudgesLeft(used: number): number {
-  return Math.max(0, WHATSAPP_NUDGE_LIMIT - used);
+export function nudgesLeft(used: number, limit: number = WHATSAPP_NUDGE_LIMIT): number {
+  return Math.max(0, limit - used);
 }
 
 /**
@@ -81,7 +81,18 @@ export function nudgesLeft(used: number): number {
  * Says what happened, why, and what makes it work again — in that order,
  * because "send them the private chat link" is the only thing they can
  * act on and a message that buries it reads as an outage.
+ *
+ * Takes the limit rather than baking it in: with the wording enforced,
+ * the allowance is however many messages the workspace has set, so a
+ * fixed number here would be wrong for any workspace that changed it.
  */
-export const NUDGE_QUOTA_MESSAGE =
-  `Only ${WHATSAPP_NUDGE_LIMIT} WhatsApp replies are allowed until this customer opens their private chat. ` +
-  'Send them the private chat link — once they open it you can message them without any limit.';
+export function nudgeQuotaMessage(limit: number = WHATSAPP_NUDGE_LIMIT): string {
+  return (
+    `Only ${limit} WhatsApp ${limit === 1 ? 'reply is' : 'replies are'} allowed until this customer opens ` +
+    'their private chat. Send them the private chat link — once they open it you can message them ' +
+    'without any limit.'
+  );
+}
+
+/** The default-limit wording, for callers with no workspace in hand. */
+export const NUDGE_QUOTA_MESSAGE = nudgeQuotaMessage();

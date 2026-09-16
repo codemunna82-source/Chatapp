@@ -30,7 +30,20 @@ export async function listMessages(
 type WithClientId = { clientMessageId?: string };
 
 export type SendMessageBody =
-  | ({ type: 'text'; text: string; replyToMessageId?: string } & WithClientId)
+  | ({
+      type: 'text';
+      text: string;
+      replyToMessageId?: string;
+      /**
+       * Which of the workspace's fixed WhatsApp messages this is.
+       *
+       * Sent only while the customer is still outside their private chat,
+       * where the wording is the workspace's and not the agent's. Naming
+       * the position rather than trusting the text means this app cannot
+       * drift from what an admin set today.
+       */
+      nudgeIndex?: number;
+    } & WithClientId)
   | ({
       type: 'template';
       templateName: string;

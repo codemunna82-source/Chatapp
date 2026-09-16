@@ -12,6 +12,9 @@ import { resolveBusinessName, resolveBusinessNameForConversation } from '../gues
 import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
 import { AVATAR_MAX_SIZE_BYTES } from '../media/avatarAsset';
 import { CONTENT_POLICY_MESSAGE, findPolicyViolation } from '../messages/contentPolicy';
+import { recordAudit } from '../audit/auditLog.service';
+import { forgetNudgePolicy, nudgePolicyFor } from '../messages/nudgePolicy';
+import { DEFAULT_WHATSAPP_NUDGES, NUDGE_MAX_LENGTH } from '../messages/nudgeTemplates';
 import { guestLinkUrlPattern } from './guestDomain';
 import {
   assignPoolDomain,
@@ -405,5 +408,77 @@ tenantRouter.delete(
   asyncHandler(async (req, res) => {
     const auth = getTenantContext(req);
     res.status(200).json({ success: true, data: await clearGuestDomain(auth.tenantId) });
+  }),
+);
+
+/**
+ * What may be said over WhatsApp before the customer opens their private
+ * chat — and therefore, since the list length is the allowance, how many
+ * times.
+ *
+ * MASTER_ADMIN only, like the rest of this router, and this one deserves
+ * it more than most: these are the only words that reach a customer who
+ * has not engaged, and it is exactly that traffic Meta's policy reviewers
+ * act on. Getting it wrong costs the whole business account.
+ */
+const whatsappNudgesSchema = z.object({
+  enforced: z.boolean().optional(),
+  messages: z
+    .array(z.string().trim().min(1).max(NUDGE_MAX_LENGTH))
+    // An empty list would read as "no messages allowed", which is not a
+    // thing this can express — that is what `enforced: false` is for, and
+    // it is a decision with a visible switch rather than an empty box.
+    .min(1, 'Keep at least one message, or switch the rule off instead')
+    .max(5, 'More than a handful of WhatsApp nudges is not a nudge')
+    .optional(),
+});
+
+tenantRouter.get(
+  '/settings/whatsapp-nudges',
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const policy = await nudgePolicyFor(auth.tenantId);
+    res.status(200).json({
+      success: true,
+      data: {
+        ...policy,
+        /** So the screen can offer "put the original wording back". */
+        defaults: DEFAULT_WHATSAPP_NUDGES,
+      },
+    });
+  }),
+);
+
+tenantRouter.patch(
+  '/settings/whatsapp-nudges',
+  validate({ body: whatsappNudgesSchema }),
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const body = req.body as z.infer<typeof whatsappNudgesSchema>;
+
+    const updated = await Tenant.findByIdAndUpdate(auth.tenantId, {
+      $set: {
+        ...(body.enforced !== undefined ? { 'whatsappNudges.enforced': body.enforced } : {}),
+        ...(body.messages ? { 'whatsappNudges.messages': body.messages } : {}),
+      },
+    });
+    if (!updated) throw ApiError.notFound('TENANT_NOT_FOUND', 'Workspace not found');
+
+    // Immediately, so the next message uses the new wording rather than
+    // whatever the cache is still holding.
+    forgetNudgePolicy(auth.tenantId);
+
+    await recordAudit({
+      tenantId: auth.tenantId,
+      actorUserId: auth.userId,
+      action: 'tenant.whatsapp_nudges.update',
+      targetType: 'Tenant',
+      targetId: auth.tenantId,
+      // How many and whether enforced — not the wording, which is long
+      // and belongs in the document rather than in an audit row.
+      metadata: { enforced: body.enforced, messageCount: body.messages?.length },
+    });
+
+    res.status(200).json({ success: true, data: await nudgePolicyFor(auth.tenantId) });
   }),
 );

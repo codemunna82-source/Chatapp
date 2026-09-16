@@ -13,6 +13,8 @@ import { hasMovedToWebChat } from '../guest/webChatRouting';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
 import type { ConversationLean, ConversationStatus } from './conversation.model';
 import type { ContactLean } from '../contacts/contact.model';
+import { nudgePolicyFor } from '../messages/nudgePolicy';
+import { nudgeAt } from '../messages/nudgeTemplates';
 
 export interface PublicConversation {
   id: string;
@@ -50,6 +52,15 @@ export interface PublicConversation {
    * where there is no limit to report.
    */
   whatsappRepliesLeft?: number | null;
+  /**
+   * The exact message the agent may send next over WhatsApp, when the
+   * workspace has fixed the wording.
+   *
+   * Null when there is nothing to send (allowance spent), when the rule
+   * is switched off, or when the question does not apply at all — the
+   * same three cases whatsappRepliesLeft reports as null.
+   */
+  nextNudge?: NextNudge | null;
   unreadCount: number;
   manuallyUnread: boolean;
   pinned: boolean;
@@ -57,6 +68,16 @@ export interface PublicConversation {
   status: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** The next fixed WhatsApp message, and where it sits in the sequence. */
+export interface NextNudge {
+  /** Its position in the list, for sending it back by name. */
+  index: number;
+  /** 1-based, for "message 1 of 2". */
+  position: number;
+  total: number;
+  text: string;
 }
 
 function toPublicConversation(doc: ConversationLean, contact?: ContactLean): PublicConversation {
@@ -163,7 +184,9 @@ export async function getConversationForTenant(auth: AuthContext, id: string): P
   ]);
 
   const view = toPublicConversation(conversation, contact ?? undefined);
-  view.whatsappRepliesLeft = await whatsappRepliesLeftFor(tenantId, id, contact, session);
+  const nudge = await whatsappRepliesLeftFor(tenantId, id, contact, session);
+  view.whatsappRepliesLeft = nudge.left;
+  view.nextNudge = nudge.nextNudge;
   return view;
 }
 
@@ -185,11 +208,26 @@ async function whatsappRepliesLeftFor(
   conversationId: string,
   contact: ContactLean | null,
   session: Awaited<ReturnType<typeof findActiveSessionForConversation>>,
-): Promise<number | null> {
-  if (contact?.isDemo) return null;
-  if (hasMovedToWebChat(session)) return null;
-  const used = await countWhatsAppNudges(tenantId, conversationId, nudgeWindowStart(session));
-  return nudgesLeft(used);
+): Promise<{ left: number | null; nextNudge: NextNudge | null }> {
+  if (contact?.isDemo) return { left: null, nextNudge: null };
+  if (hasMovedToWebChat(session)) return { left: null, nextNudge: null };
+
+  const [used, policy] = await Promise.all([
+    countWhatsAppNudges(tenantId, conversationId, nudgeWindowStart(session)),
+    nudgePolicyFor(tenantId),
+  ]);
+
+  const left = nudgesLeft(used, policy.limit);
+  if (!policy.enforced || left === 0) return { left, nextNudge: null };
+
+  const text = nudgeAt(policy.nudges, used);
+  return {
+    left,
+    // The composer needs the actual wording, not just a count: with the
+    // message fixed, an empty box the agent cannot type into is a worse
+    // answer than showing them exactly what will be sent.
+    nextNudge: text ? { index: used, position: used + 1, total: policy.limit, text } : null,
+  };
 }
 
 export interface UpdateConversationBody {

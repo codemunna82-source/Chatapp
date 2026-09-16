@@ -34,8 +34,7 @@ import { resolveReplyChannel } from '../guest/webChatRouting';
 import {
   countsAgainstNudgeQuota,
   nudgeWindowStart,
-  NUDGE_QUOTA_MESSAGE,
-  WHATSAPP_NUDGE_LIMIT,
+  nudgeQuotaMessage,
 } from './whatsappQuota';
 import { pushGuestMessage } from '../guest/guestPush.service';
 import { resolveBusinessNameForConversation } from '../guest/businessName';
@@ -47,6 +46,8 @@ import {
   CONTENT_POLICY_MESSAGE,
   findPolicyViolationInSend,
 } from './contentPolicy';
+import { nudgePolicyFor } from './nudgePolicy';
+import { nudgeAt, nudgeRefusalMessage, sameNudgeText } from './nudgeTemplates';
 
 /**
  * Message types this service can actually dispatch through the Meta
@@ -81,6 +82,19 @@ export interface SendOutboundMessageInput {
   templateName?: string;
   languageCode?: string;
   templateComponents?: unknown[];
+  /**
+   * Which of the workspace's set WhatsApp messages this is.
+   *
+   * Only meaningful while the customer is outside their private window,
+   * where the wording is fixed (nudgeTemplates.ts). Naming the nudge by
+   * position rather than posting its text back means a client one
+   * version behind still sends what the admin set today, and that an
+   * agent editing the box cannot turn it into something else.
+   *
+   * Optional: sending the exact text works too, so a client that does
+   * not know about this field is not broken by it.
+   */
+  nudgeIndex?: number;
   replyToMessageId?: string; // our Message._id — quotes another message when sending text/media
   reactToMessageId?: string; // our Message._id — the target of a `type: 'reaction'` send
   emoji?: string; // '' removes a previously-sent reaction (real, documented Meta behavior)
@@ -406,14 +420,55 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * the allowance first would send someone to the wrong one.
    */
   if (countsAgainstNudgeQuota({ messageType: input.type, internal: input.internal, isDemoContact })) {
-    const used = await countWhatsAppNudges(
-      input.tenantId,
-      input.conversationId,
-      nudgeWindowStart(session),
-    );
+    const [used, policy] = await Promise.all([
+      countWhatsAppNudges(input.tenantId, input.conversationId, nudgeWindowStart(session)),
+      nudgePolicyFor(input.tenantId),
+    ]);
     perf.mark('nudge_quota_read');
-    if (used >= WHATSAPP_NUDGE_LIMIT) {
-      throw new ApiError(422, 'WHATSAPP_NUDGE_LIMIT_REACHED', NUDGE_QUOTA_MESSAGE);
+    if (used >= policy.limit) {
+      throw new ApiError(422, 'WHATSAPP_NUDGE_LIMIT_REACHED', nudgeQuotaMessage(policy.limit));
+    }
+
+    /**
+     * WHAT may be said, not just how often.
+     *
+     * The count above is the weaker half of this rule. Free-form WhatsApp
+     * messages to a customer who has not engaged are what Meta's policy
+     * reviewers act on, and the cost of one agent improvising is the
+     * whole business account — every number on it. So while the customer
+     * is still outside their private window, the wording is the
+     * workspace's to set and not the agent's to choose.
+     *
+     * The client may name the nudge by index or simply send its text;
+     * both resolve to the same stored wording, and anything else is
+     * refused. Matching ignores whitespace only, because a text box
+     * round-trips newlines and trailing spaces without changing a single
+     * thing the customer reads — see sameNudgeText.
+     *
+     * Media, location and everything that is not a plain text message are
+     * refused outright here: there is no approved wording for them, and a
+     * photo is exactly the kind of unsolicited content this is guarding
+     * against.
+     */
+    if (policy.enforced) {
+      const expected = nudgeAt(policy.nudges, used);
+      if (!expected) {
+        throw new ApiError(422, 'WHATSAPP_NUDGE_LIMIT_REACHED', nudgeQuotaMessage(policy.limit));
+      }
+
+      const named = typeof input.nudgeIndex === 'number' && input.nudgeIndex === used;
+      const matches = input.type === 'text' && typeof input.text === 'string' && sameNudgeText(input.text, expected);
+      if (!named && !matches) {
+        throw new ApiError(
+          422,
+          'WHATSAPP_NUDGE_NOT_ALLOWED',
+          nudgeRefusalMessage(used + 1, policy.limit),
+        );
+      }
+
+      // The stored wording wins over whatever arrived, so a client that
+      // is one version behind still sends what the admin set today.
+      input = { ...input, type: 'text', text: expected };
     }
   }
 
