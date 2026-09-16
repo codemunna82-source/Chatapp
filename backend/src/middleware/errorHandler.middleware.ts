@@ -11,6 +11,25 @@ import { env } from '../config/env';
  * logged server-side only — never sent to the client, even in development,
  * to keep behavior consistent with production.
  */
+/**
+ * The most useful single line out of a Zod failure.
+ *
+ * The field name is included because a schema message is not always
+ * self-locating: "Required" and "Expected string" say nothing on a form
+ * with eight inputs. Where the message already names the problem, the
+ * prefix is a small cost against the case where it is the only clue.
+ */
+function firstFieldMessage(flat: {
+  formErrors: string[];
+  fieldErrors: Record<string, string[] | undefined>;
+}): string | null {
+  for (const [field, messages] of Object.entries(flat.fieldErrors)) {
+    const message = messages?.[0];
+    if (message) return `${field}: ${message}`;
+  }
+  return flat.formErrors[0] ?? null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
   if (err instanceof ApiError) {
@@ -47,12 +66,24 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   }
 
   if (err instanceof ZodError) {
+    const flat = err.flatten();
     res.status(400).json({
       success: false,
       error: {
         code: 'VALIDATION_ERROR',
-        message: 'Request validation failed',
-        details: err.flatten(),
+        // The first field error, not "Request validation failed".
+        //
+        // The schemas already carry messages written for a person to read
+        // — "That is not a Meta app secret — it should be 32 characters,
+        // 0-9 and a-f" — and every one of them was being thrown into
+        // `details` and replaced with a sentence that says nothing. A
+        // client showing the message (which is all most of them do) told
+        // the user only that something was wrong, on a form where the
+        // actual fault was a value pasted into the wrong box.
+        message: firstFieldMessage(flat) ?? 'Request validation failed',
+        // Still sent whole, so a client that can mark the offending field
+        // has what it needs.
+        details: flat,
       },
     });
     return;
