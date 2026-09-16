@@ -41,6 +41,9 @@ interface AuthState {
   refreshUser: () => Promise<void>;
 }
 
+/** In-flight sign-out, so a re-entrant call waits rather than starting another. */
+let clearingSession: Promise<void> | null = null;
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'hydrating',
   accessToken: null,
@@ -83,63 +86,79 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   clearSession: async (reason?: string) => {
     /**
-     * FIRST, while the access token this call needs is still valid.
+     * Belt to the opt-out's braces.
      *
-     * And here rather than in the Sign out button, because this function
-     * is where every way out of a session converges: the button, an
-     * expired refresh token, an admin revoking access, the socket
-     * reporting the same. Only the button used to detach the device, so
-     * the other three left the install registered — and it kept ringing
-     * for calls and messages in a workspace nobody on that phone was
-     * signed into any more. On a shared phone that is not a glitch, it
-     * is someone else's customers.
-     *
-     * Awaited, but it never throws and never blocks on a slow network
-     * beyond its own request: signing out locally must not depend on
-     * reaching the server, which is exactly the case where the session
-     * ended because the server could not be reached.
+     * Signing out makes a network call, and anything that answers 401 can
+     * route back here — so this must be safe to re-enter even after the
+     * one known path that did (the device detach) stopped doing it. The
+     * second caller waits on the first rather than starting a second
+     * sign-out, which is what turned this into a loop the app never came
+     * out of.
      */
-    await unregisterForPushNotifications();
+    if (clearingSession) return clearingSession;
+    clearingSession = (async () => {
+      /**
+       * FIRST, while the access token this call needs is still valid.
+       *
+       * And here rather than in the Sign out button, because this function
+       * is where every way out of a session converges: the button, an
+       * expired refresh token, an admin revoking access, the socket
+       * reporting the same. Only the button used to detach the device, so
+       * the other three left the install registered — and it kept ringing
+       * for calls and messages in a workspace nobody on that phone was
+       * signed into any more. On a shared phone that is not a glitch, it
+       * is someone else's customers.
+       *
+       * Awaited, but it never throws and never blocks on a slow network
+       * beyond its own request: signing out locally must not depend on
+       * reaching the server, which is exactly the case where the session
+       * ended because the server could not be reached.
+       */
+      await unregisterForPushNotifications();
 
-    await clearStoredTokens();
-    removeCached(CACHED_USER_KEY);
-    // The on-disk chat cache holds customer message content. Leaving it
-    // for whoever signs in next — on a shared phone, or after an admin
-    // revokes access — is not a cache, it is a leak.
-    clearChatCache();
-    clearMediaShapes();
+      await clearStoredTokens();
+      removeCached(CACHED_USER_KEY);
+      // The on-disk chat cache holds customer message content. Leaving it
+      // for whoever signs in next — on a shared phone, or after an admin
+      // revokes access — is not a cache, it is a leak.
+      clearChatCache();
+      clearMediaShapes();
 
-    /**
-     * Everything else a session leaves behind, here rather than in the
-     * Sign out button — which is the same mistake the push token had.
-     * Four things end a session (the button, an expired refresh token, an
-     * admin revoking access, the socket reporting it) and only one of
-     * them ran any of this.
-     *
-     * The query cache is the one that shows: it holds the calls list and
-     * the dashboard, in memory, for the life of the process. Signing in
-     * as someone else reused it, so the new user's Calls tab and
-     * Dashboard opened on the previous user's data.
-     *
-     * The outbox is the one that acts. It is queued messages, persisted
-     * to disk — left behind, OutboxFlusher sends them under whoever signs
-     * in next, from their number. One person's words going out in
-     * another's name is worse than stale figures.
-     */
-    queryClient.clear();
-    useOutboxStore.getState().clear();
-    useCallsSeenStore.getState().reset();
+      /**
+       * Everything else a session leaves behind, here rather than in the
+       * Sign out button — which is the same mistake the push token had.
+       * Four things end a session (the button, an expired refresh token, an
+       * admin revoking access, the socket reporting it) and only one of
+       * them ran any of this.
+       *
+       * The query cache is the one that shows: it holds the calls list and
+       * the dashboard, in memory, for the life of the process. Signing in
+       * as someone else reused it, so the new user's Calls tab and
+       * Dashboard opened on the previous user's data.
+       *
+       * The outbox is the one that acts. It is queued messages, persisted
+       * to disk — left behind, OutboxFlusher sends them under whoever signs
+       * in next, from their number. One person's words going out in
+       * another's name is worse than stale figures.
+       */
+      queryClient.clear();
+      useOutboxStore.getState().clear();
+      useCallsSeenStore.getState().reset();
 
-    // Cleared on the way out so a crash after signing out is not still
-    // attributed to the person who just left.
-    setSentryUser(null);
-    set({
-      status: 'signedOut',
-      accessToken: null,
-      refreshToken: null,
-      user: null,
-      signedOutReason: reason ?? null,
+      // Cleared on the way out so a crash after signing out is not still
+      // attributed to the person who just left.
+      setSentryUser(null);
+      set({
+        status: 'signedOut',
+        accessToken: null,
+        refreshToken: null,
+        user: null,
+        signedOutReason: reason ?? null,
+      });
+    })().finally(() => {
+      clearingSession = null;
     });
+    return clearingSession;
   },
 
   updateUser: (patch: Partial<AuthUser>) => {

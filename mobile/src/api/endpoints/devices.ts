@@ -24,5 +24,12 @@ export async function registerDevice(
  * device, and the kind nobody notices until it happens.
  */
 export async function unregisterDevice(token: string): Promise<void> {
-  await apiClient.delete('/devices', { data: { token } });
+  // skipAuthHandling: this runs while the session is being cleared, so a
+  // 401 is the expected answer rather than something to recover from.
+  // Without it the 401 drove a refresh, the failed refresh drove another
+  // clearSession, and sign-out never finished — see client.ts.
+  await apiClient.delete('/devices', {
+    data: { token },
+    skipAuthHandling: true,
+  } as never);
 }

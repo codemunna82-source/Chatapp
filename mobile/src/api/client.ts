@@ -128,8 +128,21 @@ apiClient.interceptors.response.use(
     // Never attempt a refresh-and-retry loop on the refresh call itself, or
     // more than once per original request.
     const isAuthEndpoint = original?.url?.includes('/auth/');
+    /**
+     * Requests made WHILE signing out.
+     *
+     * Detaching this device from the workspace runs inside clearSession,
+     * and a 401 there is expected — the session is ending, that is the
+     * whole point. Left to the handling below it re-entered instead: the
+     * 401 tried a refresh, the refresh failed, onAuthExpired called
+     * clearSession, and clearSession detached again. The outer call never
+     * returned, so the app never reached `signedOut` and sat on
+     * "Reconnecting" with an empty list, forever.
+     */
+    const skipAuthHandling = (original as { skipAuthHandling?: boolean } | undefined)?.skipAuthHandling === true;
     if (
       status === 401 &&
+      !skipAuthHandling &&
       code !== 'RATE_LIMITED' &&
       // Refreshing cannot fix a replaced session — the refresh is refused
       // for the same reason — and trying turns a clear answer into a
