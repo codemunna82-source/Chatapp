@@ -29,6 +29,23 @@ const AUTH_TAG_BYTES = 16;
  */
 const ENVELOPE_VERSION = 'v1';
 
+/**
+ * A misconfigured key, told apart from every other failure.
+ *
+ * Its own type so the error handler can answer 503 with something an
+ * operator can act on. Left as a bare Error, this surfaced as a generic
+ * 500 — "Something went wrong. Please try again." — on whichever admin
+ * action happened to encrypt first, with the real cause visible only in
+ * the server logs. It is a deployment fault, not a bad request, and the
+ * response should say so.
+ */
+export class EncryptionKeyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EncryptionKeyError';
+  }
+}
+
 let cachedKey: Buffer | null = null;
 
 /**
@@ -41,32 +58,80 @@ let cachedKey: Buffer | null = null;
 function loadKey(): Buffer {
   if (cachedKey) return cachedKey;
 
-  // Read live from process.env, falling back to the value validated at
-  // boot. `env` is parsed once at import, so going through it alone would
-  // freeze the key for the lifetime of the process — which makes rotation
-  // impossible without a restart, and makes this module untestable. The
-  // length check below applies whichever source wins, so nothing is
-  // trusted just because it arrived late.
-  const raw = process.env.ENCRYPTION_KEY?.trim() || env.ENCRYPTION_KEY;
-  if (!raw) {
-    throw new Error(
+  const status = encryptionKeyStatus();
+  if (!status.configured) {
+    throw new EncryptionKeyError(
       'ENCRYPTION_KEY is not set — required to store Meta access tokens. Generate one with: openssl rand -base64 32',
     );
   }
-
-  // Try hex first: a 64-char hex string is also valid base64, and
-  // interpreting it as base64 would silently produce the wrong 48 bytes.
-  const looksHex = /^[0-9a-fA-F]{64}$/.test(raw);
-  const key = looksHex ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64');
-
-  if (key.length !== KEY_BYTES) {
-    throw new Error(
-      `ENCRYPTION_KEY must decode to ${KEY_BYTES} bytes, got ${key.length}. Generate one with: openssl rand -base64 32`,
+  if (!status.usable) {
+    throw new EncryptionKeyError(
+      `ENCRYPTION_KEY must decode to ${KEY_BYTES} bytes, got ${status.bytes}. Generate one with: openssl rand -base64 32`,
     );
   }
 
-  cachedKey = key;
-  return key;
+  cachedKey = parseKey(rawKey() as string);
+  return cachedKey;
+}
+
+/**
+ * The configured key, from whichever source wins.
+ *
+ * Read live from process.env, falling back to the value validated at
+ * boot. `env` is parsed once at import, so going through it alone would
+ * freeze the key for the lifetime of the process — which makes rotation
+ * impossible without a restart, and makes this module untestable. The
+ * length check applies whichever source wins, so nothing is trusted just
+ * because it arrived late.
+ */
+function rawKey(): string | null {
+  return process.env.ENCRYPTION_KEY?.trim() || env.ENCRYPTION_KEY || null;
+}
+
+function parseKey(raw: string): Buffer {
+  // Try hex first: a 64-char hex string is also valid base64, and
+  // interpreting it as base64 would silently produce the wrong 48 bytes.
+  const looksHex = /^[0-9a-fA-F]{64}$/.test(raw);
+  return looksHex ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64');
+}
+
+export interface EncryptionKeyStatus {
+  /** Something is set. Says nothing about whether it works. */
+  configured: boolean;
+  /** It decodes to exactly the 32 bytes AES-256 needs. */
+  usable: boolean;
+  /** How many bytes it decoded to, so a wrong key says what is wrong. */
+  bytes: number;
+  /** What it was read as. Fixed enum, never the value. */
+  encoding: 'hex' | 'base64' | 'none';
+}
+
+/**
+ * Whether the key would work, WITHOUT throwing.
+ *
+ * Exists because "set" and "works" are different questions and the health
+ * check was only ever asking the first. A key that is present but decodes
+ * to the wrong length reported as configured: true, so the self-check
+ * said the deployment was fine while every single encrypt threw a 500 —
+ * which a client then showed as "Something went wrong. Please try again."
+ * with nothing anywhere connecting the two. That cost real time to find,
+ * and the information needed to spot it in one glance was already here.
+ *
+ * Returns a byte COUNT and an encoding name, never any part of the key
+ * itself. The correct count is a public constant, so it reveals nothing
+ * an attacker does not already know from reading this file.
+ */
+export function encryptionKeyStatus(): EncryptionKeyStatus {
+  const raw = rawKey();
+  if (!raw) return { configured: false, usable: false, bytes: 0, encoding: 'none' };
+
+  const key = parseKey(raw);
+  return {
+    configured: true,
+    usable: key.length === KEY_BYTES,
+    bytes: key.length,
+    encoding: /^[0-9a-fA-F]{64}$/.test(raw) ? 'hex' : 'base64',
+  };
 }
 
 /** Clears the cached key. For tests, which set ENCRYPTION_KEY per case. */

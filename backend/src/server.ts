@@ -19,6 +19,7 @@ import {
 import { startSocketServer, stopSocketServer } from './sockets/socketServer';
 import { migrateWabaIndexAtBoot } from './modules/whatsapp/wabaIndexMigration';
 import { domainPool } from './modules/tenants/guestDomain.service';
+import { encryptionKeyStatus } from './lib/crypto';
 
 /**
  * What this deployment can and cannot do, said once at boot.
@@ -50,6 +51,11 @@ function logConfigReadiness(): void {
       pushFcm: getPushGateway().isConfigured(),
       turn: hasTurnConfigured(),
       cloudinary: Boolean(env.CLOUDINARY_URL),
+      // Usable, not merely set. A key of the wrong length fails only at
+      // the first encrypt — which is a 500 on whichever admin action
+      // happened to reach it first, hours or weeks after the deploy that
+      // caused it. Printing it at boot puts the answer above the failure.
+      encryptionKeyUsable: encryptionKeyStatus().usable,
     },
     'Integration readiness — false means that feature is off, not that the server is broken',
   );

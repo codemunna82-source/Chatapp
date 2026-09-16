@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import { ApiError } from '../lib/ApiError';
+import { EncryptionKeyError } from '../lib/crypto';
 import { logger } from '../lib/logger';
 import { env } from '../config/env';
 
@@ -19,6 +20,28 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     res.status(err.statusCode).json({
       success: false,
       error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) },
+    });
+    return;
+  }
+
+  /**
+   * A server misconfiguration, answered as one.
+   *
+   * Every route that stores a credential encrypts it, so a bad
+   * ENCRYPTION_KEY surfaced as a generic 500 on whichever of them an
+   * admin reached first — with the real cause only in the logs and the
+   * client showing "Something went wrong. Please try again." Mapped here
+   * rather than in each route because it is one fault with one fix, and
+   * the next feature to store a secret would otherwise reintroduce it.
+   *
+   * The message names the variable and how to generate a valid value. It
+   * cannot leak the key: getting here means the key could not be parsed.
+   */
+  if (err instanceof EncryptionKeyError) {
+    logger.error({ err, path: req.path }, 'Encryption key is misconfigured');
+    res.status(503).json({
+      success: false,
+      error: { code: 'ENCRYPTION_KEY_INVALID', message: err.message },
     });
     return;
   }

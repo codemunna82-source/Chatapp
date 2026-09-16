@@ -1,4 +1,11 @@
-import { encryptSecret, decryptSecret, isEncryptedEnvelope, safeEqual, resetEncryptionKeyCache } from './crypto';
+import {
+  encryptSecret,
+  decryptSecret,
+  isEncryptedEnvelope,
+  safeEqual,
+  resetEncryptionKeyCache,
+  encryptionKeyStatus,
+} from './crypto';
 
 // A fixed 32-byte key so these tests are deterministic. Never a real key.
 const TEST_KEY_BASE64 = Buffer.alloc(32, 7).toString('base64');
@@ -111,5 +118,73 @@ describe('safeEqual', () => {
     expect(safeEqual('abc123', 'abc124')).toBe(false);
     expect(safeEqual('abc', 'abcd')).toBe(false);
     expect(safeEqual('', '')).toBe(true);
+  });
+});
+
+/**
+ * Reporting whether the key WORKS, separately from whether it is set.
+ *
+ * This exists because the two were conflated and it cost real time: a key
+ * of the wrong length reported as configured, so the deployment's own
+ * self-check said everything was fine while every encrypt threw a 500 the
+ * admin UI showed as "Something went wrong. Please try again."
+ */
+describe('encryptionKeyStatus', () => {
+  afterEach(() => {
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 1).toString('base64');
+    resetEncryptionKeyCache();
+  });
+
+  it('reports a good base64 key as usable', () => {
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+    resetEncryptionKeyCache();
+    expect(encryptionKeyStatus()).toEqual({
+      configured: true,
+      usable: true,
+      bytes: 32,
+      encoding: 'base64',
+    });
+  });
+
+  it('recognises a hex key as hex, not as the 48 bytes base64 would make of it', () => {
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('hex');
+    resetEncryptionKeyCache();
+    expect(encryptionKeyStatus()).toMatchObject({ usable: true, bytes: 32, encoding: 'hex' });
+  });
+
+  it('reports a short key as configured but NOT usable, and says how short', () => {
+    // The exact production fault: someone typed a passphrase instead of
+    // generating a key. 'configured' alone called this healthy.
+    process.env.ENCRYPTION_KEY = 'voxo-secret-key!';
+    resetEncryptionKeyCache();
+    const status = encryptionKeyStatus();
+    expect(status.configured).toBe(true);
+    expect(status.usable).toBe(false);
+    expect(status.bytes).toBeLessThan(32);
+  });
+
+  it('reports nothing set', () => {
+    process.env.ENCRYPTION_KEY = '';
+    resetEncryptionKeyCache();
+    expect(encryptionKeyStatus()).toEqual({
+      configured: false,
+      usable: false,
+      bytes: 0,
+      encoding: 'none',
+    });
+  });
+
+  it('agrees with what encryptSecret actually does', () => {
+    // The whole point is that this never disagrees with reality, so the
+    // two are asserted against each other rather than independently.
+    process.env.ENCRYPTION_KEY = Buffer.alloc(12, 1).toString('base64');
+    resetEncryptionKeyCache();
+    expect(encryptionKeyStatus().usable).toBe(false);
+    expect(() => encryptSecret('x')).toThrow(/32 bytes, got 12/);
+
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 1).toString('base64');
+    resetEncryptionKeyCache();
+    expect(encryptionKeyStatus().usable).toBe(true);
+    expect(() => encryptSecret('x')).not.toThrow();
   });
 });

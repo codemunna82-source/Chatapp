@@ -13,6 +13,7 @@ import { isRedisConfigured } from '../../queues/connection';
 import { getPushGateway } from '../../integrations/fcm';
 import { processWebhookDelivery } from './webhook.service';
 import { findMetaAppByWebhookRef, readAppSecret } from '../whatsapp/metaApp.repository';
+import { encryptionKeyStatus } from '../../lib/crypto';
 
 /**
  * The credentials to check one inbound delivery against.
@@ -99,6 +100,7 @@ export const verifyWebhookHandler = asyncHandler(async (req: Request, res: Respo
  */
 export function webhookConfigHealthHandler(req: Request, res: Response): void {
   const host = req.get('host');
+  const encryptionKey = encryptionKeyStatus();
   res.status(200).json({
     success: true,
     data: {
@@ -120,7 +122,21 @@ export function webhookConfigHealthHandler(req: Request, res: Response): void {
       appIdConfigured: env.META_APP_ID.length > 0,
       configIdConfigured: env.META_CONFIG_ID.length > 0,
       registerPinConfigured: env.META_REGISTER_PIN.length > 0,
-      encryptionKeyConfigured: env.ENCRYPTION_KEY.length > 0,
+      encryptionKeyConfigured: encryptionKey.configured,
+      /**
+       * Whether it would actually WORK, which is a different question.
+       *
+       * A key that is set but decodes to the wrong length reported as
+       * configured and nothing else, so this page said the deployment was
+       * fine while every encrypt threw a 500 the client showed as
+       * "Something went wrong". The byte count is what names the fault;
+       * it is a count, never any part of the key, and the correct value
+       * is a public constant anyway.
+       */
+      encryptionKeyUsable: encryptionKey.usable,
+      encryptionKeyBytes: encryptionKey.bytes,
+      encryptionKeyExpectedBytes: 32,
+      encryptionKeyEncoding: encryptionKey.encoding,
       phoneNumberIdConfigured: env.META_PHONE_NUMBER_ID.length > 0,
       mockMode: env.META_MOCK_MODE,
       queueMode: isRedisConfigured() ? 'redis' : 'inline',
