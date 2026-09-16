@@ -1,6 +1,6 @@
 import { Queue, Worker, type Job } from 'bullmq';
 import { Types } from 'mongoose';
-import { getRedisConnection } from './connection';
+import { createBlockingRedisConnection, getRedisConnection } from './connection';
 import { logger } from '../lib/logger';
 import { Subscription, type SubscriptionStatusLabel } from '../modules/subscriptions/subscription.model';
 import { computeCurrentStatus } from '../modules/subscriptions/subscription.repository';
@@ -103,7 +103,9 @@ export function startSubscriptionExpiryWorker(): Worker {
         logger.info(result, 'Subscription expiry sweep transitioned tenants');
       }
     },
-    { connection: getRedisConnection(), concurrency: 1 },
+    // Its own connection, for the same reason as the webhook worker:
+    // a Worker blocks on Redis, and a blocked connection serves nothing else.
+    { connection: createBlockingRedisConnection(), concurrency: 1 },
   );
   worker.on('failed', (job, err) => {
     logger.error({ jobId: job?.id, err }, 'Subscription expiry sweep job failed');
