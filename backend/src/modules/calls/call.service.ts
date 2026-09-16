@@ -63,9 +63,14 @@ export interface ListCallsQuery {
   limit?: number;
 }
 
-export async function listCallsForTenant(tenantId: string, query: ListCallsQuery) {
-  const result = await repo.listCallLogsByTenant(tenantId, query);
-  return { items: await enrichWithContacts(tenantId, result.items), nextCursor: result.nextCursor };
+export async function listCallsForTenant(auth: AuthContext, query: ListCallsQuery) {
+  const result = await repo.listCallLogsByTenant(auth.tenantId, {
+    ...query,
+    // Undefined for a MASTER_ADMIN, who sees the workspace; the assigned
+    // number for everyone else. Exactly what the chat list uses.
+    whatsappPhoneNumberId: visibleWhatsAppPhoneNumberId(auth),
+  });
+  return { items: await enrichWithContacts(auth.tenantId, result.items), nextCursor: result.nextCursor };
 }
 
 export interface InitiateCallResult {

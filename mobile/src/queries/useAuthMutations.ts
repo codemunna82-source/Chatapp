@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import * as authApi from '../api/endpoints/auth';
 import { uploadOwnAvatar, type PickedAvatarFile } from '../api/endpoints/users';
 import { useAuthStore } from '../store/authStore';
@@ -13,7 +13,6 @@ export function useLogin() {
 }
 
 export function useLogout() {
-  const queryClient = useQueryClient();
   const refreshToken = useAuthStore((s) => s.refreshToken);
   const clearSession = useAuthStore((s) => s.clearSession);
 
@@ -30,8 +29,10 @@ export function useLogout() {
       }
     },
     onSettled: async () => {
+      // Clearing the cache is clearSession's job now, for the same reason
+      // detaching the device is: this button is one of four ways a
+      // session ends, and it was the only one doing it.
       await clearSession();
-      queryClient.clear(); // drop every cached query — nothing from the old session should leak into the next login
     },
   });
 }

@@ -8,6 +8,9 @@ import { setSentryUser } from '../lib/sentry';
 import { clearChatCache } from '../storage/chatCache';
 import { clearMediaShapes } from '../storage/mediaShape';
 import { unregisterForPushNotifications } from '../notifications/pushRegistration';
+import { queryClient } from '../queries/queryClient';
+import { useOutboxStore } from './outboxStore';
+import { useCallsSeenStore } from './callsSeenStore';
 
 const CACHED_USER_KEY = 'voxo.cachedUser';
 
@@ -105,6 +108,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // revokes access — is not a cache, it is a leak.
     clearChatCache();
     clearMediaShapes();
+
+    /**
+     * Everything else a session leaves behind, here rather than in the
+     * Sign out button — which is the same mistake the push token had.
+     * Four things end a session (the button, an expired refresh token, an
+     * admin revoking access, the socket reporting it) and only one of
+     * them ran any of this.
+     *
+     * The query cache is the one that shows: it holds the calls list and
+     * the dashboard, in memory, for the life of the process. Signing in
+     * as someone else reused it, so the new user's Calls tab and
+     * Dashboard opened on the previous user's data.
+     *
+     * The outbox is the one that acts. It is queued messages, persisted
+     * to disk — left behind, OutboxFlusher sends them under whoever signs
+     * in next, from their number. One person's words going out in
+     * another's name is worse than stale figures.
+     */
+    queryClient.clear();
+    useOutboxStore.getState().clear();
+    useCallsSeenStore.getState().reset();
+
     // Cleared on the way out so a crash after signing out is not still
     // attributed to the person who just left.
     setSentryUser(null);

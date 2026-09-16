@@ -6,7 +6,7 @@ import { buildIceServers } from './webCall.service';
 
 export const listCallsHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  const result = await callService.listCallsForTenant(auth.tenantId, req.query as never);
+  const result = await callService.listCallsForTenant(auth, req.query as never);
   res.status(200).json({ success: true, data: result.items, meta: { nextCursor: result.nextCursor } });
 });
 

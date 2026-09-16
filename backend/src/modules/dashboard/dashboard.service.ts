@@ -58,11 +58,47 @@ export interface DashboardSummary {
  * embedded copy here would silently widen who can see tenant billing data.
  * The mobile dashboard screen fetches those separately, gated by role.
  */
-export async function getDashboardSummary(tenantId: string): Promise<DashboardSummary> {
-  const cached = summaryCache.get(tenantId);
+export async function getDashboardSummary(
+  tenantId: string,
+  /**
+   * The number this reader is limited to, or undefined for a
+   * MASTER_ADMIN who sees the whole workspace.
+   *
+   * The chat list has always scoped by this and the dashboard never did,
+   * so a member assigned to one number was shown the workspace's totals:
+   * every contact, every message, every colleague's busiest customers by
+   * name. A count is a smaller leak than a transcript, but "Most active
+   * contacts" is a list of names, and it was the wrong names.
+   */
+  whatsappPhoneNumberId?: string,
+): Promise<DashboardSummary> {
+  // The scope is part of the key, not just the tenant. Keyed on the
+  // tenant alone, the first reader's summary was served to the next one —
+  // so an admin opening the dashboard would cache the workspace-wide
+  // numbers and hand them to every member for the next minute, which is
+  // the very leak this scoping exists to close.
+  const cacheKey = `${tenantId}:${whatsappPhoneNumberId ?? 'all'}`;
+  const cached = summaryCache.get(cacheKey);
   if (cached) return cached;
 
   const tenantObjectId = new Types.ObjectId(tenantId);
+
+  /**
+   * Messages carry no number of their own — only their conversation does
+   * — so a scoped reader's message aggregations are filtered by the
+   * conversations on that number. One extra query, and only for a scoped
+   * reader; an admin's path is untouched.
+   */
+  const scope = whatsappPhoneNumberId ? new Types.ObjectId(whatsappPhoneNumberId) : null;
+  const scopedConversations = scope
+    ? await Conversation.find({ tenantId: tenantObjectId, whatsappPhoneNumberId: scope })
+        .select('_id contactId')
+        .lean()
+    : null;
+  const conversationScope = scopedConversations
+    ? { conversationId: { $in: scopedConversations.map((c) => c._id) } }
+    : {};
+  const conversationMatch = scope ? { whatsappPhoneNumberId: scope } : {};
   const since = new Date(Date.now() - TIME_SERIES_DAYS * 24 * 60 * 60 * 1000);
 
   const startOfToday = new Date();
@@ -71,17 +107,22 @@ export async function getDashboardSummary(tenantId: string): Promise<DashboardSu
 
   const [contactsTotal, conversationStats, messageStats, messagesByDayRaw, todayRaw, responseRaw, topContactsRaw] =
     await Promise.all([
-    Contact.countDocuments({ tenantId: tenantObjectId }),
+    // A contact belongs to the workspace, not to a number, so a scoped
+    // reader is counted the only way that means anything here: the
+    // distinct people they actually have a conversation with.
+    scopedConversations
+      ? Promise.resolve(new Set(scopedConversations.map((c) => String(c.contactId))).size)
+      : Contact.countDocuments({ tenantId: tenantObjectId }),
     Conversation.aggregate<{ _id: string; count: number; unread: number }>([
-      { $match: { tenantId: tenantObjectId } },
+      { $match: { tenantId: tenantObjectId, ...conversationMatch } },
       { $group: { _id: '$status', count: { $sum: 1 }, unread: { $sum: '$unreadCount' } } },
     ]),
     Message.aggregate<{ _id: { direction: string; failed: boolean }; count: number }>([
-      { $match: { tenantId: tenantObjectId } },
+      { $match: { tenantId: tenantObjectId, ...conversationScope } },
       { $group: { _id: { direction: '$direction', failed: { $eq: ['$status', 'FAILED'] } }, count: { $sum: 1 } } },
     ]),
     Message.aggregate<{ _id: { day: string; direction: string }; count: number }>([
-      { $match: { tenantId: tenantObjectId, createdAt: { $gte: since } } },
+      { $match: { tenantId: tenantObjectId, ...conversationScope, createdAt: { $gte: since } } },
       {
         $group: {
           _id: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, direction: '$direction' },
@@ -94,7 +135,7 @@ export async function getDashboardSummary(tenantId: string): Promise<DashboardSu
     // Today and yesterday in one pass — two round trips for two adjacent
     // buckets would be the same query twice.
     Message.aggregate<{ _id: { day: string; direction: string }; count: number }>([
-      { $match: { tenantId: tenantObjectId, createdAt: { $gte: startOfYesterday } } },
+      { $match: { tenantId: tenantObjectId, ...conversationScope, createdAt: { $gte: startOfYesterday } } },
       {
         $group: {
           _id: {
@@ -110,7 +151,7 @@ export async function getDashboardSummary(tenantId: string): Promise<DashboardSu
     // AFTER the conversation's most recent inbound. Restricted to the
     // window so a long-dead chat cannot skew the current picture.
     Message.aggregate<{ minutes: number }>([
-      { $match: { tenantId: tenantObjectId, createdAt: { $gte: since } } },
+      { $match: { tenantId: tenantObjectId, ...conversationScope, createdAt: { $gte: since } } },
       // No $sort here: $min scans the whole group regardless of input
       // order, so sorting first was a blocking sort of every message in
       // the window whose result the very next stage discarded.
@@ -132,7 +173,7 @@ export async function getDashboardSummary(tenantId: string): Promise<DashboardSu
     ]),
 
     Message.aggregate<{ _id: Types.ObjectId; messages: number }>([
-      { $match: { tenantId: tenantObjectId, createdAt: { $gte: since } } },
+      { $match: { tenantId: tenantObjectId, ...conversationScope, createdAt: { $gte: since } } },
       { $group: { _id: '$conversationId', messages: { $sum: 1 } } },
       { $sort: { messages: -1 } },
       { $limit: 5 },
@@ -231,7 +272,7 @@ export async function getDashboardSummary(tenantId: string): Promise<DashboardSu
     messages,
     messagesByDay,
   };
-  summaryCache.set(tenantId, summary);
+  summaryCache.set(cacheKey, summary);
   return summary;
 }
 

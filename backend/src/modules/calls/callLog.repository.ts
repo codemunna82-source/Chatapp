@@ -26,10 +26,24 @@ export async function findCallLogByIdAndTenant(id: string, tenantId: string): Pr
 
 export async function listCallLogsByTenant(
   tenantId: string,
-  opts: { cursor?: string; limit?: number } = {},
+  opts: { cursor?: string; limit?: number; whatsappPhoneNumberId?: string } = {},
 ): Promise<{ items: CallLogDoc[]; nextCursor: string | null }> {
   const limit = Math.min(opts.limit ?? 30, 100);
   const filter: Record<string, unknown> = { tenantId };
+  /**
+   * The same number scope the chat list has always applied.
+   *
+   * Without it a member assigned to one number saw every call in the
+   * workspace — their colleagues' customers, by name, with the times they
+   * called. The chats they could not open were right there in the Calls
+   * tab, which is not a smaller leak for being on a different screen.
+   *
+   * Rows written before this field existed have no number to match and
+   * therefore drop out of a scoped list. That is the right direction for
+   * a fix of this kind: a member seeing too little is a complaint, and
+   * seeing too much is the bug.
+   */
+  if (opts.whatsappPhoneNumberId) filter.whatsappPhoneNumberId = opts.whatsappPhoneNumberId;
   if (opts.cursor && Types.ObjectId.isValid(opts.cursor)) {
     filter._id = { $lt: new Types.ObjectId(opts.cursor) };
   }

@@ -1,9 +1,10 @@
 import { create } from 'zustand';
-import { getJSON, setJSON } from '../storage/mmkv';
+import { getJSON, setJSON, remove } from '../storage/mmkv';
 
 const KEY = 'voxo.callsSeenAt';
 
 interface CallsSeenState {
+  reset: () => void;
   /** ISO timestamp of the last time the Calls tab was opened, or null. */
   seenAt: string | null;
   markSeen: () => void;
@@ -28,5 +29,18 @@ export const useCallsSeenStore = create<CallsSeenState>((set) => ({
     const now = new Date().toISOString();
     setJSON(KEY, now);
     set({ seenAt: now });
+  },
+
+  /**
+   * Forgotten on sign-out.
+   *
+   * "Have I looked at this yet" is a property of the phone, but it is
+   * also a property of WHO was holding it: carried across a sign-out, the
+   * next person's Calls tab opens with the previous one's badge already
+   * cleared, hiding calls they have never seen.
+   */
+  reset: () => {
+    remove(KEY);
+    set({ seenAt: null });
   },
 }));
