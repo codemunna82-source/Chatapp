@@ -9,6 +9,7 @@ import { Platform } from 'react-native';
 import { DEFAULT_RINGTONE_ID, ringtoneById } from './ringtones';
 import { useRingtoneStore } from '../store/ringtoneStore';
 import { chatDarkColors } from '../theme/chatTheme';
+import { markCallEnded, wasCallEnded } from './endedCalls';
 
 /**
  * The incoming-call notification — the one with Accept and Reject on it.
@@ -91,6 +92,18 @@ export interface IncomingCallNotification {
  * replaces rather than stacks.
  */
 export async function displayIncomingCall(call: IncomingCallNotification): Promise<void> {
+  /**
+   * A call this phone has already finished with never rings again.
+   *
+   * Guarded here rather than at the two call sites, because neither can
+   * answer the question by itself: the foreground one consults the call
+   * store, which a decline has already reset to idle, and the background
+   * one runs in a fresh module graph with no store at all. A duplicate
+   * push after a decline therefore got through both and put the ring back
+   * up — looping, ongoing, until it timed out. See endedCalls.ts.
+   */
+  if (wasCallEnded(call.callId)) return;
+
   if (Platform.OS !== 'android') return;
 
   // The channel the push named, or this device's own choice if it did not
@@ -187,6 +200,11 @@ export async function displayIncomingCall(call: IncomingCallNotification): Promi
 /** Takes the ring back — answered elsewhere, rejected, cancelled or timed
  *  out. Harmless when there is nothing showing. */
 export async function cancelIncomingCall(callId: string): Promise<void> {
+  // Before the platform check and before the cancel itself: this is the
+  // one function every ending goes through — answered, declined,
+  // cancelled by the caller, timed out — which makes it the only place
+  // that can promise a late duplicate push will not restart the ring.
+  markCallEnded(callId);
   if (Platform.OS !== 'android') return;
   try {
     await notifee.cancelNotification(callNotificationId(callId));

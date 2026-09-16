@@ -12,6 +12,7 @@ import {
   emitWebCallInvite,
   emitWebCallReject,
 } from '../sockets/actions';
+import { markCallEnded } from './endedCalls';
 
 /**
  * The one live call this device is handling.
@@ -490,6 +491,11 @@ export const useCallStore = create<CallState>((set, get) => ({
     closeSession();
     set({ ...IDLE });
     if (!callId) return;
+    // Recorded here as well as in cancelIncomingCall, because that one
+    // runs from the ringer's cleanup and the ringer is only mounted when
+    // the call overlay is. This path has to hold on its own, or a
+    // duplicate push after this decline starts the phone ringing again.
+    markCallEnded(callId);
     if (channel === 'web') {
       // Over the socket, not Meta's REST API — these are different calls
       // with different far ends, and there is no Meta call id here.
@@ -510,6 +516,11 @@ export const useCallStore = create<CallState>((set, get) => ({
     closeSession();
     set({ ...IDLE });
     if (!callId) return;
+    // Recorded here as well as in cancelIncomingCall, because that one
+    // runs from the ringer's cleanup and the ringer is only mounted when
+    // the call overlay is. This path has to hold on its own, or a
+    // duplicate push after this decline starts the phone ringing again.
+    markCallEnded(callId);
     if (channel === 'web') {
       emitWebCallEnd(callId);
       return;

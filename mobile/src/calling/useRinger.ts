@@ -19,6 +19,17 @@ import { useCallStore } from './callStore';
 const VIBRATION_PATTERN = [0, 700, 900];
 
 let player: AudioPlayer | null = null;
+/**
+ * Which ring is current.
+ *
+ * Bumped on every start AND every stop, so an asynchronous lookup that
+ * resolves late can tell whether the ring it was fetching a sound for is
+ * still wanted. Without it, declining a call during the custom sound's
+ * native round trip let the lookup finish afterwards and start a looping
+ * player that nothing was left to stop — the phone rang on, with the call
+ * already gone.
+ */
+let ringGeneration = 0;
 /** What `player` holds — the ringtone id, or the custom sound's URI, so a
  *  changed choice rebuilds it and an unchanged one does not. */
 let loadedSource: string | null = null;
@@ -51,6 +62,7 @@ function play(source: number | string, key: string): void {
 }
 
 function startSound(): void {
+  const generation = ++ringGeneration;
   try {
     // Unlike the message chime, this one deliberately does NOT force
     // playsInSilentMode: a phone on silent should not start ringing out
@@ -74,7 +86,8 @@ function startSound(): void {
      */
     void customSoundUri()
       .then((uri) => {
-        if (uri) play(uri, uri);
+        // Only if this is still the ring that asked for it.
+        if (uri && generation === ringGeneration) play(uri, uri);
       })
       .catch(() => {
         // No channel, or a sound that will not open. The vibration and
@@ -87,6 +100,9 @@ function startSound(): void {
 }
 
 function stopSound(): void {
+  // First, and outside the try: a lookup still in flight must be
+  // invalidated even if pausing throws.
+  ringGeneration++;
   try {
     player?.pause();
   } catch {
