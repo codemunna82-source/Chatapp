@@ -226,6 +226,61 @@ metaAppRouter.post(
   }),
 );
 
+/**
+ * A fresh verify token for an app whose first one was not captured.
+ *
+ * The token is shown once, at creation, and is stored encrypted — there is
+ * no reading it back. That was the whole design and it was missing its
+ * other half: an admin who closed the panel before copying had no way
+ * forward at all, because there is no way to read the token and no way to
+ * delete the app and start again. One misread screen and the Business
+ * Manager was unusable.
+ *
+ * Minting a new one is safe because the token proves nothing on its own.
+ * It is matched against hub.verify_token on Meta's subscription challenge
+ * and never again; it does not authenticate deliveries, which are checked
+ * by HMAC against the app secret. So the cost of rotating it is precisely
+ * that the callback URL has to be saved in Meta's dashboard once more —
+ * which is what the admin was going to do anyway.
+ *
+ * POST rather than GET because it CHANGES the token: a GET that quietly
+ * broke an already-configured webhook would be the worse mistake.
+ */
+metaAppRouter.post(
+  '/:id/verify-token',
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const app = await findMetaAppByIdAndTenant(req.params.id as string, auth.tenantId);
+    if (!app) throw ApiError.notFound('META_APP_NOT_FOUND', 'Business Manager not found');
+
+    const verifyToken = randomBytes(24).toString('base64url');
+    app.verifyTokenEnc = encryptSecret(verifyToken);
+    await app.save();
+
+    await recordAudit({
+      tenantId: auth.tenantId,
+      actorUserId: auth.userId,
+      action: 'meta_app.verify_token.rotate',
+      targetType: 'MetaApp',
+      targetId: app._id,
+      // That it was rotated, never the value. An audit trail is read by people.
+      metadata: { name: app.name, appId: app.appId },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        ...toPublic(app, baseUrlFor(req)),
+        // Once again exactly once, and the response says what has to
+        // happen next — the old token stops working the moment this is
+        // saved, so an already-verified webhook must be re-saved in Meta.
+        verifyToken,
+        mustReconfigureInMeta: true,
+      },
+    });
+  }),
+);
+
 metaAppRouter.patch(
   '/:id',
   validate({ body: updateSchema }),

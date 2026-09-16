@@ -20,8 +20,23 @@ export async function findMetaAppByIdAndTenant(id: string, tenantId: string): Pr
   return MetaApp.findOne({ _id: id, tenantId }).select('+appSecretEnc +verifyTokenEnc +accessTokenEnc');
 }
 
+/**
+ * The workspace's Business Managers, for the admin list.
+ *
+ * Selects the encrypted fields even though the list never shows them,
+ * because what it DOES show is whether each is set — and both are
+ * `select: false`, so without this they came back undefined and every
+ * saved credential was reported as "Not set". It read as a failed save on
+ * a Business Manager that was working perfectly, which is the kind of
+ * thing an admin fixes by re-entering a secret that was never wrong.
+ *
+ * toPublic() reduces them to booleans before anything leaves the server,
+ * so the values still never reach a client.
+ */
 export async function listMetaAppsForTenant(tenantId: string): Promise<MetaAppDoc[]> {
-  return MetaApp.find({ tenantId }).sort({ createdAt: 1 });
+  return MetaApp.find({ tenantId })
+    .select('+appSecretEnc +accessTokenEnc')
+    .sort({ createdAt: 1 });
 }
 
 /**
