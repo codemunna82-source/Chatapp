@@ -52,6 +52,7 @@ import { hasMovedToWebChat } from './webChatRouting';
 import { guestSessionExpiresAt } from './guestSessionExpiry';
 import { findCustomerFacingNameForPhoneNumber } from '../users/user.repository';
 import { guestChatUrl } from '../tenants/guestDomain';
+import { sendGuestLinkInvitationNow, type InvitationResult } from './guestAutoReply.service';
 import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
 import {
   CONTENT_POLICY_CODE,
@@ -348,6 +349,39 @@ export function assertGuestNotBlocked(guest: GuestContext): void {
  * and minting a new token would turn all of them into dead links that are
  * just as likely to be tapped as the newest one.
  */
+/**
+ * Sends the private-chat invitation to this customer on WhatsApp, now,
+ * because an agent asked for it.
+ *
+ * The automatic reply is the normal path, and it fails in ways nobody in
+ * the app can see or fix — Meta accepts a template and declines to deliver
+ * it minutes later; the cap is spent on an invitation that never arrived;
+ * the customer wrote in before the workspace had finished configuring
+ * anything. Each leaves an agent looking at a chat where the customer was
+ * never given the link, and nothing to do about it. This is the something.
+ *
+ * Gated on CHAT_SEND by its route, like every other way of putting a
+ * message in front of a customer, and scoped to a conversation this agent
+ * may see — the invitation carries that customer's own private token.
+ */
+export async function sendGuestLinkInvitation(
+  auth: AuthContext,
+  conversationId: string,
+): Promise<InvitationResult> {
+  const conversation = await findConversationByIdAndTenant(conversationId, auth.tenantId);
+  const scope = visibleWhatsAppPhoneNumberId(auth);
+  if (!conversation || (scope && String(conversation.whatsappPhoneNumberId) !== scope)) {
+    throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
+  }
+
+  return sendGuestLinkInvitationNow({
+    tenantId: auth.tenantId,
+    conversationId,
+    contactId: String(conversation.contactId),
+    whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
+  });
+}
+
 export async function issueGuestLinkForConversation(
   auth: AuthContext,
   conversationId: string,

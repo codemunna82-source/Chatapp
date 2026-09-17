@@ -48,6 +48,29 @@ export async function issueGuestLink(conversationId: string): Promise<IssuedGues
   return res.data.data;
 }
 
+export interface SentInvitation {
+  /** What actually went out: the approved template, or text when it could not. */
+  sentVia: 'text' | 'template' | 'text-after-template-failed';
+  /** Which invitation this was for this customer, counting from 1. */
+  attempt: number;
+}
+
+/**
+ * Sends the private-chat invitation to the customer on WhatsApp, by hand.
+ *
+ * The automatic reply covers the normal case. This is for when it did not
+ * arrive — Meta accepted the template and refused to deliver it, the cap
+ * was spent on one that never landed, the workspace was not configured
+ * yet when they wrote in. Re-uses the customer's existing link rather than
+ * minting a new one, so copies already sent keep working.
+ */
+export async function sendGuestLinkInvitation(conversationId: string): Promise<SentInvitation> {
+  const res = await apiClient.post<ApiSuccess<SentInvitation>>(
+    `/conversations/${conversationId}/guest/link/invite`,
+  );
+  return res.data.data;
+}
+
 export async function revokeGuestLink(conversationId: string): Promise<{ revoked: number }> {
   const res = await apiClient.delete<ApiSuccess<{ revoked: number }>>(
     `/conversations/${conversationId}/guest/link`,
