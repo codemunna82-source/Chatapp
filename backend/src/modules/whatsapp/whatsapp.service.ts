@@ -735,9 +735,25 @@ export async function registerPhoneNumberForTenant(
     // Meta's own message is the useful part here — "Unsupported get request"
     // for a wrong id, "Invalid OAuth access token" for a bad token. Passing
     // it through is what makes this endpoint worth calling.
+    //
+    // But on its own it is also the message that cost the most time. Meta
+    // says a number "does not exist, or missing permissions" in exactly the
+    // same words whether the id is wrong or the id is fine and the token
+    // simply belongs to a different Business Manager — and it cannot tell
+    // them apart, because from that token's side the number genuinely is
+    // not there. The second is by far the more common of the two here, and
+    // it is the one nobody guesses, so it gets said out loud.
+    const belongsElsewhere =
+      err instanceof Error && /does not exist|missing permissions|Unsupported get request/i.test(err.message);
+    const hint = !belongsElsewhere
+      ? ''
+      : metaApp
+        ? ` Check the id is right, and that it is a number inside "${metaApp.name}" — a token from one Business Manager cannot see a number in another.`
+        : ' If this number lives in one of your Business Managers, set that Business Manager on it first: this was verified with the server default credentials, and a token from one Business Manager cannot see a number in another.';
+
     throw ApiError.badRequest(
       'WHATSAPP_NUMBER_VERIFICATION_FAILED',
-      `Meta rejected this phone number id: ${err instanceof Error ? err.message : 'unknown error'}`,
+      `Meta rejected this phone number id: ${err instanceof Error ? err.message : 'unknown error'}${hint}`,
     );
   }
 
