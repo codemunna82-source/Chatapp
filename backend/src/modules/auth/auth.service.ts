@@ -61,7 +61,7 @@ async function issueTokenPair(
   role: 'MASTER_ADMIN' | 'SUB_USER',
   family: string,
   meta: RequestMeta,
-): Promise<{ accessToken: string; refreshToken: string }> {
+): Promise<{ accessToken: string; refreshToken: string; jti: string }> {
   const accessToken = signAccessToken({ sub: userId, tenantId, role, family });
 
   const jti = randomUUID();
@@ -78,7 +78,11 @@ async function issueTokenPair(
     userAgent: meta.userAgent,
   });
 
-  return { accessToken, refreshToken };
+  // The jti goes back to the caller so a rotation can record WHICH token
+  // replaced the old one. It used to be private to this function, and the
+  // rotation below wrote the old token's own jti into replacedByJti — a
+  // field pointing at itself.
+  return { accessToken, refreshToken, jti };
 }
 
 export type AuthUser = AuthTokens['user'];
@@ -187,6 +191,35 @@ export async function login(identifier: string, password: string, meta: RequestM
     }
   }
 
+  /**
+   * One device at a time: this sign-in takes the account.
+   *
+   * Every refresh token the account already had is revoked, and the
+   * user's active family becomes this one — so the previous device is
+   * refused on its very next request (see authContext.service.ts) and
+   * cannot refresh its way back in either.
+   *
+   * BEFORE the new pair is minted, and that order is the whole point.
+   * This sweep matches `revokedAt: null`, which in Mongo matches a field
+   * that is absent as well as one that is null — so running it after
+   * issueTokenPair revoked the token this login had just handed out,
+   * about five milliseconds old. Every sign-in produced a refresh token
+   * that was already dead: the session worked until the access token
+   * expired, then the first refresh presented a revoked token with no
+   * replacement, which is precisely the shape of a stolen token being
+   * replayed. Reuse detection did its job, revoked the family, and
+   * answered TOKEN_REUSE_DETECTED — and the app, correctly, signed the
+   * user out. On every device, every time, for as long as an access
+   * token lasts.
+   *
+   * Also before lastLoginAt is saved, so a crash between the two leaves
+   * the account signed out rather than signed in twice.
+   */
+  await RefreshToken.updateMany(
+    { userId: user._id, revokedAt: null },
+    { $set: { revokedAt: new Date() } },
+  );
+
   const family = randomUUID();
   const { accessToken, refreshToken } = await issueTokenPair(
     String(user._id),
@@ -196,21 +229,6 @@ export async function login(identifier: string, password: string, meta: RequestM
     meta,
   );
 
-  /**
-   * One device at a time: this sign-in takes the account.
-   *
-   * Every refresh token the account already had is revoked, and the
-   * user's active family becomes this one — so the previous device is
-   * refused on its very next request (see authContext.service.ts) and
-   * cannot refresh its way back in either.
-   *
-   * Done BEFORE lastLoginAt is saved so a crash between the two leaves
-   * the account signed out rather than signed in twice.
-   */
-  await RefreshToken.updateMany(
-    { userId: user._id, revokedAt: null },
-    { $set: { revokedAt: new Date() } },
-  );
   user.activeSessionFamily = family;
   user.lastLoginAt = new Date();
   await user.save();
@@ -340,7 +358,11 @@ export async function refresh(refreshTokenRaw: string, meta: RequestMeta): Promi
     );
   }
 
-  const { accessToken, refreshToken: newRefreshToken } = await issueTokenPair(
+  const {
+    accessToken,
+    refreshToken: newRefreshToken,
+    jti: newJti,
+  } = await issueTokenPair(
     String(user._id),
     String(user.tenantId),
     user.role as 'MASTER_ADMIN' | 'SUB_USER',
@@ -348,9 +370,16 @@ export async function refresh(refreshTokenRaw: string, meta: RequestMeta): Promi
     meta,
   );
 
-  record.revokedAt = new Date();
-  await record.save();
-  await RefreshToken.updateOne({ jti: record.jti }, { $set: { replacedByJti: claims.jti } });
+  // One write, and pointing at the RIGHT token. This was two writes, the
+  // second of which set replacedByJti to `claims.jti` — the jti of the
+  // token being rotated, which is this record's own. The field meant to
+  // say "here is what replaced me" said "here is me", so the lineage
+  // could not be followed and isConcurrentRefresh was reading a value
+  // that was true of every rotated token regardless.
+  await RefreshToken.updateOne(
+    { jti: record.jti },
+    { $set: { revokedAt: new Date(), replacedByJti: newJti } },
+  );
 
   return {
     accessToken,
