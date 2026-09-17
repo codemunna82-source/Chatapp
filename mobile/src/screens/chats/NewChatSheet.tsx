@@ -7,7 +7,7 @@ import { SearchBar } from '../../components/SearchBar';
 import { ContactFormSheet } from '../contacts/ContactFormSheet';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
-import { useContacts, flattenContacts, useDeleteContact } from '../../queries/useContacts';
+import { useContacts, flattenContacts, useDeleteContacts } from '../../queries/useContacts';
 import { useStartConversation } from '../../queries/useConversations';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { getApiErrorMessage } from '../../api/client';
@@ -39,8 +39,37 @@ export function NewChatSheet({ visible, onClose, onOpenConversation }: NewChatSh
   const [error, setError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [contactFormOpen, setContactFormOpen] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const deleteContact = useDeleteContact();
+  /**
+   * Selection mode, WhatsApp's: a header control turns it on, a long
+   * press turns it on with that row already ticked, and every tap
+   * afterwards ticks instead of opening.
+   *
+   * It replaced a trash button on every row. One-at-a-time was the wrong
+   * shape for what this list is actually used for: an agent cannot open a
+   * chat from here at all until the customer has written in, so the
+   * contacts that accumulate are ones nobody will ever tap — and clearing
+   * them one confirmation at a time is the work, not the deleting.
+   */
+  const [selecting, setSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const deleteContacts = useDeleteContacts();
+  const deleting = deleteContacts.isPending;
+
+  const exitSelection = useCallback(() => {
+    setSelecting(false);
+    setSelectedIds([]);
+  }, []);
+
+  const toggleSelected = useCallback((contact: Contact) => {
+    setSelectedIds((prev) =>
+      prev.includes(contact.id) ? prev.filter((id) => id !== contact.id) : [...prev, contact.id],
+    );
+  }, []);
+
+  const startSelection = useCallback((contact: Contact) => {
+    setSelecting(true);
+    setSelectedIds([contact.id]);
+  }, []);
 
   const contactsQuery = useContacts({ search: debouncedSearch || undefined });
   const contacts = useMemo(() => flattenContacts(contactsQuery.data), [contactsQuery.data]);
@@ -73,55 +102,71 @@ export function NewChatSheet({ visible, onClose, onOpenConversation }: NewChatSh
   );
 
   /**
-   * Removing a contact from the workspace.
+   * Removing the selected contacts from the workspace.
    *
-   * Confirmed, and the confirmation says plainly that the chat goes with
-   * them — because it does: the server deletes the contact's
+   * Confirmed, and the confirmation says plainly that the chats go with
+   * them — because they do: the server deletes each contact's
    * conversations and every message in them (contact.service.ts). That is
-   * not obvious from a button labelled "delete contact", and it cannot be
-   * undone, so it is spelled out before rather than discovered after.
+   * not obvious from a button labelled "delete", and it cannot be undone,
+   * so it is spelled out before rather than discovered after.
    *
-   * Only VOXO's copy. The customer's own WhatsApp thread is untouched —
+   * Only VOXO's copy. The customers' own WhatsApp threads are untouched —
    * nothing can recall what Meta has already delivered.
+   *
+   * The count is in the title because it is the one thing that makes this
+   * different from the old one-row button, and a tap meant for a tick
+   * that lands on delete should say "37 contacts" loudly enough to stop
+   * the next tap.
    */
-  const handleDelete = useCallback(
-    (contact: Contact) => {
-      const label = contact.name || contact.phone;
-      Alert.alert(
-        `Delete ${label}?`,
-        'This removes the contact AND the whole chat with them — every message, from this app only. ' +
-          'Their own WhatsApp is not affected. This cannot be undone.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Delete',
-            style: 'destructive',
-            onPress: () => {
-              setDeletingId(contact.id);
-              deleteContact.mutate(contact.id, {
-                onError: (err) => {
-                  Alert.alert('Not deleted', getApiErrorMessage(err, 'Could not delete that contact.'));
-                },
-                onSettled: () => setDeletingId(null),
-              });
-            },
+  const handleDeleteSelected = useCallback(() => {
+    const ids = selectedIds;
+    if (ids.length === 0 || deleting) return;
+    const many = ids.length > 1;
+    Alert.alert(
+      many ? `Delete ${ids.length} contacts?` : 'Delete this contact?',
+      (many
+        ? 'This removes these contacts AND every chat with them — every message, from this app only. '
+        : 'This removes the contact AND the whole chat with them — every message, from this app only. ') +
+        'Their own WhatsApp is not affected. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            deleteContacts.mutate(ids, {
+              onSuccess: ({ failed }) => {
+                if (failed > 0) {
+                  Alert.alert(
+                    'Some were not deleted',
+                    `${failed} of ${ids.length} could not be deleted. The rest are gone.`,
+                  );
+                }
+              },
+              onError: (err) => {
+                Alert.alert('Not deleted', getApiErrorMessage(err, 'Could not delete those contacts.'));
+              },
+              onSettled: exitSelection,
+            });
           },
-        ],
-      );
-    },
-    [deleteContact],
-  );
+        },
+      ],
+    );
+  }, [selectedIds, deleting, deleteContacts, exitSelection]);
 
   const renderItem = useCallback(
     ({ item }: { item: Contact }) => {
       const label = item.name || item.phone;
+      const ticked = selectedIds.includes(item.id);
       return (
         <Pressable
-          onPress={() => handlePick(item)}
-          disabled={Boolean(openingId)}
+          onPress={() => (selecting ? toggleSelected(item) : handlePick(item))}
+          onLongPress={() => (selecting ? toggleSelected(item) : startSelection(item))}
+          disabled={Boolean(openingId) || deleting}
           style={[styles.row, { paddingHorizontal: spacing.lg }]}
-          accessibilityRole="button"
-          accessibilityLabel={`Start a chat with ${label}`}
+          accessibilityRole={selecting ? 'checkbox' : 'button'}
+          accessibilityState={selecting ? { checked: ticked } : undefined}
+          accessibilityLabel={selecting ? label : `Start a chat with ${label}`}
         >
           {({ pressed }) => (
             <View style={[styles.rowInner, { opacity: pressed ? 0.6 : 1 }]}>
@@ -138,49 +183,108 @@ export function NewChatSheet({ visible, onClose, onOpenConversation }: NewChatSh
               </View>
               {openingId === item.id ? <ActivityIndicator color={colors.primary} size="small" /> : null}
 
-              {/* Its own control rather than a swipe or a long press: the
-                  row's job is to open a chat, and a second action nobody
-                  can see is a second action nobody uses. */}
-              {deletingId === item.id ? (
-                <ActivityIndicator color={colors.danger} size="small" />
-              ) : (
-                <Pressable
-                  onPress={() => handleDelete(item)}
-                  disabled={Boolean(openingId) || Boolean(deletingId)}
-                  hitSlop={10}
-                  style={styles.deleteButton}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Delete ${label} and the chat with them`}
-                >
-                  {({ pressed: deletePressed }) => (
-                    <Ionicons
-                      name="trash-outline"
-                      size={20}
-                      color={colors.danger}
-                      style={{ opacity: deletePressed ? 0.5 : 1 }}
-                    />
-                  )}
-                </Pressable>
-              )}
+              {/* The tick, and nothing else. A delete control on the row
+                  as well would give two ways to destroy a chat from one
+                  list, one of them a single tap. */}
+              {selecting ? (
+                <Ionicons
+                  name={ticked ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={24}
+                  color={ticked ? colors.primary : colors.textTertiary}
+                />
+              ) : null}
             </View>
           )}
         </Pressable>
       );
     },
-    [handlePick, handleDelete, openingId, deletingId, colors, spacing, typography],
+    [
+      handlePick,
+      openingId,
+      selecting,
+      selectedIds,
+      toggleSelected,
+      startSelection,
+      deleting,
+      colors,
+      spacing,
+      typography,
+    ],
   );
 
   return (
     <>
-      <AppBottomSheet ref={sheetRef} snapPoints={SNAP_POINTS} onDismiss={onClose}>
-        <View style={{ paddingHorizontal: spacing.lg }}>
-          <Text style={[typography.heading, { color: colors.textPrimary }]}>New chat</Text>
+      {/* Selection is cleared on the way out, not by an effect watching
+          `visible`: reopening the sheet to find rows still ticked from
+          last time is a delete waiting to happen, and the sheet's own
+          dismiss is the one event that covers both ways it can close. */}
+      <AppBottomSheet
+        ref={sheetRef}
+        snapPoints={SNAP_POINTS}
+        onDismiss={() => {
+          exitSelection();
+          onClose();
+        }}
+      >
+        <View style={[styles.header, { paddingHorizontal: spacing.lg }]}>
+          {selecting ? (
+            <>
+              <Pressable
+                onPress={exitSelection}
+                disabled={deleting}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel selection"
+              >
+                <Ionicons name="close" size={24} color={colors.textPrimary} />
+              </Pressable>
+              <Text style={[typography.heading, { color: colors.textPrimary, flex: 1, marginLeft: spacing.md }]}>
+                {selectedIds.length === 0 ? 'Select contacts' : `${selectedIds.length} selected`}
+              </Text>
+              {deleting ? (
+                <ActivityIndicator color={colors.danger} size="small" />
+              ) : (
+                <Pressable
+                  onPress={handleDeleteSelected}
+                  disabled={selectedIds.length === 0}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${selectedIds.length} selected contacts and their chats`}
+                >
+                  <Ionicons
+                    name="trash-outline"
+                    size={22}
+                    // Dimmed rather than hidden with nothing selected: a
+                    // control that appears only once you have guessed the
+                    // gesture is a control nobody finds.
+                    color={selectedIds.length === 0 ? colors.textTertiary : colors.danger}
+                  />
+                </Pressable>
+              )}
+            </>
+          ) : (
+            <>
+              <Text style={[typography.heading, { color: colors.textPrimary, flex: 1 }]}>New chat</Text>
+              <Pressable
+                onPress={() => setSelecting(true)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Select contacts to delete"
+              >
+                <Ionicons name="checkmark-circle-outline" size={24} color={colors.textSecondary} />
+              </Pressable>
+            </>
+          )}
         </View>
 
         <View style={{ marginHorizontal: -spacing.md }}>
           <SearchBar value={search} onChangeText={setSearch} placeholder="Search contacts" />
         </View>
 
+        {/* Out of the way while selecting: the row sits where the first
+            contact would be, and a tap meant for a tick opening a blank
+            contact form loses the selection behind it. */}
+        {selecting ? null : (
         <Pressable
           onPress={() => setContactFormOpen(true)}
           style={[styles.row, { paddingHorizontal: spacing.lg }]}
@@ -196,6 +300,7 @@ export function NewChatSheet({ visible, onClose, onOpenConversation }: NewChatSh
             </View>
           )}
         </Pressable>
+        )}
 
         {error ? (
           <Text style={[typography.caption, { color: colors.danger, paddingHorizontal: spacing.lg, paddingBottom: 4 }]}>
@@ -239,10 +344,7 @@ export function NewChatSheet({ visible, onClose, onOpenConversation }: NewChatSh
 }
 
 const styles = StyleSheet.create({
-  // Padded well past the icon so a mis-tap opens the chat rather than
-  // offering to delete it — the destructive action is the one that must
-  // be harder to hit by accident, not easier.
-  deleteButton: { paddingVertical: 8, paddingLeft: 14, paddingRight: 2 },
+  header: { flexDirection: 'row', alignItems: 'center' },
   list: { flex: 1 },
   row: { minHeight: touchTarget.min + 12, justifyContent: 'center' },
   rowInner: { flexDirection: 'row', alignItems: 'center' },
