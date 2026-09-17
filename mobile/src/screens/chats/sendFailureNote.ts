@@ -24,6 +24,8 @@ export function sendFailureNote(code: string | undefined): string | null {
       return 'No WhatsApp replies left for this customer. Nothing more will go out on WhatsApp — you can reply again the moment they open the private chat link.';
     case 'WHATSAPP_NUDGE_NOT_ALLOWED':
       return 'Until the customer opens the private chat, only the fixed WhatsApp messages your workspace set can be sent.';
+    case 'NUDGE_NOT_NEEDED':
+      return 'This customer is already in the private chat — reply to them here instead.';
     case 'MESSAGE_TEMPLATE_REQUIRED':
       return 'More than 24 hours since their last message, so WhatsApp allows only an approved template until they write again.';
     default:

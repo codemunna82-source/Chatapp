@@ -382,6 +382,29 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     session,
   });
 
+  /**
+   * A nudge has nowhere to go once the customer has arrived.
+   *
+   * The fixed WhatsApp messages exist for one purpose: to move a customer
+   * into their private window. Delivered INTO that window they are an
+   * absurdity — the customer sits in the private chat and is told to click
+   * the link to the private chat — and that is exactly what happened,
+   * because the web branch below runs before every WhatsApp rule and this
+   * one is not a WhatsApp rule at all.
+   *
+   * Refused rather than quietly re-routed: the agent tapped a card that
+   * should not have been on screen, and being told so is what stops them
+   * tapping it again. The composer withdraws the card as soon as it knows,
+   * so this is the backstop for a client whose copy is out of date.
+   */
+  if (channel === 'web' && typeof input.nudgeIndex === 'number') {
+    throw new ApiError(
+      422,
+      'NUDGE_NOT_NEEDED',
+      'This customer is already in the private chat — just reply to them here.',
+    );
+  }
+
   // Delivered into the window the customer is actually reading, and not
   // to Meta at all. Its own path because none of what follows applies:
   // there is no gateway to call, no Meta id to attach, and no 24-hour

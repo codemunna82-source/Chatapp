@@ -609,6 +609,17 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   const guestActive = guestLinkQuery.data?.active ?? false;
   /**
+   * They have opened the private chat at least once.
+   *
+   * Not the same as being in it right now: someone who read the window
+   * yesterday and closed the tab has still moved there, and the server
+   * routes replies accordingly (webChatRouting.ts, on lastSeenAt rather
+   * than live presence). So this is what decides whether the fixed
+   * WhatsApp messages are still on offer — and never `guestOnline`, which
+   * goes false the moment they lock their phone.
+   */
+  const guestOpened = guestLinkQuery.data?.openedByCustomer ?? false;
+  /**
    * Whether the customer is sitting in the web window right now.
    *
    * Live socket presence, not the link's existence: `guestActive` says a
@@ -1275,7 +1286,18 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               // private chat and the workspace has fixed the wording —
               // the composer then offers that one message instead of a
               // text box it cannot actually send from.
-              nextNudge={conversationQuery.data?.nextNudge}
+              /**
+               * Withdrawn the moment the customer has opened the private
+               * chat, whatever the conversation payload still says.
+               *
+               * The server stops offering one as soon as they move — but
+               * this screen caches the conversation, and nothing refetched
+               * it when they arrived, so the card sat there offering a
+               * WhatsApp message to somebody already in the window. The
+               * refetch is wired up now too; this is the half that does not
+               * depend on an event arriving.
+               */
+              nextNudge={guestOpened ? null : conversationQuery.data?.nextNudge}
             />
 
             {/* See keyboardGapStyle. */}

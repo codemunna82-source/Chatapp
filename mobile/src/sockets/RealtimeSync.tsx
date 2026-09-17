@@ -246,6 +246,22 @@ export function RealtimeSync({
     ({ conversationId, online }) => {
       if (!conversationId) return;
       useGuestPresenceStore.getState().setGuestOpen(conversationId, online);
+
+      /**
+       * The customer arriving changes what may be sent to them, and both
+       * facts live in cached queries nothing was refreshing.
+       *
+       * The conversation carries nextNudge — the fixed WhatsApp message
+       * the composer offers — and the server stops offering one the moment
+       * they move to the private chat. Without this the agent kept being
+       * shown "WhatsApp message 2 of 2" for a customer already sitting in
+       * the window, because the copy on the phone was from before they
+       * opened it. The link status carries openedByCustomer, which is what
+       * the header reads to say they are there.
+       */
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversation(conversationId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.guestLink(conversationId) });
+
       if (!online || !navigationRef?.isReady()) return;
       if (AppState.currentState !== 'active') return;
 
@@ -258,7 +274,7 @@ export function RealtimeSync({
         params: { conversationId },
       });
     },
-    [navigationRef],
+    [navigationRef, queryClient],
   );
 
   // separate signalling path — see webCallSession.ts for why they cannot
