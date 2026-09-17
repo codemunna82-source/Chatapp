@@ -728,6 +728,37 @@ export async function registerPhoneNumberForTenant(
       })())
     : resolveAccessToken(undefined); // env token; the account row may still hold the placeholder
 
+  /**
+   * Already here, under a different Business Manager.
+   *
+   * Asked BEFORE Meta, because Meta cannot answer it: a token from one
+   * Business Manager reports a number in another as simply not existing,
+   * and that sentence sends people hunting for a typo in an id that is
+   * perfectly correct. It is the wrong NUMBER, not a wrong id — and this
+   * workspace already knows which one, by name.
+   *
+   * Only when the Business Manager differs. Re-registering a number on
+   * the one it already belongs to is an ordinary thing to do and still
+   * works; moving it between them has its own control on the number
+   * itself, which does the bookkeeping this path would skip.
+   */
+  const alreadyHere = await WhatsAppPhoneNumber.findOne({ phoneNumberId, tenantId });
+  if (alreadyHere) {
+    const itsAccount = await WhatsAppAccount.findById(alreadyHere.whatsappAccountId).select('metaAppId');
+    const itsAppId = itsAccount?.metaAppId ? String(itsAccount.metaAppId) : null;
+    const wantedAppId = metaApp ? String(metaApp._id) : null;
+    if (itsAppId !== wantedAppId) {
+      const itsApp = itsAppId ? await MetaApp.findById(itsAppId).select('name') : null;
+      const where = itsApp?.name ? `"${itsApp.name}"` : 'the server default credentials';
+      throw ApiError.badRequest(
+        'WHATSAPP_NUMBER_ON_ANOTHER_APP',
+        `That phone number id is already in this workspace as ${alreadyHere.displayPhoneNumber}, under ${where}. ` +
+          'If you meant to add a different number, take its own id from WhatsApp Manager — each number has its own. ' +
+          'To move this one, use Change on the number itself rather than adding it again.',
+      );
+    }
+  }
+
   let profile;
   try {
     profile = await getMetaGateway().fetchPhoneNumberProfile(accessToken, phoneNumberId);
