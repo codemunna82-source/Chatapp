@@ -196,6 +196,30 @@ export async function recordInviteSent(conversationId: string, tenantId: string)
 }
 
 /**
+ * Gives back an invitation Meta refused to deliver.
+ *
+ * The cap counts how many times this customer has been ASKED, and an
+ * invitation that never reached their phone did not ask them anything.
+ * Counting it was how a workspace spent its one allowed invitation on a
+ * message the customer never saw — and then sent nothing on the next
+ * inbound message either, because the counter said the job was done.
+ *
+ * Meta accepts a send with a 200 and refuses it minutes later in a status
+ * webhook, so "sent" and "arrived" are genuinely different moments and
+ * the count has to follow the second one.
+ *
+ * `$gt: 0` so a duplicate status webhook — Meta retries them — cannot
+ * drive the count below zero and hand out invitations forever.
+ */
+export async function refundInviteSent(conversationId: string, tenantId: string): Promise<void> {
+  if (!Types.ObjectId.isValid(conversationId)) return;
+  await GuestSession.updateOne(
+    { conversationId, tenantId, revokedAt: { $exists: false }, invitesSent: { $gt: 0 } },
+    { $inc: { invitesSent: -1 } },
+  );
+}
+
+/**
  * Marks the customer as having actually moved to the web window.
  *
  * Idempotent on purpose — it is called on every guest message, and only

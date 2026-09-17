@@ -6,6 +6,7 @@ import { recordWebhookEventOnce, markWebhookEventProcessed, markWebhookEventFail
 import { findPhoneNumberByMetaId } from '../whatsapp/whatsapp.repository';
 import type { WhatsAppPhoneNumberDoc } from '../whatsapp/whatsappPhoneNumber.model';
 import { findOrCreateContactByPhone } from '../contacts/contact.repository';
+import { refundInviteSent } from '../guest/guestSession.repository';
 import {
   findOrCreateConversation,
   recordInboundActivity,
@@ -269,6 +270,21 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
   if (surfaced) {
     await revealInternalMessage(String(message._id), tenantId);
     message.internal = false;
+
+    // And the invitation goes back on the shelf.
+    //
+    // The cap counts how many times this customer has been ASKED to move
+    // to the private chat, and one that never reached their phone asked
+    // them nothing. Counting it anyway is how a workspace spent its single
+    // allowed invitation on a message the customer never saw — and then
+    // sent nothing on their next message either, because the counter said
+    // the job was done. Which is exactly what happened here for a whole
+    // morning while Meta refused every one of them over billing.
+    //
+    // So the next inbound message tries again, and keeps trying until one
+    // actually lands. Once one does, the count stands and the customer is
+    // not asked again.
+    await refundInviteSent(String(message.conversationId), tenantId);
   }
 
   const realtime = getRealtimeEmitter();
