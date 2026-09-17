@@ -119,6 +119,9 @@ export async function maybeSendGuestLinkAutoReply(input: {
 
     const url = guestChatUrl(linkBaseUrl, token);
 
+    /** What actually went out, which is not always what was configured. */
+    let sentVia: 'text' | 'template' | 'text-after-template-failed' = mode;
+
     // No senderId on either path: nobody sent this. Recording a human's id
     // would put an agent's name on a message they did not write, and the
     // agent app reads that field to decide whose bubble it is.
@@ -153,17 +156,60 @@ export async function maybeSendGuestLinkAutoReply(input: {
       }
       const components = buildAutoGuestLinkComponents(customerName, token, config.bodyVariable);
 
-      await sendOutboundMessage({
-        tenantId: input.tenantId,
-        conversationId: input.conversationId,
-        type: 'template',
-        templateName: config.templateName ?? undefined,
-        languageCode: config.templateLanguage ?? undefined,
-        templateComponents: components,
-        // Same as the text mode above: the invitation is the customer's,
-        // not the agent's.
-        internal: true,
-      });
+      try {
+        await sendOutboundMessage({
+          tenantId: input.tenantId,
+          conversationId: input.conversationId,
+          type: 'template',
+          templateName: config.templateName ?? undefined,
+          languageCode: config.templateLanguage ?? undefined,
+          templateComponents: components,
+          // Same as the text mode above: the invitation is the customer's,
+          // not the agent's.
+          internal: true,
+        });
+      } catch (templateErr) {
+        // A template belongs to a WhatsApp Business Account, not to this
+        // workspace — while this setting is one per workspace. A workspace
+        // running two numbers on two Business Managers has two WABAs, and
+        // a template approved on one simply does not exist on the other:
+        // Meta answers (#132001) and the customer gets NOTHING. The same
+        // happens for a language code that does not match the approved
+        // copy, or a template still in review.
+        //
+        // So the invitation falls back to text rather than to silence.
+        // Free-form is allowed here for the reason the text mode relies on
+        // — this fires in direct reply to the customer's own message, so
+        // the 24-hour window is open by definition. The link is the same
+        // one the template would have carried, on the same token; it
+        // arrives as a bare URL instead of a tappable button, which is
+        // worse than the template and far better than nothing.
+        //
+        // Logged at warn with the name and language, because the fix is
+        // an admin's: create and submit this template on THAT number's
+        // WhatsApp Business Account too. Until they do, every invitation
+        // on that number quietly costs a round trip to Meta first.
+        logger.warn(
+          {
+            err: templateErr,
+            tenantId: input.tenantId,
+            conversationId: input.conversationId,
+            whatsappPhoneNumberId: input.whatsappPhoneNumberId,
+            template: config.templateName,
+            language: config.templateLanguage,
+          },
+          'The approved template could not be sent on this number — sending the invitation as plain text instead. Check the template exists, in this language, on this number\'s WhatsApp Business Account.',
+        );
+
+        await sendOutboundMessage({
+          tenantId: input.tenantId,
+          conversationId: input.conversationId,
+          type: 'text',
+          text: renderAutoGuestLinkText(config.message ?? undefined, url),
+          internal: true,
+        });
+        sentVia = 'text-after-template-failed';
+      }
     }
 
     await recordInviteSent(input.conversationId, input.tenantId);
@@ -181,16 +227,17 @@ export async function maybeSendGuestLinkAutoReply(input: {
         tenantId: input.tenantId,
         conversationId: input.conversationId,
         mode,
+        sentVia,
         template: config.templateName,
         attempt: (existing?.invitesSent ?? 0) + 1,
         maxSends,
       },
-      'Sent the private-chat invitation template in reply to an inbound message',
+      'Sent the private-chat invitation in reply to an inbound message',
     );
   } catch (err) {
     logger.warn(
       { err, tenantId: input.tenantId, conversationId: input.conversationId },
-      'Could not send the automatic private-chat invitation — the inbound message itself is unaffected',
+      'Could not send the automatic private-chat invitation at all — the inbound message itself is unaffected',
     );
   }
 }
