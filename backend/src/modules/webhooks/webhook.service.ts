@@ -183,11 +183,45 @@ async function handleIncomingMessage(
   });
 }
 
+/**
+ * Meta's reason codes out of a `failed` status, for the log.
+ *
+ * Code and title only. They are Meta's own fixed identifiers — the kind of
+ * thing you paste into their error reference — while `details` is free text
+ * that carries account and asset ids. The whole payload is kept on the
+ * message row either way, so nothing is lost by keeping the log narrow.
+ *
+ * Defensive throughout: this is parsed from a webhook body, and the shape
+ * is whatever Meta sent.
+ */
+function failureReasons(errors: unknown): { code?: unknown; title?: unknown }[] {
+  if (!Array.isArray(errors)) return [];
+  return errors.map((e) => {
+    const entry = (e ?? {}) as Record<string, unknown>;
+    return { code: entry.code, title: entry.title };
+  });
+}
+
 async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem): Promise<void> {
   const ourStatus = META_STATUS_MAP[item.status];
   if (!ourStatus) {
     logger.debug({ status: item.status }, 'Ignoring unrecognized Meta message status');
     return;
+  }
+
+  // A failure arrives here and NOWHERE else. Meta accepts the send with a
+  // 200 and its message id, then decides minutes later that it will not
+  // deliver it — an unconfigured account currency, a template still in
+  // review, a per-user marketing cap. Until this log existed, the only
+  // trace was an `error` field on a row nobody reads, and the invitation
+  // messages are internal, so not even the agent saw a red tick. "Meta
+  // accepted it" and "the customer got it" are different claims, and this
+  // is the line that tells them apart.
+  if (item.status === 'failed') {
+    logger.warn(
+      { tenantId, messageId: item.messageId, reasons: failureReasons(item.errors) },
+      'Meta refused to deliver a message it had already accepted — the customer did not receive it',
+    );
   }
 
   // item.timestamp is Meta's own — see the model's note on why the webhook's
