@@ -6,7 +6,7 @@ import type { Message } from '../api/types';
 import { queryKeys } from './keys';
 import { perfStart, perfMark, perfEnd } from '../utils/perfTrace';
 import { playSentSound } from '../sockets/useMessageAlert';
-import { isOfflineError } from '../api/client';
+import { getApiErrorCode, isOfflineError } from '../api/client';
 import { useOutboxStore, isQueueableBody } from '../store/outboxStore';
 import { captureHandledError } from '../lib/sentry';
 import { readCachedMessages, writeCachedMessages } from '../storage/chatCache';
@@ -484,7 +484,14 @@ export function useSendMessage(conversationId: string) {
       patchMessages(queryClient, conversationId, (pages) =>
         pages.map((page) => ({
           ...page,
-          items: page.items.map((m) => (m.id === context.tempId ? { ...m, status: 'FAILED' as const } : m)),
+          items: page.items.map((m) =>
+            // The code travels with the bubble, not just with the toast:
+            // a refusal that is a rule has to still be readable after a
+            // scroll, a reopen, or a colleague picking the chat up later.
+            m.id === context.tempId
+              ? { ...m, status: 'FAILED' as const, failureCode: getApiErrorCode(err) }
+              : m,
+          ),
         })),
       );
 

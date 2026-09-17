@@ -183,6 +183,15 @@ export interface Message {
   location?: { latitude: number; longitude: number; name?: string; address?: string };
   replyToMessageId?: string;
   status: MessageStatus;
+  /**
+   * Client-only: why the server refused this send, as its error code.
+   *
+   * Set alongside status FAILED so the bubble can say what the toast said
+   * — three seconds of toast is not where a rule belongs. Never sent or
+   * returned by the API: a refused send is not stored server-side at all
+   * (see message.service.ts), so this row exists only on this device.
+   */
+  failureCode?: string;
   senderId?: string;
   /**
    * Which wire this message travelled on.

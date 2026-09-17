@@ -10,6 +10,7 @@ import { MediaImage } from './MediaImage';
 import { LocationBubble } from './LocationBubble';
 import { MediaFileChip } from './MediaFileChip';
 import { VideoMessageBubble } from './VideoMessageBubble';
+import { sendFailureNote } from './sendFailureNote';
 import { revokedLine } from './messageRevoke';
 import { ReplyQuote } from './ReplyQuote';
 import { AudioMessageBubble } from './AudioMessageBubble';
@@ -182,6 +183,17 @@ function MessageBubbleImpl({
   const bubbleColor = isOut ? colors.bubbleSent : colors.bubbleReceived;
   const textColor = isOut ? colors.bubbleSentText : colors.bubbleReceivedText;
   const isFailed = message.status === 'FAILED';
+  /**
+   * Why it was refused, when the reason is a rule rather than a blip.
+   *
+   * Its presence also changes the label above from "Failed · tap to
+   * retry" to "Not sent": retrying a rule fails the same way every time,
+   * and telling someone to retry while the note tells them to wait for
+   * the customer is two instructions that contradict each other. The tap
+   * still retries — it is the right thing to do once the note's condition
+   * has actually changed — it just stops being the advertised answer.
+   */
+  const failureNote = sendFailureNote(message.failureCode);
   const revoked = Boolean(message.revokedAt);
   // Never bleed a tombstone to the bubble edge: the media it was sized
   // for is gone, and the line that replaced it needs ordinary padding.
@@ -448,7 +460,9 @@ function MessageBubbleImpl({
             <Ionicons name="star" size={11} color={textColor} style={styles.starMark} />
           ) : null}
           {isFailed ? (
-            <Text style={[typography.caption, { color: colors.danger, marginRight: 4 }]}>Failed · tap to retry</Text>
+            <Text style={[typography.caption, { color: colors.danger, marginRight: 4 }]}>
+              {failureNote ? 'Not sent' : 'Failed · tap to retry'}
+            </Text>
           ) : null}
           <Text style={[typography.caption, { color: textColor, opacity: 0.7 }]}>
             {formatMessageTime(message.createdAt)}
@@ -459,6 +473,15 @@ function MessageBubbleImpl({
             </View>
           ) : null}
         </View>
+
+        {/* Under the footer rather than in it: this is a sentence, and the
+            footer is a single line the timestamp and ticks have to stay on. */}
+        {isFailed && failureNote ? (
+          <View style={[styles.failureNote, insetWhenBleeding]}>
+            <Ionicons name="information-circle-outline" size={13} color={colors.danger} style={styles.failureIcon} />
+            <Text style={[typography.caption, { color: colors.danger, flex: 1 }]}>{failureNote}</Text>
+          </View>
+        ) : null}
 
         {activeReactions.length > 0 ? (
           <View
@@ -492,6 +515,8 @@ const styles = StyleSheet.create({
   // Sits with the timestamp rather than over the text: it marks the message
   // without competing with what the message says.
   starMark: { marginRight: 4, opacity: 0.75 },
+  failureNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginTop: 4 },
+  failureIcon: { marginTop: 1 },
   revoked: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   highlighted: { borderWidth: 2 },
   row: { flexDirection: 'row' },
