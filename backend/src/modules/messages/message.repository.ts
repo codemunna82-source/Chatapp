@@ -390,6 +390,19 @@ const STATUS_TIMESTAMP_FIELD: Partial<Record<MessageStatus, 'sentAt' | 'delivere
   READ: 'readAt',
 };
 
+/**
+ * Stops a message being hidden from the agent's thread.
+ *
+ * Only ever used on a failure. The private-chat invitation is written
+ * `internal` because it is addressed to the customer and carries a link
+ * the agent cannot use — but an invitation that never arrived is news,
+ * and news that stays hidden is how an agent comes to believe a customer
+ * was given something they were not.
+ */
+export async function revealInternalMessage(id: string, tenantId: string): Promise<void> {
+  await Message.updateOne({ _id: id, tenantId }, { $set: { internal: false } });
+}
+
 export async function updateMessageStatusByMetaId(
   metaMessageId: string,
   tenantId: string,

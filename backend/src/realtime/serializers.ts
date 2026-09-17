@@ -1,4 +1,5 @@
 import type { MessageLean } from '../modules/messages/message.model';
+import { messageFailureReason } from '../modules/messages/messageFailureReason';
 import type { ConversationLean } from '../modules/conversations/conversation.model';
 import type { RealtimeMessagePayload, RealtimeConversationPayload } from './events';
 
@@ -16,6 +17,9 @@ export function toRealtimeMessage(doc: MessageLean): RealtimeMessagePayload {
     mediaId: doc.mediaId ? String(doc.mediaId) : undefined,
     replyToMessageId: doc.replyToMessageId ? String(doc.replyToMessageId) : undefined,
     status: doc.status,
+    // Only on a failure. A delivered message has no error to report, and
+    // a reason attached to one would be read as one.
+    failureReason: doc.status === 'FAILED' ? messageFailureReason(doc.error) : undefined,
     senderId: doc.senderId ? String(doc.senderId) : undefined,
     starredAt: doc.starredAt ? doc.starredAt.toISOString() : undefined,
     sentAt: doc.sentAt ? doc.sentAt.toISOString() : undefined,

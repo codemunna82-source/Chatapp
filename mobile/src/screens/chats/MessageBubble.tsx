@@ -184,7 +184,12 @@ function MessageBubbleImpl({
   const textColor = isOut ? colors.bubbleSentText : colors.bubbleReceivedText;
   const isFailed = message.status === 'FAILED';
   /**
-   * Why it was refused, when the reason is a rule rather than a blip.
+   * Why it did not arrive, when there is something useful to say.
+   *
+   * The server's own sentence wins: it is there when Meta ACCEPTED the
+   * send and refused to deliver it afterwards, which nothing on this
+   * device could have known — the local code only ever describes a
+   * refusal that came back on the request itself.
    *
    * Its presence also changes the label above from "Failed · tap to
    * retry" to "Not sent": retrying a rule fails the same way every time,
@@ -193,7 +198,7 @@ function MessageBubbleImpl({
    * still retries — it is the right thing to do once the note's condition
    * has actually changed — it just stops being the advertised answer.
    */
-  const failureNote = sendFailureNote(message.failureCode);
+  const failureNote = message.failureReason ?? sendFailureNote(message.failureCode);
   const revoked = Boolean(message.revokedAt);
   // Never bleed a tombstone to the bubble edge: the media it was sized
   // for is gone, and the line that replaced it needs ordinary padding.

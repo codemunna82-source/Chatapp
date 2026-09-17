@@ -184,6 +184,15 @@ export interface Message {
   replyToMessageId?: string;
   status: MessageStatus;
   /**
+   * Why a FAILED message did not arrive, in a sentence, from the server.
+   *
+   * Set when Meta accepted the send and then refused to deliver it —
+   * which arrives minutes later in a webhook, long after the toast that
+   * said it was sent. The bubble is the only place that can still tell
+   * anyone, so the reason travels with it.
+   */
+  failureReason?: string;
+  /**
    * Client-only: why the server refused this send, as its error code.
    *
    * Set alongside status FAILED so the bubble can say what the toast said

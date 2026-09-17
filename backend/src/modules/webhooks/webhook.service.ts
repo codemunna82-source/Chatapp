@@ -17,6 +17,7 @@ import {
   updateMessageStatusByMetaId,
   findMessageByMetaIdAndTenant,
   findMessageByIdAndTenant,
+  revealInternalMessage,
 } from '../messages/message.repository';
 import { pushIncomingMessage, pushReaction } from '../notifications/push.service';
 import { handleInboundCallEvent } from '../calls/call.service';
@@ -245,18 +246,54 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
   // that has since moved on.
   await updateLastMessageStatus(tenantId, String(message._id), ourStatus);
 
+  /**
+   * A failed invitation stops hiding.
+   *
+   * The private-chat invitation is written `internal`, which keeps it out
+   * of the agent's thread — it is addressed to the customer and carries a
+   * link the agent cannot use, and a bubble full of that between the
+   * customer's message and the reply helped nobody.
+   *
+   * That is right while it works. When it does NOT, hiding it is how an
+   * agent ends up believing a customer was given the link when they were
+   * never given anything: Meta accepts the send with a 200, the app says
+   * "Invitation sent", and the refusal arrives seconds later in a webhook
+   * nobody watches. It happened for a whole morning.
+   *
+   * So a failure un-hides the message. It appears in the thread as a red
+   * bubble carrying Meta's reason, which is exactly where somebody will
+   * see it, and the reply beneath it is the next thing they were going to
+   * write anyway.
+   */
+  const surfaced = ourStatus === 'FAILED' && message.internal === true;
+  if (surfaced) {
+    await revealInternalMessage(String(message._id), tenantId);
+    message.internal = false;
+  }
+
   const realtime = getRealtimeEmitter();
   // Loaded before the emit rather than after: the status event now has to
   // be addressed to the conversation's number, so it needs the row anyway.
   const conversation = await findConversationByIdAndTenant(String(message.conversationId), tenantId);
   if (conversation) {
-    realtime.emitMessageStatus(
-      tenantId,
-      String(message.conversationId),
-      String(message._id),
-      ourStatus,
-      String(conversation.whatsappPhoneNumberId),
-    );
+    if (surfaced) {
+      // message:status would not do here: the app never received this
+      // message in the first place, so there is no bubble for a status to
+      // land on. It has to arrive as a new one.
+      realtime.emitMessageNew(
+        tenantId,
+        toRealtimeMessage(message),
+        String(conversation.whatsappPhoneNumberId),
+      );
+    } else {
+      realtime.emitMessageStatus(
+        tenantId,
+        String(message.conversationId),
+        String(message._id),
+        ourStatus,
+        String(conversation.whatsappPhoneNumberId),
+      );
+    }
     // The row's tick lives on the conversation, so the list needs its own
     // event — message:status alone only updates an open chat's bubbles.
     realtime.emitConversationUpdated(tenantId, toRealtimeConversation(conversation));

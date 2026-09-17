@@ -19,6 +19,13 @@ export interface RealtimeMessagePayload {
   mediaId?: string;
   replyToMessageId?: string;
   status: string;
+  /**
+   * Why a FAILED message did not arrive, in a sentence for the agent.
+   *
+   * Present only on failures, and only once Meta has said why — a send
+   * can sit at FAILED for a moment before the reason webhook lands.
+   */
+  failureReason?: string;
   senderId?: string;
   /** Present only when the message is starred — see Message.starredAt. */
   starredAt?: string;
