@@ -17,6 +17,62 @@ import {
 } from './guestSession.repository';
 import { guestChatUrl } from '../tenants/guestDomain';
 import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
+import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
+import { WhatsAppAccount } from '../whatsapp/whatsappAccount.model';
+
+/** The invitation config's own shape, independent of which slot it came from. */
+interface AutoGuestLinkConfig {
+  enabled?: boolean;
+  mode?: 'text' | 'template';
+  message?: string | null;
+  templateName?: string | null;
+  templateLanguage?: string | null;
+  bodyVariable?: 'none' | 'customer_name';
+  maxSends?: number;
+  holdWhatsAppUntilOpened?: boolean;
+  welcomeMessage?: string | null;
+}
+
+/**
+ * Which invitation config applies to a send on THIS number.
+ *
+ * A template lives on one Business Manager's WhatsApp Business Account —
+ * Meta rejects a send naming a template approved on a different one
+ * (#132001) — while `Tenant.autoGuestLink` used to be the only config
+ * there was, one setting for every number in the workspace regardless of
+ * which Business Manager it answers on. A workspace running two Business
+ * Managers had every number past the first silently sending nothing.
+ *
+ * `Tenant.autoGuestLinkByApp` is the fix: a config per Business Manager,
+ * keyed by MetaApp id. This resolves which one applies — the number's own
+ * Business Manager's config if an admin has set one up, the tenant-wide
+ * default otherwise. That fallback is what keeps every workspace that has
+ * never opened the per-Business-Manager picker working exactly as before:
+ * a number with no entry in the map behaves as if the map did not exist.
+ */
+async function resolveAutoGuestLinkConfig(
+  tenantId: string,
+  whatsappPhoneNumberId: string,
+): Promise<AutoGuestLinkConfig | undefined> {
+  const tenant = await Tenant.findById(tenantId).select('autoGuestLink autoGuestLinkByApp').lean();
+  if (!tenant) return undefined;
+
+  const phoneNumber = await findPhoneNumberByIdAndTenant(whatsappPhoneNumberId, tenantId);
+  const account = phoneNumber
+    ? await WhatsAppAccount.findById(phoneNumber.whatsappAccountId).select('metaAppId').lean()
+    : null;
+  const metaAppId = account?.metaAppId ? String(account.metaAppId) : null;
+
+  // `.lean()` turns a Mongoose Map field into a plain object at runtime —
+  // there is no `.get()` to call — while its inferred TS type still says
+  // Map, because that mismatch is how mongoose's lean() typing works. Cast
+  // to what is actually there rather than fight the type.
+  const byApp = tenant.autoGuestLinkByApp as unknown as
+    | Record<string, AutoGuestLinkConfig>
+    | undefined;
+  const perApp = metaAppId ? byApp?.[metaAppId] : undefined;
+  return perApp ?? tenant.autoGuestLink;
+}
 
 /**
  * Hands a customer the private-chat link the moment they message in.
@@ -95,8 +151,10 @@ async function deliverGuestLinkInvitation(
     );
   }
 
-  const tenant = await Tenant.findById(input.tenantId).select('autoGuestLink').lean();
-  const config = tenant?.autoGuestLink;
+  // Resolved per this number's Business Manager, not the tenant's single
+  // default — see resolveAutoGuestLinkConfig for why a template config
+  // has to be scoped that narrowly.
+  const config = await resolveAutoGuestLinkConfig(input.tenantId, input.whatsappPhoneNumberId);
 
   // The on/off switch governs the AUTOMATIC reply only. An agent tapping
   // "send the invitation" has made the decision that switch exists to

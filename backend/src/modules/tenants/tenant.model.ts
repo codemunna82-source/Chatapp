@@ -4,6 +4,85 @@ import { GUEST_DOMAIN_SOURCES } from './guestDomain';
 export const TENANT_STATUSES = ['ACTIVE', 'SUSPENDED'] as const;
 export type TenantStatus = (typeof TENANT_STATUSES)[number];
 
+/**
+ * One workspace-facing invitation configuration.
+ *
+ * Used both as the tenant-wide default (`Tenant.autoGuestLink`) and, keyed
+ * by Business Manager, in `Tenant.autoGuestLinkByApp` — extracted so the
+ * two cannot drift into two different shapes of the same setting.
+ */
+const autoGuestLinkSchema = new Schema(
+  {
+    enabled: { type: Boolean, default: false, required: true },
+    /**
+     * How the invitation is sent.
+     *
+     * 'text' is the default and needs nothing from Meta: the reply
+     * goes out as an ordinary message with the link in it. That
+     * works because this only ever fires in direct response to a
+     * customer's own message, so Meta's 24-hour window is open by
+     * definition — the one moment free-form text is allowed.
+     *
+     * 'template' sends an approved template instead, which is the
+     * upgrade: Meta renders its URL button as a real tappable
+     * control rather than a bare link. Worth having, but it costs a
+     * review cycle, and a workspace should not have to wait on Meta
+     * to get its first customer into the chat window.
+     */
+    mode: { type: String, enum: ['text', 'template'], default: 'text', required: true },
+    /** The text sent in 'text' mode. {{link}} becomes the customer's own URL. */
+    message: { type: String, trim: true, maxlength: 900 },
+    /** The approved template's name, exactly as it appears in WhatsApp Manager. */
+    templateName: { type: String, trim: true, maxlength: 512 },
+    /** Meta's language code for the approved copy, e.g. "en" or "en_US". */
+    templateLanguage: { type: String, trim: true, maxlength: 16 },
+    /**
+     * What fills the template body's {{1}}, when it has one.
+     *
+     * 'none' for a body with no variables. Sending a parameter to a
+     * template that takes none makes Meta reject the whole send, and
+     * omitting one it needs does the same — so this has to be stated
+     * rather than guessed.
+     */
+    bodyVariable: {
+      type: String,
+      enum: ['none', 'customer_name'],
+      default: 'none',
+    },
+    /**
+     * How many times the invitation may be sent to one customer.
+     *
+     * Default 1. Two is the useful setting and the reason this is a
+     * number at all: a customer who writes again without tapping the
+     * link almost certainly did not see it. Capped at 3, because
+     * past that the customer is not missing the message — they are
+     * declining it, and a fourth is just noise from a business that
+     * will not take an answer.
+     */
+    maxSends: { type: Number, default: 1, min: 1, max: 3 },
+    /**
+     * Hold WhatsApp messages out of the inbox until the customer
+     * moves to the web window.
+     *
+     * Off by default, and it should be turned on deliberately: it
+     * means a customer who never taps the link is never seen. They
+     * are not LOST — every message is stored and appears the moment
+     * they arrive — but nobody is looking at them in the meantime.
+     */
+    holdWhatsAppUntilOpened: { type: Boolean, default: false, required: true },
+    /**
+     * Greeting posted into the conversation the first time the
+     * customer opens the window.
+     *
+     * A real message in the thread, not a UI banner: the agent sees
+     * it too, so what the customer was told is part of the history
+     * rather than something only one side knows.
+     */
+    welcomeMessage: { type: String, trim: true, maxlength: 900 },
+  },
+  { _id: false },
+);
+
 const tenantSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -118,78 +197,31 @@ const tenantSchema = new Schema(
      * token goes into that one variable; see guestAutoReply.service.ts.
      */
     autoGuestLink: {
-      type: new Schema(
-        {
-          enabled: { type: Boolean, default: false, required: true },
-          /**
-           * How the invitation is sent.
-           *
-           * 'text' is the default and needs nothing from Meta: the reply
-           * goes out as an ordinary message with the link in it. That
-           * works because this only ever fires in direct response to a
-           * customer's own message, so Meta's 24-hour window is open by
-           * definition — the one moment free-form text is allowed.
-           *
-           * 'template' sends an approved template instead, which is the
-           * upgrade: Meta renders its URL button as a real tappable
-           * control rather than a bare link. Worth having, but it costs a
-           * review cycle, and a workspace should not have to wait on Meta
-           * to get its first customer into the chat window.
-           */
-          mode: { type: String, enum: ['text', 'template'], default: 'text', required: true },
-          /** The text sent in 'text' mode. {{link}} becomes the customer's own URL. */
-          message: { type: String, trim: true, maxlength: 900 },
-          /** The approved template's name, exactly as it appears in WhatsApp Manager. */
-          templateName: { type: String, trim: true, maxlength: 512 },
-          /** Meta's language code for the approved copy, e.g. "en" or "en_US". */
-          templateLanguage: { type: String, trim: true, maxlength: 16 },
-          /**
-           * What fills the template body's {{1}}, when it has one.
-           *
-           * 'none' for a body with no variables. Sending a parameter to a
-           * template that takes none makes Meta reject the whole send, and
-           * omitting one it needs does the same — so this has to be stated
-           * rather than guessed.
-           */
-          bodyVariable: {
-            type: String,
-            enum: ['none', 'customer_name'],
-            default: 'none',
-          },
-          /**
-           * How many times the invitation may be sent to one customer.
-           *
-           * Default 1. Two is the useful setting and the reason this is a
-           * number at all: a customer who writes again without tapping the
-           * link almost certainly did not see it. Capped at 3, because
-           * past that the customer is not missing the message — they are
-           * declining it, and a fourth is just noise from a business that
-           * will not take an answer.
-           */
-          maxSends: { type: Number, default: 1, min: 1, max: 3 },
-          /**
-           * Hold WhatsApp messages out of the inbox until the customer
-           * moves to the web window.
-           *
-           * Off by default, and it should be turned on deliberately: it
-           * means a customer who never taps the link is never seen. They
-           * are not LOST — every message is stored and appears the moment
-           * they arrive — but nobody is looking at them in the meantime.
-           */
-          holdWhatsAppUntilOpened: { type: Boolean, default: false, required: true },
-          /**
-           * Greeting posted into the conversation the first time the
-           * customer opens the window.
-           *
-           * A real message in the thread, not a UI banner: the agent sees
-           * it too, so what the customer was told is part of the history
-           * rather than something only one side knows.
-           */
-          welcomeMessage: { type: String, trim: true, maxlength: 900 },
-        },
-        { _id: false },
-      ),
+      type: autoGuestLinkSchema,
       default: () => ({ enabled: false, bodyVariable: 'none' }),
+    },
+    /**
+     * The SAME invitation, configured separately per Business Manager.
+     *
+     * autoGuestLink above is a single, tenant-wide setting, and a template
+     * lives on one Business Manager's WhatsApp Business Account — Meta
+     * rejects a send naming a template that was approved on a different
+     * one (#132001). A workspace with only one Business Manager never
+     * notices; one with several has every number past the first silently
+     * sending nothing, because the one template name in `autoGuestLink`
+     * cannot be right for two different WABAs at once.
+     *
+     * Keyed by MetaApp _id as a string (Mongoose Map keys are always
+     * strings). Deliberately additive rather than a replacement: a number
+     * with no entry here — including every number on a workspace that has
+     * never opened the per-Business-Manager picker — keeps using
+     * `autoGuestLink` exactly as before. See resolveAutoGuestLinkConfig()
+     * in guestAutoReply.service.ts for the lookup this enables.
+     */
+    autoGuestLinkByApp: {
+      type: Map,
+      of: autoGuestLinkSchema,
+      default: () => new Map(),
     },
   },
   { timestamps: true },
