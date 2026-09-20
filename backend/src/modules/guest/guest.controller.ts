@@ -155,20 +155,6 @@ export const issueGuestLinkHandler = asyncHandler(async (req: Request, res: Resp
   });
 });
 
-/**
- * 200, not 201: nothing new is created in the common case — the customer
- * already has a session and this re-sends the link they were already
- * given.
- */
-export const sendGuestLinkInvitationHandler = asyncHandler(async (req: Request, res: Response) => {
-  const auth = getTenantContext(req);
-  const conversationId = req.params.conversationId as string;
-  res.status(200).json({
-    success: true,
-    data: await guestService.sendGuestLinkInvitation(auth, conversationId),
-  });
-});
-
 export const guestLinkStatusHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const conversationId = req.params.conversationId as string;

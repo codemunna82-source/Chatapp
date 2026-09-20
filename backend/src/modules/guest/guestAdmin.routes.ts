@@ -7,7 +7,6 @@ import { guestConversationIdParamSchema, guestReplySchema } from './guest.valida
 import {
   issueGuestLinkHandler,
   revokeGuestLinkHandler,
-  sendGuestLinkInvitationHandler,
   sendGuestReplyHandler,
   guestLinkStatusHandler,
   listGuestReportsHandler,
@@ -41,12 +40,6 @@ guestAdminRouter.get('/link', guestLinkStatusHandler);
 guestAdminRouter.get('/reports', listGuestReportsHandler);
 guestAdminRouter.post('/link', requirePermission('CHAT_SEND'), issueGuestLinkHandler);
 guestAdminRouter.delete('/link', requirePermission('CHAT_SEND'), revokeGuestLinkHandler);
-// Sending the invitation to the customer over WhatsApp, by hand. The
-// automatic reply covers the normal case and fails in ways an agent can
-// see but not fix — a template Meta accepted and then refused to deliver,
-// a cap spent on an invitation that never arrived. Same permission as any
-// other way of putting a message in front of a customer.
-guestAdminRouter.post('/link/invite', requirePermission('CHAT_SEND'), sendGuestLinkInvitationHandler);
 guestAdminRouter.post(
   '/messages',
   requirePermission('CHAT_SEND'),

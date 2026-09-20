@@ -17,9 +17,9 @@
  * These are NOT Meta-approved templates, and the difference matters. They
  * are ordinary free-form messages, which Meta allows only inside the
  * 24-hour window the customer's own message opened — which is exactly
- * when these are sent. The approved template is the separate, earlier
- * thing that carries the link (see guestAutoReply.service.ts); these
- * follow it and refer back to it.
+ * when these are sent. The private-chat link itself goes out separately —
+ * an agent sends it by hand, or it arrives via the workspace's own Meta
+ * automation; these follow it and refer back to it.
  */
 
 /**

@@ -52,7 +52,6 @@ import { hasMovedToWebChat } from './webChatRouting';
 import { guestSessionExpiresAt } from './guestSessionExpiry';
 import { findCustomerFacingNameForPhoneNumber } from '../users/user.repository';
 import { guestChatUrl } from '../tenants/guestDomain';
-import { sendGuestLinkInvitationNow, type InvitationResult } from './guestAutoReply.service';
 import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
 import {
   CONTENT_POLICY_CODE,
@@ -349,39 +348,6 @@ export function assertGuestNotBlocked(guest: GuestContext): void {
  * and minting a new token would turn all of them into dead links that are
  * just as likely to be tapped as the newest one.
  */
-/**
- * Sends the private-chat invitation to this customer on WhatsApp, now,
- * because an agent asked for it.
- *
- * The automatic reply is the normal path, and it fails in ways nobody in
- * the app can see or fix — Meta accepts a template and declines to deliver
- * it minutes later; the cap is spent on an invitation that never arrived;
- * the customer wrote in before the workspace had finished configuring
- * anything. Each leaves an agent looking at a chat where the customer was
- * never given the link, and nothing to do about it. This is the something.
- *
- * Gated on CHAT_SEND by its route, like every other way of putting a
- * message in front of a customer, and scoped to a conversation this agent
- * may see — the invitation carries that customer's own private token.
- */
-export async function sendGuestLinkInvitation(
-  auth: AuthContext,
-  conversationId: string,
-): Promise<InvitationResult> {
-  const conversation = await findConversationByIdAndTenant(conversationId, auth.tenantId);
-  const scope = visibleWhatsAppPhoneNumberId(auth);
-  if (!conversation || (scope && String(conversation.whatsappPhoneNumberId) !== scope)) {
-    throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
-  }
-
-  return sendGuestLinkInvitationNow({
-    tenantId: auth.tenantId,
-    conversationId,
-    contactId: String(conversation.contactId),
-    whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
-  });
-}
-
 export async function issueGuestLinkForConversation(
   auth: AuthContext,
   conversationId: string,
@@ -788,9 +754,6 @@ export async function postGuestMessage(
     // clearing the flag is the whole of it. The agent's app finds the full
     // thread the first time it opens the conversation.
     await setAwaitingWebChat(guest.conversationId, guest.tenantId, false);
-    // After the customer's own message is on the wire, so the greeting
-    // lands under it rather than ahead of it.
-    await postWelcomeMessage(guest);
   }
 
   const updated = await recordGuestInboundActivity(guest.conversationId, guest.tenantId, text);
@@ -823,56 +786,6 @@ export async function postGuestMessage(
   return view;
 }
 
-/**
- * The greeting the business shows a customer who has just arrived.
- *
- * Written into the conversation as a real outbound message rather than
- * rendered as a banner in the window, so the agent sees exactly what the
- * customer was told. A greeting only one side can see is a greeting the
- * agent then repeats.
- *
- * Stored directly rather than going through sendOutboundMessage: this is
- * a message in the WEB window, and sending it would push it to WhatsApp
- * as well — the customer would get welcomed twice, once in each place,
- * for having moved to one of them.
- *
- * Never throws. It runs on the customer's first message, and losing that
- * message because a greeting failed would be a poor trade.
- */
-async function postWelcomeMessage(guest: GuestContext): Promise<void> {
-  try {
-    const tenant = await Tenant.findById(guest.tenantId).select('autoGuestLink').lean();
-    const text = tenant?.autoGuestLink?.welcomeMessage?.trim();
-    if (!text) return;
-
-    const message = await createMessage({
-      tenantId: guest.tenantId,
-      conversationId: guest.conversationId,
-      // No senderId: nobody wrote this. Stamping an agent's id would put
-      // their name on a greeting they never typed.
-      recipientPhone: await guestRecipientPhone(guest),
-      direction: 'OUT',
-      channel: 'web',
-      type: 'text',
-      text,
-      status: 'DELIVERED',
-    });
-
-    // One emit covers both sides: the guest socket and the agents' sockets
-    // are all in this conversation's room, which is how every other
-    // business message reaches the window too.
-    getRealtimeEmitter().emitMessageNew(
-      guest.tenantId,
-      toRealtimeMessage(message),
-      guest.whatsappPhoneNumberId,
-    );
-  } catch (err) {
-    logger.warn(
-      { err, conversationId: guest.conversationId },
-      'Could not post the welcome message — the customer\'s own message is unaffected',
-    );
-  }
-}
 
 /**
  * The message a reply or reaction points at, or nothing.
@@ -906,28 +819,6 @@ async function resolveQuotedMessage(
  * by an insert — two taps arriving together could otherwise both delete
  * and both insert, leaving one person with two reactions on one message.
  */
-/**
- * What goes in a guest message's `recipientPhone`.
- *
- * The field is required on the model, and the web-chat paths were filling
- * it with the business number when one was known and an EMPTY STRING when
- * it was not — which Mongoose rejects, because an empty string does not
- * satisfy `required` on a String. The welcome message passed '' outright
- * and so failed every single time it ran: "Message validation failed:
- * recipientPhone: Path `recipientPhone` is required", on every customer's
- * first message, in production.
- *
- * The number's own id is the last resort. It is not a phone number, but
- * it is stable, always present, and identifies exactly the same thing the
- * display number would have — and a greeting that arrives beats a
- * greeting lost to a field nobody reads.
- */
-async function guestRecipientPhone(guest: GuestContext): Promise<string> {
-  const phoneNumber = await findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId);
-  const display = phoneNumber?.displayPhoneNumber?.trim();
-  return display || guest.whatsappPhoneNumberId;
-}
-
 export async function postGuestReaction(
   guest: GuestContext,
   messageId: string,

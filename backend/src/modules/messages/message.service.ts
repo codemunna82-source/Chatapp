@@ -66,11 +66,10 @@ export interface SendOutboundMessageInput {
   /**
    * The agent who sent this, when a person did.
    *
-   * Optional because not every outbound message has an author: the
-   * automatic private-chat link (see guestAutoReply.service.ts) is sent by
-   * the system, and stamping an agent's id on it would put their name on a
-   * message they never wrote — the agent app reads this field to decide
-   * whose bubble it is.
+   * Optional because not every outbound message has an author: a
+   * system-sent message has no agent behind it, and stamping one's id on
+   * it would put their name on a message they never wrote — the agent app
+   * reads this field to decide whose bubble it is.
    */
   senderId?: string;
   type: SendableMessageType;

@@ -44,7 +44,6 @@ import { useCallStore } from '../../calling/callStore';
 import {
   useGuestLinkStatus,
   useIssueGuestLink,
-  useSendGuestLinkInvitation,
   useRevokeGuestLink,
 } from '../../queries/useGuestChat';
 import {
@@ -604,7 +603,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const guestLinkQuery = useGuestLinkStatus(conversationId);
   const uploadContactAvatar = useUploadContactAvatar();
   const issueGuestLink = useIssueGuestLink(conversationId);
-  const sendInvitation = useSendGuestLinkInvitation(conversationId);
   const revokeGuestLink = useRevokeGuestLink(conversationId);
 
   const guestActive = guestLinkQuery.data?.active ?? false;
@@ -740,49 +738,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       ],
     );
   }, [guestActive, issueGuestLink, revokeGuestLink, shareGuestLink]);
-
-  /**
-   * Asks the server to send this customer the workspace's invitation on
-   * WhatsApp, now.
-   *
-   * Different from the link row above it, which mints a link and opens the
-   * share sheet for the agent to send from somewhere else. This one goes
-   * out on the business number, as the approved template, with the link
-   * already in it — the same message the automatic reply sends.
-   *
-   * Confirmed first, because it is a message to a customer and the agent
-   * cannot see it afterwards: the invitation is internal, so it never
-   * appears as a bubble in this thread.
-   *
-   * The result says what actually went out. A template that Meta would not
-   * take falls back to plain text server-side, and an agent who is not
-   * told that will believe the customer got a tappable button.
-   */
-  const handleSendInvitation = useCallback(() => {
-    if (sendInvitation.isPending) return;
-    Alert.alert(
-      'Send the invitation?',
-      'This sends the private-chat invitation to the customer on WhatsApp, with their link in it.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send',
-          onPress: () =>
-            sendInvitation.mutate(undefined, {
-              onSuccess: (result) => {
-                showToast(
-                  result.sentVia === 'template'
-                    ? 'Invitation sent.'
-                    : 'Invitation sent as plain text — the approved template could not be used.',
-                );
-              },
-              onError: (err) => Alert.alert('Not sent', getApiErrorMessage(err)),
-            }),
-        },
-      ],
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- showToast is a stable useCallback defined above
-  }, [sendInvitation]);
 
   const handleSendText = useCallback(
     (text: string, nudgeIndex?: number) => {
@@ -1312,7 +1267,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           onClose={() => setHeaderMenuOpen(false)}
           onSearch={() => setSearchOpen(true)}
           onGuestLink={handleGuestLink}
-          onSendInvitation={handleSendInvitation}
           guestActive={guestActive}
           // The photo moved in here too: tapping the avatar still sets
           // one, but that was never discoverable — nothing about a
