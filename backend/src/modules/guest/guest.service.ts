@@ -667,6 +667,12 @@ export async function listGuestMessages(
     // the workspace's deletions are a separate field and neither side
     // sees the other's.
     forGuest: true,
+    // The private window starts fresh: whatever they and the business
+    // already said over WhatsApp stays on WhatsApp, out of this screen.
+    // The agent's own conversation view is untouched — it still reads
+    // every channel, because an agent replying needs that context. Only
+    // the customer's own window is scoped down.
+    channel: 'web',
   });
   return {
     items: await toGuestMessagePage(guest.tenantId, guest.conversationId, page.items),

@@ -91,6 +91,13 @@ export interface ListMessagesOptions {
   /** Reading as the customer rather than as the workspace — applies their
    *  own hidden list instead of the workspace's. */
   forGuest?: boolean;
+  /**
+   * Restrict to one channel — 'web' for the guest window's own history, so
+   * a customer opening the private chat sees a fresh thread rather than
+   * everything they and the business already said over WhatsApp before
+   * this link ever existed.
+   */
+  channel?: 'whatsapp' | 'web';
 }
 
 /**
@@ -243,6 +250,9 @@ export async function listMessagesByConversation(
   };
   if (opts.excludeReactions) {
     filter.type = { $ne: 'reaction' };
+  }
+  if (opts.channel) {
+    filter.channel = opts.channel;
   }
   // The customer's own hidden list. Separate from `deletedAt` above: the
   // two sides hide messages from themselves independently, and only a
