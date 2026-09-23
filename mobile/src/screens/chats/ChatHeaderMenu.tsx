@@ -27,6 +27,8 @@ export function ChatHeaderMenu({
   onClose,
   onSearch,
   onGuestLink,
+  /** Sends the invitation to the customer on WhatsApp, from the server. */
+  onSendInvitation,
   /** A live private-chat link changes what the link row offers. */
   guestActive,
   /** Absent when this conversation has no contact to look at. */
@@ -37,6 +39,7 @@ export function ChatHeaderMenu({
   onClose: () => void;
   onSearch: () => void;
   onGuestLink: () => void;
+  onSendInvitation: () => void;
   guestActive: boolean;
   onContactPhoto?: () => void;
   contactPhotoLabel?: string;
@@ -55,6 +58,22 @@ export function ChatHeaderMenu({
       label: guestActive ? 'Replace private chat link' : 'Send a private chat link',
       icon: guestActive ? 'link' : 'link-outline',
       onPress: onGuestLink,
+    },
+    // Separate from the row above, and the difference matters. That one
+    // mints a link and hands it to the phone's share sheet for the agent
+    // to send from somewhere else. This one asks the SERVER to send the
+    // workspace's approved invitation to this customer on WhatsApp, on
+    // the business number, with the link already in it.
+    //
+    // It exists because the automatic invitation fails in ways an agent
+    // can see but not fix: Meta accepts a template and declines to
+    // deliver it minutes later, or the cap was spent on one that never
+    // arrived. Without this, the answer was to wait and hope.
+    {
+      key: 'invite',
+      label: 'Send the invitation on WhatsApp',
+      icon: 'paper-plane-outline',
+      onPress: onSendInvitation,
     },
   ];
   if (onContactPhoto) {

@@ -23,6 +23,23 @@ export function useIssueGuestLink(conversationId: string | undefined) {
   });
 }
 
+/**
+ * Sends the invitation by hand.
+ *
+ * Invalidates the link status because this can create the session that
+ * status reports on — a customer who was never successfully invited has no
+ * live link until this succeeds.
+ */
+export function useSendGuestLinkInvitation(conversationId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => guestChatApi.sendGuestLinkInvitation(conversationId as string),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.guestLink(conversationId ?? '') });
+    },
+  });
+}
+
 export function useRevokeGuestLink(conversationId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({

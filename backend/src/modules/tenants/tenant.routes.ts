@@ -7,10 +7,12 @@ import { validate } from '../../middleware/validate.middleware';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { ApiError } from '../../lib/ApiError';
-import { Tenant } from './tenant.model';
+import { Tenant, DEFAULT_AUTO_GUEST_LINK_TEXT, DEFAULT_AUTO_GUEST_WELCOME } from './tenant.model';
 import { resolveBusinessName, resolveBusinessNameForConversation } from '../guest/businessName';
 import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
+import { findMetaAppByIdAndTenant } from '../whatsapp/metaApp.repository';
 import { AVATAR_MAX_SIZE_BYTES } from '../media/avatarAsset';
+import { CONTENT_POLICY_MESSAGE, findPolicyViolation } from '../messages/contentPolicy';
 import { recordAudit } from '../audit/auditLog.service';
 import { forgetNudgePolicy, nudgePolicyFor } from '../messages/nudgePolicy';
 import { DEFAULT_WHATSAPP_NUDGES, NUDGE_MAX_LENGTH } from '../messages/nudgeTemplates';
@@ -92,14 +94,142 @@ tenantRouter.get(
   }),
 );
 
+const autoGuestLinkSchema = z
+  .object({
+    enabled: z.boolean(),
+    mode: z.enum(['text', 'template']).optional(),
+    message: z.string().trim().min(1).max(900).optional(),
+    templateName: z.string().trim().min(1).max(512).optional(),
+    templateLanguage: z.string().trim().min(2).max(16).optional(),
+    bodyVariable: z.enum(['none', 'customer_name']).optional(),
+    /** How many times one customer may be sent the invitation. 1-3; see tenant.model.ts. */
+    maxSends: z.coerce.number().int().min(1).max(3).optional(),
+    holdWhatsAppUntilOpened: z.boolean().optional(),
+    welcomeMessage: z.string().trim().max(900).optional(),
+    /**
+     * Which Business Manager this save is for. Omitted means the
+     * tenant-wide default that every number without its own override
+     * uses — see Tenant.autoGuestLinkByApp in tenant.model.ts.
+     */
+    metaAppId: z.string().trim().min(1).optional(),
+  })
+  // Only template mode needs anything named. Refused here rather than at
+  // send time, where the failure happens inside the webhook handler with
+  // nobody watching: switched on with nothing to send looks on and sends
+  // nothing forever. Text mode needs nothing, which is the point of it.
+  .refine(
+    (body) =>
+      !body.enabled ||
+      (body.mode ?? 'text') !== 'template' ||
+      (body.templateName && body.templateLanguage),
+    {
+      message: 'Name the approved template and its language, or switch to plain text',
+      path: ['templateName'],
+    },
+  )
+  /**
+   * The content policy, applied when the wording is SAVED.
+   *
+   * sendOutboundMessage already refuses this text at send time, so nothing
+   * gets out either way. The reason to check it here too is that these two
+   * messages are the only ones on the platform that go out with no human
+   * in the loop — they fire from the webhook handler the moment a customer
+   * writes in. Caught only at send time, a blocked wording would look
+   * saved, look enabled, and silently fail against every customer forever,
+   * which is precisely the failure the template check above exists to
+   * prevent. See contentPolicy.ts.
+   */
+  .refine((body) => !findPolicyViolation(body.message), {
+    message: CONTENT_POLICY_MESSAGE,
+    path: ['message'],
+  })
+  .refine((body) => !findPolicyViolation(body.welcomeMessage), {
+    message: CONTENT_POLICY_MESSAGE,
+    path: ['welcomeMessage'],
+  });
+
+
+/**
+ * Shapes one invitation config for the client, whichever slot it came
+ * from — the tenant-wide default or one Business Manager's override.
+ * Defaults fill every field a config has never had set, the same way an
+ * unconfigured `autoGuestLink` always has.
+ */
+function shapeAutoGuestLink(config: {
+  enabled?: boolean;
+  mode?: 'text' | 'template';
+  message?: string | null;
+  templateName?: string | null;
+  templateLanguage?: string | null;
+  bodyVariable?: 'none' | 'customer_name';
+  maxSends?: number;
+  holdWhatsAppUntilOpened?: boolean;
+  welcomeMessage?: string | null;
+} | undefined) {
+  return {
+    enabled: config?.enabled ?? false,
+    mode: config?.mode ?? ('text' as const),
+    message: config?.message ?? DEFAULT_AUTO_GUEST_LINK_TEXT,
+    templateName: config?.templateName ?? '',
+    templateLanguage: config?.templateLanguage ?? '',
+    bodyVariable: config?.bodyVariable ?? ('none' as const),
+    maxSends: config?.maxSends ?? 1,
+    holdWhatsAppUntilOpened: config?.holdWhatsAppUntilOpened ?? false,
+    welcomeMessage: config?.welcomeMessage ?? DEFAULT_AUTO_GUEST_WELCOME,
+  };
+}
+
+/**
+ * Whether this config would actually send anything.
+ *
+ * Distinct from `enabled`, and the difference is not pedantry: a
+ * workspace that switched this on before it took a template has
+ * `enabled: true` and no template, so the panel reads "On" while the
+ * sender skips every message. Reporting only `enabled` is how that goes
+ * unnoticed until a customer says nobody answered.
+ */
+function autoGuestLinkIsActive(config: { enabled?: boolean; mode?: string; templateName?: string | null; templateLanguage?: string | null } | undefined): boolean {
+  return Boolean(
+    config?.enabled &&
+      ((config?.mode ?? 'text') !== 'template' || (config?.templateName && config?.templateLanguage)),
+  );
+}
+
+/**
+ * Resolves which invitation config slot a request means: a Business
+ * Manager's own override when `metaAppId` names one this tenant owns, the
+ * tenant-wide default otherwise. Throws on a `metaAppId` that does not
+ * belong to this tenant, rather than silently falling back to the
+ * default — a typo in the query string should not edit the wrong slot.
+ */
+async function resolveAutoGuestLinkTarget(
+  tenantId: string,
+  metaAppIdRaw: unknown,
+): Promise<{ metaAppId: string | null }> {
+  const metaAppId = typeof metaAppIdRaw === 'string' && metaAppIdRaw.trim() ? metaAppIdRaw.trim() : null;
+  if (!metaAppId) return { metaAppId: null };
+  const app = await findMetaAppByIdAndTenant(metaAppId, tenantId);
+  if (!app) throw ApiError.badRequest('META_APP_NOT_FOUND', 'That Business Manager does not belong to this workspace.');
+  return { metaAppId };
+}
+
 tenantRouter.get(
   '/settings',
   asyncHandler(async (req, res) => {
     const auth = getTenantContext(req);
+    const { metaAppId } = await resolveAutoGuestLinkTarget(auth.tenantId, req.query.metaAppId);
     const tenant = await Tenant.findById(auth.tenantId)
-      .select('name displayName')
+      .select('name displayName autoGuestLink autoGuestLinkByApp')
       .lean();
     if (!tenant) throw ApiError.notFound('TENANT_NOT_FOUND', 'Workspace not found');
+
+    // Cast for the same reason as guestAutoReply.service.ts's resolver:
+    // .lean() turns the Map field into a plain object at runtime, while
+    // its inferred type still says Map.
+    const byApp = tenant.autoGuestLinkByApp as unknown as
+      | Record<string, typeof tenant.autoGuestLink>
+      | undefined;
+    const autoGuestLinkConfig = metaAppId ? byApp?.[metaAppId] : tenant.autoGuestLink;
 
     // What a customer would actually see, resolved through the same rule
     // the web window uses. Reported alongside the raw field because the
@@ -145,6 +275,10 @@ tenantRouter.get(
         customerFacingAvatar: firstNumber
           ? await resolveBusinessAvatar(auth.tenantId, String(firstNumber._id))
           : null,
+        autoGuestLink: {
+          ...shapeAutoGuestLink(autoGuestLinkConfig),
+          active: autoGuestLinkIsActive(autoGuestLinkConfig),
+        },
         // Without this the feature cannot work at all, and the admin has no
         // way to find that out short of turning it on and waiting for a
         // customer to receive nothing.
@@ -153,6 +287,69 @@ tenantRouter.get(
         /** Which domain those links are built on, and how it got there. */
         guestDomain: await getGuestDomainSettings(auth.tenantId),
       },
+    });
+  }),
+);
+
+tenantRouter.patch(
+  '/settings/auto-guest-link',
+  validate({ body: autoGuestLinkSchema }),
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const body = req.body as z.infer<typeof autoGuestLinkSchema>;
+    const { metaAppId } = await resolveAutoGuestLinkTarget(auth.tenantId, body.metaAppId);
+
+    if (body.enabled && !(await guestLinkBaseUrlFor(auth.tenantId))) {
+      throw ApiError.serviceUnavailable(
+        'GUEST_LINK_NOT_CONFIGURED',
+        'No chat domain is configured on the server, so there is no link to send yet.',
+      );
+    }
+
+    // Same fields either way, just under a different path prefix — the
+    // tenant-wide default when no Business Manager was named, that
+    // Business Manager's own slot in the map otherwise. A Map's entries
+    // are addressed the same way a subdocument's fields are, so this is
+    // the only branch the write needs.
+    const prefix = metaAppId ? `autoGuestLinkByApp.${metaAppId}` : 'autoGuestLink';
+
+    const tenant = await Tenant.findByIdAndUpdate(
+      auth.tenantId,
+      {
+        $set: {
+          [`${prefix}.enabled`]: body.enabled,
+          ...(body.mode ? { [`${prefix}.mode`]: body.mode } : {}),
+          ...(body.message ? { [`${prefix}.message`]: body.message } : {}),
+          ...(body.templateName ? { [`${prefix}.templateName`]: body.templateName } : {}),
+          ...(body.templateLanguage
+            ? { [`${prefix}.templateLanguage`]: body.templateLanguage }
+            : {}),
+          ...(body.bodyVariable ? { [`${prefix}.bodyVariable`]: body.bodyVariable } : {}),
+          ...(body.maxSends !== undefined ? { [`${prefix}.maxSends`]: body.maxSends } : {}),
+          ...(body.holdWhatsAppUntilOpened !== undefined
+            ? { [`${prefix}.holdWhatsAppUntilOpened`]: body.holdWhatsAppUntilOpened }
+            : {}),
+          // An empty string is a real instruction here — "stop greeting
+          // them" — so it is written rather than treated as "unchanged".
+          ...(body.welcomeMessage !== undefined
+            ? { [`${prefix}.welcomeMessage`]: body.welcomeMessage }
+            : {}),
+        },
+      },
+      { new: true },
+    )
+      .select('autoGuestLink autoGuestLinkByApp')
+      .lean();
+    if (!tenant) throw ApiError.notFound('TENANT_NOT_FOUND', 'Workspace not found');
+
+    const byApp = tenant.autoGuestLinkByApp as unknown as
+      | Record<string, typeof tenant.autoGuestLink>
+      | undefined;
+    const saved = metaAppId ? byApp?.[metaAppId] : tenant.autoGuestLink;
+
+    res.status(200).json({
+      success: true,
+      data: shapeAutoGuestLink(saved),
     });
   }),
 );

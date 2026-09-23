@@ -1,3 +1,4 @@
+import { maybeSendGuestLinkAutoReply } from '../guest/guestAutoReply.service';
 import { logger } from '../../lib/logger';
 import type { NormalizedCallItem, NormalizedWebhookItem } from '../../integrations/meta/webhookPayload';
 import { parseWebhookPayload, type NormalizedMessageItem, type NormalizedStatusItem } from '../../integrations/meta/webhookPayload';
@@ -128,6 +129,13 @@ async function handleIncomingMessage(
   // the inbox is deliberately not showing would send an agent looking for
   // a conversation that is not there.
   if (held) {
+    await maybeSendGuestLinkAutoReply({
+      tenantId,
+      conversationId: String(conversation._id),
+      contactId: String(contact._id),
+      whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
+      inboundMessageType: item.messageType,
+    });
     return;
   }
 
@@ -164,6 +172,17 @@ async function handleIncomingMessage(
     });
   }
 
+  // Last, and after the push, deliberately: the agent should hear about
+  // the customer's message before the system answers on their behalf.
+  // Swallows its own errors for the same reason the push above does — a
+  // failure here must not fail the delivery and have Meta retry it.
+  await maybeSendGuestLinkAutoReply({
+    tenantId,
+    conversationId: String(conversation._id),
+    contactId: String(contact._id),
+    whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
+    inboundMessageType: item.messageType,
+  });
 }
 
 /**
