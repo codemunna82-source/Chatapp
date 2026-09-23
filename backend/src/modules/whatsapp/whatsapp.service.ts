@@ -216,16 +216,32 @@ export interface PublicWhatsAppNumber {
    * this codebase follows.
    */
   linkApiKeyCreatedAt?: string | null;
+  /**
+   * Whether the Meta credentials behind this number's Business Manager are
+   * actually usable right now — CONNECTED, PENDING, DISCONNECTED, ERROR or
+   * EXPIRED, mirroring WABA_STATUSES. Undefined when it could not be read.
+   *
+   * Distinct from `status` above: that is Meta's verdict on the NUMBER
+   * (its own registration state), while this is the workspace's own ACCOUNT
+   * connection — the token every send actually authenticates with. A
+   * number can show CONNECTED while its account's token has been revoked
+   * or expired, and until now that was invisible here: every send failed
+   * with "This WhatsApp account is not connected" and nothing on this
+   * screen said why, or that reconnecting the Business Manager was the fix.
+   */
+  accountStatus?: string;
 }
 
 /** Exported for its test: `enabled` defaulting wrong locks out a workspace. */
 export function toPublicWhatsAppNumber(
   n: WhatsAppPhoneNumberDoc,
   app?: { id: string; name: string } | null,
+  accountStatus?: string,
 ): PublicWhatsAppNumber {
   return {
     metaAppId: app?.id ?? null,
     metaAppName: app?.name ?? null,
+    accountStatus,
     id: String(n._id),
     phoneNumberId: n.phoneNumberId,
     displayPhoneNumber: n.displayPhoneNumber,
@@ -342,20 +358,23 @@ export async function listPhoneNumbersForTenant(tenantId: string): Promise<Publi
   // points at an account and the account names the Business Manager, and
   // doing that per row is a pair of round trips each against a database
   // that is not local.
-  const appOfNumber = await resolveBusinessManagerOfNumbers(tenantId, numbers);
-  return numbers.map((n) => toPublicWhatsAppNumber(n, appOfNumber.get(String(n.whatsappAccountId)) ?? null));
+  const accountOfNumber = await resolveBusinessManagerOfNumbers(tenantId, numbers);
+  return numbers.map((n) => {
+    const info = accountOfNumber.get(String(n.whatsappAccountId));
+    return toPublicWhatsAppNumber(n, info?.app ?? null, info?.accountStatus);
+  });
 }
 
 /** account id → the Business Manager it belongs to, for a tenant's numbers. */
 async function resolveBusinessManagerOfNumbers(
   tenantId: string,
   numbers: WhatsAppPhoneNumberDoc[],
-): Promise<Map<string, { id: string; name: string } | null>> {
+): Promise<Map<string, { app: { id: string; name: string } | null; accountStatus: string }>> {
   const accountIds = [...new Set(numbers.map((n) => String(n.whatsappAccountId)))];
   if (accountIds.length === 0) return new Map();
 
   const accounts = await WhatsAppAccount.find({ _id: { $in: accountIds }, tenantId })
-    .select('metaAppId')
+    .select('metaAppId status')
     .lean();
   const appIds = [...new Set(accounts.map((a) => a.metaAppId).filter(Boolean).map(String))];
   const apps = appIds.length > 0 ? await MetaApp.find({ _id: { $in: appIds }, tenantId }).select('name').lean() : [];
@@ -365,7 +384,10 @@ async function resolveBusinessManagerOfNumbers(
     accounts.map((a) => {
       const appId = a.metaAppId ? String(a.metaAppId) : null;
       const name = appId ? nameOfApp.get(appId) : undefined;
-      return [String(a._id), appId && name ? { id: appId, name } : null];
+      return [
+        String(a._id),
+        { app: appId && name ? { id: appId, name } : null, accountStatus: a.status },
+      ];
     }),
   );
 }
@@ -447,7 +469,11 @@ export async function moveNumberToBusinessManager(
   if (profile.verifiedName) number.verifiedName = profile.verifiedName;
   await number.save();
 
-  return toPublicWhatsAppNumber(number, metaApp ? { id: String(metaApp._id), name: metaApp.name } : null);
+  return toPublicWhatsAppNumber(
+    number,
+    metaApp ? { id: String(metaApp._id), name: metaApp.name } : null,
+    account.status,
+  );
 }
 
 /**
@@ -816,7 +842,7 @@ export async function registerPhoneNumberForTenant(
     existingAnywhere.status = 'CONNECTED';
     existingAnywhere.whatsappAccountId = account._id;
     await existingAnywhere.save();
-    return toPublicWhatsAppNumber(existingAnywhere);
+    return toPublicWhatsAppNumber(existingAnywhere, null, account.status);
   }
 
   const created = await WhatsAppPhoneNumber.create({
@@ -828,7 +854,7 @@ export async function registerPhoneNumberForTenant(
     verifiedName: profile.verifiedName,
     status: 'CONNECTED',
   });
-  return toPublicWhatsAppNumber(created);
+  return toPublicWhatsAppNumber(created, null, account.status);
 }
 
 /**
