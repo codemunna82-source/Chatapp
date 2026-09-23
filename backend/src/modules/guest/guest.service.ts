@@ -42,6 +42,7 @@ import {
   setSessionBlocked,
   touchSession,
   activateGuestSession,
+  reissueGuestSessionToken,
 } from './guestSession.repository';
 import { countRecentGuestReports, createGuestReport, listGuestReportsForConversation } from './guestReport.repository';
 import { deleteGuestPushTokensForConversation } from './guestPushToken.repository';
@@ -460,6 +461,59 @@ export async function issueGuestLinkForPhone(
     conversationId: String(conversation._id),
     phone: normalized,
   };
+}
+
+/**
+ * The link for a customer identified by phone number, for an external
+ * automation rather than a signed-in agent — see guestLinkApi.routes.ts.
+ *
+ * Unlike issueGuestLinkForConversation, this never refuses because a live
+ * session already exists: an automation calling in on every inbound
+ * message needs a link back every time, not a GUEST_LINK_EXISTS error on
+ * the second customer message onward. Reissuing adds the new token
+ * alongside every one this session has already handed out (see
+ * reissueGuestSessionToken) rather than replacing it, so an earlier copy
+ * still sitting in the customer's WhatsApp thread keeps working too.
+ */
+export async function issuePublicGuestLink(
+  tenantId: string,
+  whatsappPhoneNumberId: string,
+  phone: string,
+): Promise<{ url: string; expiresAt: string }> {
+  const normalized = normalizePhone(phone);
+  if (!normalized) {
+    throw ApiError.badRequest('INVALID_PHONE', 'That does not look like a phone number.');
+  }
+
+  const linkBaseUrl = await guestLinkBaseUrlFor(tenantId);
+  if (!linkBaseUrl) {
+    throw ApiError.serviceUnavailable(
+      'GUEST_LINK_NOT_CONFIGURED',
+      'No chat domain is configured on the server, so a chat link cannot be built yet',
+    );
+  }
+
+  const contact = await findOrCreateContactByPhone(tenantId, normalized);
+  const conversation = await findOrCreateConversation(tenantId, String(contact._id), whatsappPhoneNumberId);
+
+  const existing = await findActiveSessionForConversation(String(conversation._id), tenantId);
+  if (existing) {
+    const reissued = await reissueGuestSessionToken(String(existing._id), tenantId);
+    if (!reissued) {
+      throw ApiError.serviceUnavailable('GUEST_LINK_UNAVAILABLE', 'Could not prepare a link for this customer.');
+    }
+    return { url: guestChatUrl(linkBaseUrl, reissued), expiresAt: existing.expiresAt.toISOString() };
+  }
+
+  const expiresAt = guestSessionExpiresAt();
+  const created = await createGuestSession({
+    tenantId,
+    conversationId: String(conversation._id),
+    contactId: String(contact._id),
+    whatsappPhoneNumberId,
+    expiresAt,
+  });
+  return { url: guestChatUrl(linkBaseUrl, created.token), expiresAt: expiresAt.toISOString() };
 }
 
 /**

@@ -209,6 +209,13 @@ export interface PublicWhatsAppNumber {
    * number.
    */
   health: NumberHealth;
+  /**
+   * When the current public guest-link API key was generated, or null if
+   * this number has never had one. The key itself is never reported here
+   * — only its existence and age, the same contract every other secret in
+   * this codebase follows.
+   */
+  linkApiKeyCreatedAt?: string | null;
 }
 
 /** Exported for its test: `enabled` defaulting wrong locks out a workspace. */
@@ -236,6 +243,7 @@ export function toPublicWhatsAppNumber(
       messagingLimitTier: n.messagingLimitTier ?? undefined,
       healthCheckedAt: n.healthCheckedAt ?? undefined,
     }),
+    linkApiKeyCreatedAt: n.linkApiKeyCreatedAt ? n.linkApiKeyCreatedAt.toISOString() : null,
   };
 }
 

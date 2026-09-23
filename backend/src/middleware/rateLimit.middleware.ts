@@ -46,3 +46,25 @@ export const guestRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many requests, slow down.' } },
 });
+
+/**
+ * The public guest-link API (guestLinkApi.routes.ts). Keyed by the
+ * presented key rather than by IP: a BSP or WhatsApp Flows calls from
+ * infrastructure it shares with every other business on the platform, so
+ * an IP-keyed limit would throttle this number's automation because of
+ * traffic from someone else's. A missing/malformed key falls back to the
+ * IP — there is nothing else to key on before the key itself is even
+ * read, and that request is rejected by requireLinkApiKey immediately
+ * after anyway.
+ */
+export const linkApiRateLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  limit: Math.max(60, env.RATE_LIMIT_MAX),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const key = req.headers['x-voxo-link-key'];
+    return typeof key === 'string' && key ? key : (req.ip ?? 'unknown');
+  },
+  message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many requests, slow down.' } },
+});

@@ -88,6 +88,19 @@ const whatsappPhoneNumberSchema = new Schema(
      * a state Meta had not confirmed.
      */
     callingStatus: { type: String },
+    /**
+     * A key an external automation (WhatsApp Flows, a BSP's chatbot
+     * builder) presents to fetch a fresh private-chat link for a customer
+     * by phone number — see guestLinkApi.routes.ts.
+     *
+     * Hashed, never the plaintext: the key is shown to the admin exactly
+     * once, at generation, the same way a guest session's own token is.
+     * select: false for the same reason the Meta secrets above are — it
+     * has no business coming back on an ordinary read.
+     */
+    linkApiKeyHash: { type: String, select: false },
+    /** When the current key was generated, so the admin screen can show it without ever showing the key itself again. */
+    linkApiKeyCreatedAt: { type: Date },
   },
   { timestamps: true },
 );
@@ -97,6 +110,12 @@ const whatsappPhoneNumberSchema = new Schema(
 // this is how the webhook handler resolves which tenant an event belongs to.
 whatsappPhoneNumberSchema.index({ phoneNumberId: 1 }, { unique: true });
 whatsappPhoneNumberSchema.index({ ownerUserId: 1 });
+// Sparse: most numbers never generate this key, and a plain unique index
+// would let only one of them have no key at all.
+whatsappPhoneNumberSchema.index(
+  { linkApiKeyHash: 1 },
+  { unique: true, sparse: true },
+);
 
 export type WhatsAppPhoneNumberDoc = HydratedDocument<InferSchemaType<typeof whatsappPhoneNumberSchema>>;
 export const WhatsAppPhoneNumber = model('WhatsAppPhoneNumber', whatsappPhoneNumberSchema);

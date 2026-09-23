@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler';
+import { ApiError } from '../../lib/ApiError';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import {
   listPhoneNumbersForTenant,
@@ -14,6 +15,7 @@ import {
   disconnectWhatsAppForUser,
   getConnectionStatus,
 } from './embeddedSignup.service';
+import { rotateLinkApiKey, revokeLinkApiKey } from './linkApiKey';
 
 export const listPhoneNumbersHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
@@ -105,4 +107,32 @@ export const registerNumberForCloudApiHandler = asyncHandler(async (req: Request
   const auth = getTenantContext(req);
   const result = await registerNumberForCloudApi(auth.tenantId, req.params.id as string);
   res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Generates (or replaces) this number's public guest-link API key.
+ *
+ * The plaintext is returned exactly once, here — nowhere else in the API
+ * ever reports it again, the same contract a guest session's own token
+ * follows. Replacing an existing key invalidates it immediately.
+ */
+export const rotateLinkApiKeyHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const result = await rotateLinkApiKey(req.params.id as string, auth.tenantId);
+  if (!result) throw ApiError.notFound('NUMBER_NOT_FOUND', 'WhatsApp number not found');
+  res.status(200).json({
+    success: true,
+    data: {
+      key: result.key,
+      createdAt: result.createdAt.toISOString(),
+      endpoint: `${req.protocol}://${req.get('host')}/api/public/guest-link`,
+    },
+  });
+});
+
+export const revokeLinkApiKeyHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const revoked = await revokeLinkApiKey(req.params.id as string, auth.tenantId);
+  if (!revoked) throw ApiError.notFound('NUMBER_NOT_FOUND', 'WhatsApp number not found');
+  res.status(200).json({ success: true, data: { revoked: true } });
 });

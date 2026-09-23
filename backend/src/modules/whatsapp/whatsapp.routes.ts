@@ -20,6 +20,8 @@ import {
   setNumberEnabledHandler,
   setCallingEnabledHandler,
   setNumberBusinessManagerHandler,
+  rotateLinkApiKeyHandler,
+  revokeLinkApiKeyHandler,
 } from './whatsapp.controller';
 import { whatsappSignupPageHandler, whatsappSignupCallbackHandler } from './signupPage.controller';
 
@@ -83,4 +85,19 @@ whatsappRouter.patch(
   '/numbers/:id/business-manager',
   validate({ params: numberIdParamSchema, body: numberBusinessManagerSchema }),
   setNumberBusinessManagerHandler,
+);
+
+// The key an external automation (WhatsApp Flows, a BSP chatbot) uses to
+// fetch a private-chat link for this number's customers — see
+// guestLinkApi.routes.ts. POST issues a fresh key (invalidating any
+// earlier one) and is the only response that ever carries the plaintext.
+whatsappRouter.post(
+  '/numbers/:id/link-api-key',
+  validate({ params: numberIdParamSchema }),
+  rotateLinkApiKeyHandler,
+);
+whatsappRouter.delete(
+  '/numbers/:id/link-api-key',
+  validate({ params: numberIdParamSchema }),
+  revokeLinkApiKeyHandler,
 );

@@ -30,6 +30,7 @@ import { whatsappRouter } from './modules/whatsapp/whatsapp.routes';
 import { metaAppRouter } from './modules/whatsapp/metaApp.routes';
 import { tenantRouter } from './modules/tenants/tenant.routes';
 import { guestRouter } from './modules/guest/guest.routes';
+import { guestLinkApiRouter } from './modules/guest/guestLinkApi.routes';
 import { Sentry, isSentryEnabled, isReportableError } from './lib/sentry';
 
 export function createApp(): Express {
@@ -103,6 +104,10 @@ export function createApp(): Express {
   // than a login, so it sits outside every requireAuth router above and
   // carries its own tighter limiter (see guest.routes.ts).
   app.use('/api/guest', guestRouter);
+  // An external automation's own entry point — authenticated by its own
+  // per-number key rather than a login or a guest link token (see
+  // guestLinkApi.routes.ts).
+  app.use('/api/public/guest-link', guestLinkApiRouter);
 
   app.use(notFoundHandler);
 

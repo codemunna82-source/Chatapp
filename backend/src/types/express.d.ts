@@ -2,6 +2,7 @@ import type { UserRole } from '../lib/jwt';
 import type { Permission } from '../modules/users/permission';
 import type { GuestContext } from '../modules/guest/guest.service';
 import type { ConversationDoc } from '../modules/conversations/conversation.model';
+import type { WhatsAppPhoneNumberDoc } from '../modules/whatsapp/whatsappPhoneNumber.model';
 
 export interface AuthContext {
   userId: string;
@@ -37,6 +38,14 @@ declare global {
       visibleConversation?: ConversationDoc;
       /** Raw request body bytes, captured by express.json()'s `verify` hook in app.ts — needed for HMAC signature verification (Meta webhooks), which must hash the exact wire bytes. */
       rawBody?: Buffer;
+      /**
+       * Populated by requireLinkApiKey, for the public guest-link API an
+       * external automation (WhatsApp Flows, a BSP chatbot) calls with its
+       * own key instead of a user or guest session — see
+       * guestLinkApi.routes.ts. The key names exactly one number, which is
+       * also the tenant.
+       */
+      linkApiPhoneNumber?: WhatsAppPhoneNumberDoc;
     }
   }
 }
