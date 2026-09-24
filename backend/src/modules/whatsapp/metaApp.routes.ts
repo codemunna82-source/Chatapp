@@ -296,6 +296,23 @@ metaAppRouter.patch(
     if (body.accessToken) app.accessTokenEnc = encryptSecret(body.accessToken);
     await app.save();
 
+    // A fresh token deserves a fresh chance: every account under this
+    // Business Manager that Meta had rejected the OLD token on is stuck
+    // reporting "not connected" until something explicitly says otherwise —
+    // resolveMetaCredentialsForPhoneNumber refuses to even try a send while
+    // status stays EXPIRED, new token or not. Without this, pasting in a
+    // working replacement here was the whole fix and nothing ever noticed.
+    // Self-correcting either way: if the new token is ALSO bad, the next
+    // send attempt marks it EXPIRED again (see markConnectionExpired).
+    let reconnected = 0;
+    if (body.accessToken) {
+      const result = await WhatsAppAccount.updateMany(
+        { tenantId: auth.tenantId, metaAppId: app._id, status: 'EXPIRED' },
+        { $set: { status: 'CONNECTED' } },
+      );
+      reconnected = result.modifiedCount;
+    }
+
     await recordAudit({
       tenantId: auth.tenantId,
       actorUserId: auth.userId,
@@ -308,6 +325,7 @@ metaAppRouter.patch(
         status: app.status,
         rotatedAppSecret: Boolean(body.appSecret),
         rotatedAccessToken: Boolean(body.accessToken),
+        reconnectedAccounts: reconnected,
       },
     });
 
