@@ -49,6 +49,24 @@ const whatsappPhoneNumberSchema = new Schema(
     nameStatus: { type: String },
     codeVerificationStatus: { type: String },
     /**
+     * Meta's own live verdict on the number, read back on the same refresh
+     * as the quality rating — CONNECTED, FLAGGED, RESTRICTED, BANNED,
+     * RATE_LIMITED, and whatever else Meta reports. Free text rather than
+     * an enum: Meta's own set of values is not fixed, and rejecting a
+     * status it hands back would be worse than storing one we do not yet
+     * have a label for.
+     *
+     * Deliberately separate from `status` below, which is this app's OWN
+     * record of whether the number has completed Cloud API registration
+     * and is set once, at registration, never again from Meta. Two
+     * different authorities, two fields, same pattern as `enabled` and
+     * `accountStatus` elsewhere on this document: a number can read
+     * `status: CONNECTED` (we registered it) while `metaStatus: BANNED`
+     * (Meta has since banned it) — collapsing the two would hide exactly
+     * that case.
+     */
+    metaStatus: { type: String },
+    /**
      * When the two fields above were last read from Meta.
      *
      * They used to be written once, at registration, and never again — so

@@ -230,6 +230,16 @@ export interface PublicWhatsAppNumber {
    * screen said why, or that reconnecting the Business Manager was the fix.
    */
   accountStatus?: string;
+  /**
+   * Meta's own live verdict on the number — CONNECTED, FLAGGED, RESTRICTED,
+   * BANNED, RATE_LIMITED, or whatever else Meta reports — read back on the
+   * same refresh as the quality rating. Undefined until the first health
+   * check. Distinct from `status` above, which is this app's own
+   * registration bookkeeping and never moves again once it reads
+   * CONNECTED: a number can be registered here and banned at Meta at the
+   * same time, and this is the only field that would say so.
+   */
+  metaStatus?: string;
 }
 
 /** Exported for its test: `enabled` defaulting wrong locks out a workspace. */
@@ -246,6 +256,7 @@ export function toPublicWhatsAppNumber(
     phoneNumberId: n.phoneNumberId,
     displayPhoneNumber: n.displayPhoneNumber,
     status: n.status,
+    metaStatus: n.metaStatus ?? undefined,
     // Absent on every document written before the field existed, and
     // absent has to mean ON — a migration that silently locked out every
     // existing member would be the worst possible reading of it.
@@ -293,6 +304,12 @@ export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promi
     number.qualityRating = profile.qualityRating;
     number.messagingLimitTier = profile.messagingLimitTier;
     number.nameStatus = profile.nameStatus;
+    // Meta's own live verdict on the number — the only place a ban or
+    // restriction that happened after registration becomes visible. Only
+    // overwritten when Meta actually answers with one, same reasoning as
+    // verifiedName below: a blank reply must not erase the last known
+    // status.
+    if (profile.status) number.metaStatus = profile.status;
     // The name the customer already sees above this number in WhatsApp.
     // Only overwritten when Meta actually returns one: a blank reply must
     // not erase a name we already have, or the web window would fall back
@@ -839,6 +856,7 @@ export async function registerPhoneNumberForTenant(
     existingAnywhere.displayPhoneNumber = profile.displayPhoneNumber;
     existingAnywhere.qualityRating = profile.qualityRating;
     if (profile.verifiedName) existingAnywhere.verifiedName = profile.verifiedName;
+    if (profile.status) existingAnywhere.metaStatus = profile.status;
     existingAnywhere.status = 'CONNECTED';
     existingAnywhere.whatsappAccountId = account._id;
     await existingAnywhere.save();
@@ -852,6 +870,7 @@ export async function registerPhoneNumberForTenant(
     displayPhoneNumber: profile.displayPhoneNumber,
     qualityRating: profile.qualityRating,
     verifiedName: profile.verifiedName,
+    metaStatus: profile.status,
     status: 'CONNECTED',
   });
   return toPublicWhatsAppNumber(created, null, account.status);

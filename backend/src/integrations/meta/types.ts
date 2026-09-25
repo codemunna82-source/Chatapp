@@ -103,6 +103,14 @@ export interface PhoneNumberProfile {
   phoneNumberId: string;
   displayPhoneNumber: string;
   verifiedName?: string;
+  /**
+   * Meta's own live status for the number — CONNECTED, FLAGGED, RESTRICTED,
+   * BANNED, RATE_LIMITED, and others Meta may add. Distinct from any status
+   * stored locally at registration time: this is read back on every health
+   * refresh, so it is the one place a ban or restriction that happened
+   * *after* the number connected actually becomes visible.
+   */
+  status?: string;
   qualityRating?: string;
   /**
    * How many unique customers this number may start conversations with in

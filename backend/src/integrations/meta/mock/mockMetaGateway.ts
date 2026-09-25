@@ -85,7 +85,7 @@ export const mockMetaGateway: MetaGateway = {
     logger.debug({ phoneNumberId }, '[MOCK META] fetchPhoneNumberProfile');
     // Accepts any id — mock mode exists precisely so a deployment without
     // real Meta credentials still works end to end.
-    return { phoneNumberId, displayPhoneNumber: `+1 555 ${phoneNumberId.slice(-4)}`, verifiedName: 'Mock Business', qualityRating: 'GREEN', messagingLimitTier: 'TIER_1K' };
+    return { phoneNumberId, displayPhoneNumber: `+1 555 ${phoneNumberId.slice(-4)}`, verifiedName: 'Mock Business', qualityRating: 'GREEN', messagingLimitTier: 'TIER_1K', status: 'CONNECTED' };
   },
   async preAcceptCall(_creds, callId) {
     logger.debug({ callId }, '[MOCK META] preAcceptCall');

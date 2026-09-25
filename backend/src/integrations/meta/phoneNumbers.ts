@@ -12,6 +12,8 @@ interface MetaPhoneNumberResponse {
   name_status?: string;
   /** VERIFIED once the number itself has passed Meta's SMS/voice check. */
   code_verification_status?: string;
+  /** Meta's own live verdict on the number — CONNECTED, FLAGGED, RESTRICTED, BANNED, RATE_LIMITED, … */
+  status?: string;
 }
 
 /**
@@ -36,7 +38,7 @@ export async function fetchPhoneNumberProfile(
     ...authConfig(accessToken),
     params: {
       fields:
-        'display_phone_number,verified_name,quality_rating,messaging_limit_tier,name_status,code_verification_status',
+        'display_phone_number,verified_name,quality_rating,messaging_limit_tier,name_status,code_verification_status,status',
     },
   };
   const res = await metaRequest<MetaPhoneNumberResponse>((client) => client.get(`/${phoneNumberId}`, config));
@@ -52,6 +54,7 @@ export async function fetchPhoneNumberProfile(
     messagingLimitTier: res.messaging_limit_tier,
     nameStatus: res.name_status,
     codeVerificationStatus: res.code_verification_status,
+    status: res.status,
   };
 }
 

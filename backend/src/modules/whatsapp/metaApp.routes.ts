@@ -65,7 +65,7 @@ const updateSchema = z.object({
  * Meta puts it in URLs and client-side config — and hiding it would only
  * make the page harder to match against Meta's dashboard.
  */
-function toPublic(app: MetaAppDoc, baseUrl: string, numberCount = 0) {
+function toPublic(app: MetaAppDoc, baseUrl: string, numberCount = 0, accountStatus: string | null = null) {
   return {
     id: String(app._id),
     name: app.name,
@@ -75,6 +75,13 @@ function toPublic(app: MetaAppDoc, baseUrl: string, numberCount = 0) {
     hasAppSecret: Boolean(app.appSecretEnc),
     hasAccessToken: Boolean(app.accessTokenEnc),
     numberCount,
+    // Meta's actual verdict on this Business Manager's credentials —
+    // CONNECTED, PENDING, DISCONNECTED, ERROR or EXPIRED — worst-case
+    // across every WhatsAppAccount it holds. Null when it holds none.
+    // `status` above is only ever ACTIVE/DISABLED, an admin's own local
+    // switch; this is the one that says whether Meta will actually accept
+    // a send from anything under this BM right now.
+    accountStatus,
     isDefault: false,
     createdAt: app.get('createdAt'),
   };
@@ -110,6 +117,40 @@ async function countNumbersByApp(tenantId: string): Promise<Map<string, number>>
   return counts;
 }
 
+// Worse (higher) beats better: one broken account under a Business Manager
+// is enough to call the whole thing broken, because the admin cares
+// whether anything under it can send right now, not the average.
+const ACCOUNT_STATUS_SEVERITY: Record<string, number> = {
+  CONNECTED: 0,
+  PENDING: 1,
+  DISCONNECTED: 2,
+  EXPIRED: 3,
+  ERROR: 4,
+};
+
+/**
+ * The worst WhatsAppAccount status under each Business Manager — Meta's
+ * real, current verdict on whether anything can actually send from it.
+ *
+ * `MetaApp.status` (ACTIVE/DISABLED) is a switch an admin sets by hand and
+ * says nothing about Meta's side; this is what answers "kon sa BM disable
+ * hai" for real, from the same accountStatus this session already
+ * surfaced per number, aggregated up to the Business Manager an admin
+ * actually manages credentials for.
+ */
+async function summarizeAccountStatusByApp(tenantId: string): Promise<Map<string, string>> {
+  const accounts = await WhatsAppAccount.find({ tenantId }).select('metaAppId status').lean();
+  const worst = new Map<string, string>();
+  for (const a of accounts) {
+    const key = a.metaAppId ? String(a.metaAppId) : '';
+    const current = worst.get(key);
+    if (!current || (ACCOUNT_STATUS_SEVERITY[a.status] ?? 0) > (ACCOUNT_STATUS_SEVERITY[current] ?? 0)) {
+      worst.set(key, a.status);
+    }
+  }
+  return worst;
+}
+
 /**
  * The configuration this deployment has been running on all along.
  *
@@ -121,7 +162,7 @@ async function countNumbersByApp(tenantId: string): Promise<Map<string, number>>
  * the server's environment, and a form that appeared to edit it would be
  * lying.
  */
-function defaultAppRow(baseUrl: string, numberCount: number) {
+function defaultAppRow(baseUrl: string, numberCount: number, accountStatus: string | null) {
   return {
     id: null,
     name: 'Server default',
@@ -131,6 +172,7 @@ function defaultAppRow(baseUrl: string, numberCount: number) {
     hasAppSecret: env.META_APP_SECRET.length > 0,
     hasAccessToken: env.META_ACCESS_TOKEN.length > 0,
     numberCount,
+    accountStatus,
     isDefault: true,
     createdAt: null,
   };
@@ -158,9 +200,10 @@ metaAppRouter.get(
   asyncHandler(async (req, res) => {
     const auth = getTenantContext(req);
     const baseUrl = baseUrlFor(req);
-    const [apps, counts] = await Promise.all([
+    const [apps, counts, accountStatuses] = await Promise.all([
       listMetaAppsForTenant(auth.tenantId),
       countNumbersByApp(auth.tenantId),
+      summarizeAccountStatusByApp(auth.tenantId),
     ]);
 
     // The environment's own configuration first: it is the oldest and, on
@@ -168,8 +211,10 @@ metaAppRouter.get(
     res.status(200).json({
       success: true,
       data: [
-        defaultAppRow(baseUrl, counts.get('') ?? 0),
-        ...apps.map((a) => toPublic(a, baseUrl, counts.get(String(a._id)) ?? 0)),
+        defaultAppRow(baseUrl, counts.get('') ?? 0, accountStatuses.get('') ?? null),
+        ...apps.map((a) =>
+          toPublic(a, baseUrl, counts.get(String(a._id)) ?? 0, accountStatuses.get(String(a._id)) ?? null),
+        ),
       ],
     });
   }),
