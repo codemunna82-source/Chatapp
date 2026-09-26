@@ -335,6 +335,50 @@ metaAppRouter.post(
   }),
 );
 
+/**
+ * Retries a send with the credentials already on file, no new token
+ * required.
+ *
+ * `status: EXPIRED` is this app's OWN safety flag, set the instant Meta
+ * rejects a send with an auth-shaped error (see markConnectionExpired) —
+ * it is not Meta's word that the token itself is dead. A permission fix
+ * made entirely on Meta's side (a System User asset assignment, a
+ * connected-app revoked and the WABA re-shared) never touches the stored
+ * token at all, so there was previously no way to ask VOXO to just try
+ * again with what it already has — only PATCH, which requires pasting a
+ * token whether or not one had actually changed.
+ *
+ * Self-correcting exactly like the PATCH path: if the existing token is
+ * still genuinely bad, the very next send marks the account EXPIRED again.
+ */
+metaAppRouter.post(
+  '/:id/retry-connection',
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const app = await findMetaAppByIdAndTenant(req.params.id as string, auth.tenantId);
+    if (!app) throw ApiError.notFound('META_APP_NOT_FOUND', 'Business Manager not found');
+
+    const result = await WhatsAppAccount.updateMany(
+      { tenantId: auth.tenantId, metaAppId: app._id, status: 'EXPIRED' },
+      { $set: { status: 'CONNECTED' } },
+    );
+
+    await recordAudit({
+      tenantId: auth.tenantId,
+      actorUserId: auth.userId,
+      action: 'meta_app.retry_connection',
+      targetType: 'MetaApp',
+      targetId: app._id,
+      metadata: { name: app.name, reconnectedAccounts: result.modifiedCount },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: { reconnectedAccounts: result.modifiedCount },
+    });
+  }),
+);
+
 metaAppRouter.patch(
   '/:id',
   validate({ body: updateSchema }),
