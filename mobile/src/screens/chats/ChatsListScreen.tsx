@@ -10,7 +10,6 @@ import { NumberHealthBanner } from '../../components/NumberHealthBanner';
 import { ChatListSkeleton } from '../../components/Skeleton';
 import { EmptyState } from '../../components/EmptyState';
 import { ChatListItem } from './ChatListItem';
-import { NewChatSheet } from './NewChatSheet';
 import { ChatActionSheet } from './ChatActionSheet';
 import { ChatSelectionBar } from './ChatSelectionBar';
 import { LiveNowSheet } from './LiveNowSheet';
@@ -82,7 +81,6 @@ function ChatsListScreenInner({ navigation }: Props) {
    * the count changes, not every time any one customer's dot flickers.
    */
   const liveCount = useGuestPresenceStore((s) => Object.keys(s.open).length);
-  const [newChatOpen, setNewChatOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<Conversation | null>(null);
   // Multi-select. Held as an id array rather than a Set so it stays a plain
   // value React can compare — a mutated Set would not re-render the rows.
@@ -122,6 +120,16 @@ function ChatsListScreenInner({ navigation }: Props) {
   }, []);
 
   const clearSelection = useCallback(() => setSelectedIds([]), []);
+
+  // Everything on screen, checked in one tap — the header's own entry into
+  // selection, replacing what used to be the button for starting a new
+  // chat (see the header row below). Only ever the loaded page: the row
+  // count the person can already see is what "select all" should mean to
+  // them, not every conversation that exists somewhere past the scroll.
+  const handleSelectAll = useCallback(() => {
+    selectionFeedback();
+    setSelectedIds(conversations.map((c) => c.id));
+  }, [conversations]);
 
   const handleOpen = useCallback(
     (conversation: Conversation) => {
@@ -303,21 +311,23 @@ function ChatsListScreenInner({ navigation }: Props) {
           <View style={[styles.brandRow, { paddingHorizontal: spacing.md }]}>
             <Text style={[styles.brand, { color: colors.success }]}>VOXO</Text>
             <View style={styles.brandActions}>
-              {/* New chat lives here now, not on a floating button. The
-                  FAB sat on top of the list and covered a row's name and
-                  timestamp wherever it landed — and this is the only way
-                  to start a conversation since the Contacts tab went, so
-                  it had to keep a home rather than simply be removed. */}
-              {!showArchived ? (
+              {/* Selects every loaded chat and drops straight into the
+                  ChatSelectionBar above, already fully checked — one tap
+                  to reach "delete everything" instead of a long-press per
+                  row. Took the spot the new-chat button held; a long-press
+                  on any row still reaches selection one chat at a time via
+                  ChatActionSheet's own "Select" action, so nothing here
+                  is the only way in. */}
+              {conversations.length > 0 ? (
                 <Pressable
-                  onPress={() => setNewChatOpen(true)}
+                  onPress={handleSelectAll}
                   hitSlop={10}
                   accessibilityRole="button"
-                  accessibilityLabel="Start a new chat"
+                  accessibilityLabel="Select all chats"
                 >
                   {({ pressed }) => (
                     <Ionicons
-                      name="create-outline"
+                      name="checkmark-circle-outline"
                       size={22}
                       color={colors.textSecondary}
                       style={{ opacity: pressed ? 0.5 : 1 }}
@@ -465,14 +475,6 @@ function ChatsListScreenInner({ navigation }: Props) {
         onSelect={handleStartSelection}
       />
 
-      <NewChatSheet
-        visible={newChatOpen}
-        onClose={() => setNewChatOpen(false)}
-        onOpenConversation={(conversationId) => {
-          setNewChatOpen(false);
-          navigation.navigate('ConversationDetail', { conversationId });
-        }}
-      />
     </View>
   );
 }
