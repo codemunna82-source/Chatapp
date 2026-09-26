@@ -206,12 +206,21 @@ metaAppRouter.get(
       summarizeAccountStatusByApp(auth.tenantId),
     ]);
 
-    // The environment's own configuration first: it is the oldest and, on
-    // most deployments, the only one holding any numbers.
+    // The environment's own configuration, shown first when anything still
+    // depends on it — a fresh deployment before its first real Business
+    // Manager, or a legacy number nobody has moved off it yet. Once every
+    // number belongs to a real one, this row is dead weight: nothing reads
+    // it, and its presence is what let an admin pick "the server's default
+    // configuration" for a NEW number, which is exactly the ambiguity this
+    // workspace has since required a real Business Manager for. So it drops
+    // out entirely rather than sitting in the list forever at zero numbers.
+    const defaultNumberCount = counts.get('') ?? 0;
     res.status(200).json({
       success: true,
       data: [
-        defaultAppRow(baseUrl, counts.get('') ?? 0, accountStatuses.get('') ?? null),
+        ...(defaultNumberCount > 0
+          ? [defaultAppRow(baseUrl, defaultNumberCount, accountStatuses.get('') ?? null)]
+          : []),
         ...apps.map((a) =>
           toPublic(a, baseUrl, counts.get(String(a._id)) ?? 0, accountStatuses.get(String(a._id)) ?? null),
         ),
