@@ -58,7 +58,18 @@ export async function metaRequest<T>(build: (client: AxiosInstance) => Promise<{
 
       lastError = mapped;
       logger.warn(
-        { attempt, code: mapped.code, metaCode: mapped.metaCode, retryable: mapped.retryable },
+        {
+          attempt,
+          code: mapped.code,
+          metaCode: mapped.metaCode,
+          metaSubcode: mapped.metaSubcode,
+          retryable: mapped.retryable,
+          // Meta's own description of the failure — not a secret, and the
+          // one thing a numeric code cannot say: WHICH permission, WHICH
+          // asset, WHICH of several unrelated causes a single code (like
+          // 200, "Permissions error") can mean.
+          metaMessage: mapped.message,
+        },
         'Meta API request failed',
       );
 
