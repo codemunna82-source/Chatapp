@@ -11,6 +11,8 @@ import { logger } from '../../lib/logger';
 import { getMetaGateway } from '../../integrations/meta';
 import type { MetaCredentials } from '../../integrations/meta';
 import { describeNumberHealth, type NumberHealth } from './numberHealth';
+import { summariseHealthStatus } from './healthStatusSummary';
+import { fetchNumberHealthStatus } from '../../integrations/meta/phoneNumbers';
 import { blockNumberRemoval } from './removalGuards';
 import { registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta/oauth';
 import { User } from '../users/user.model';
@@ -92,6 +94,7 @@ async function resolveAccountAccessToken(account: {
   accessTokenRef?: string | null;
   accessTokenEnc?: string | null;
   metaAppId?: unknown;
+  displayPhoneNumber?: string;
 }): Promise<string> {
   if (account.accessTokenEnc && isEncryptedEnvelope(account.accessTokenEnc)) {
     return resolveAccessToken(account.accessTokenRef ?? undefined, account.accessTokenEnc);
@@ -102,6 +105,36 @@ async function resolveAccountAccessToken(account: {
     const appToken = readAppSecret(app?.accessTokenEnc);
     if (appToken) return appToken;
   }
+
+  /**
+   * Step (3) was written for the single-Business-Manager deployment this
+   * grew out of, and it is still right for that one. It is wrong the
+   * moment a second Business Manager exists, because the global token
+   * belongs to exactly one of them — and a number that reaches here has
+   * no Business Manager of its own to be checked against.
+   *
+   * That is not hypothetical. Numbers added before the Business Manager
+   * flow existed sit on the seeded account, which carries a `mock:` token
+   * reference and no app at all; `mock:` and `env:` are both read as "use
+   * the global token", so those numbers send with another business's
+   * credentials. Meta's answer to that is a permissions error naming
+   * nothing, hours after whoever added the number has stopped looking.
+   *
+   * So the fallback now says which number took it, where the token came
+   * from and what is missing. It still SENDS — a working single-BM
+   * deployment must not break, and a wrong token that reaches Meta fails
+   * in a way someone can read, which is better than a refusal invented
+   * here. But it stops being silent.
+   */
+  logger.warn(
+    {
+      displayPhoneNumber: account.displayPhoneNumber,
+      accessTokenRef: account.accessTokenRef ?? null,
+      hasMetaApp: Boolean(account.metaAppId),
+    },
+    'This number has no Business Manager token of its own — falling back to the global ' +
+      'META_ACCESS_TOKEN, which belongs to one Business Manager and will be refused by any other',
+  );
 
   return resolveAccessToken(account.accessTokenRef ?? undefined, account.accessTokenEnc);
 }
@@ -145,7 +178,15 @@ export async function resolveMetaCredentialsForPhoneNumber(
   }
 
   return {
-    accessToken: await resolveAccountAccessToken(account),
+    // The number rides along so the fallback warning can name it. Without
+    // it the log says a token was missing, but not for whom — and the
+    // whole point is to be able to go and fix that one number.
+    accessToken: await resolveAccountAccessToken({
+      accessTokenRef: account.accessTokenRef,
+      accessTokenEnc: account.accessTokenEnc,
+      metaAppId: account.metaAppId,
+      displayPhoneNumber: phoneNumber.displayPhoneNumber,
+    }),
     phoneNumberId: phoneNumber.phoneNumberId,
     // Returned so the send path can mark this exact connection EXPIRED when
     // Meta rejects the token, rather than having to look it up again from
@@ -193,6 +234,13 @@ export interface PublicWhatsAppNumber {
    */
   callingStatus?: string;
   qualityRating?: string;
+  /**
+   * Meta's own verdict on whether this number can send — AVAILABLE,
+   * LIMITED or BLOCKED. Surfaced beside the rating because the two can
+   * disagree, and when they do this is the one that decides whether a
+   * customer receives anything.
+   */
+  canSendMessage?: string;
   messagingLimitTier?: string;
   /** When quality and tier were last read from Meta — null if never. */
   healthCheckedAt?: string;
@@ -269,10 +317,13 @@ export function toPublicWhatsAppNumber(
     qualityRating: n.qualityRating ?? undefined,
     messagingLimitTier: n.messagingLimitTier ?? undefined,
     healthCheckedAt: n.healthCheckedAt ? n.healthCheckedAt.toISOString() : undefined,
+    canSendMessage: n.canSendMessage ?? undefined,
     health: describeNumberHealth({
       qualityRating: n.qualityRating ?? undefined,
       messagingLimitTier: n.messagingLimitTier ?? undefined,
       nameStatus: n.nameStatus ?? undefined,
+      canSendMessage: n.canSendMessage ?? undefined,
+      sendBlockReason: n.sendBlockReason ?? undefined,
       healthCheckedAt: n.healthCheckedAt ?? undefined,
     }),
     linkApiKeyCreatedAt: n.linkApiKeyCreatedAt ? n.linkApiKeyCreatedAt.toISOString() : null,
@@ -335,6 +386,33 @@ export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promi
     } catch (err) {
       logger.warn({ err, phoneNumberId: number.phoneNumberId }, 'Could not read calling settings');
     }
+    /**
+     * Whether Meta will actually deliver from this number, which none of
+     * the fields above answer. Its own call and its own try/catch: it is
+     * the newest of these reads and the one most likely to change shape,
+     * and an older rating beats no health reading at all.
+     */
+    try {
+      const summary = summariseHealthStatus(
+        await fetchNumberHealthStatus(credentials.accessToken, number.phoneNumberId),
+      );
+      number.canSendMessage = summary.canSendMessage;
+      number.sendBlockReason = summary.reason;
+      if (summary.canSendMessage && summary.canSendMessage !== 'AVAILABLE') {
+        logger.warn(
+          {
+            phoneNumberId: number.phoneNumberId,
+            displayPhoneNumber: number.displayPhoneNumber,
+            canSendMessage: summary.canSendMessage,
+            reason: summary.reason,
+          },
+          'Meta will not fully deliver from this number',
+        );
+      }
+    } catch (err) {
+      logger.warn({ err, phoneNumberId: number.phoneNumberId }, 'Could not read Meta health_status');
+    }
+
     number.codeVerificationStatus = profile.codeVerificationStatus;
     number.healthCheckedAt = new Date();
     await number.save();

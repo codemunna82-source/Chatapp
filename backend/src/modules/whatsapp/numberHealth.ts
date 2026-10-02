@@ -31,6 +31,10 @@ export function describeNumberHealth(input: {
   messagingLimitTier?: string;
   /** Meta's review state for the business display name shown to customers. */
   nameStatus?: string;
+  /** Meta's health_status verdict: AVAILABLE, LIMITED, BLOCKED. */
+  canSendMessage?: string;
+  /** Meta's own sentence for why sending is not fully available. */
+  sendBlockReason?: string;
   healthCheckedAt?: Date | string;
   now?: Date;
 }): NumberHealth {
@@ -58,6 +62,36 @@ export function describeNumberHealth(input: {
    * the case that misleads: a healthy rating on a number nothing can
    * leave reads as an all-clear.
    */
+  /**
+   * Meta's own verdict comes first, ahead of everything inferred.
+   *
+   * The other fields describe the number; this one describes what Meta
+   * will do with it, and when they disagree this is the one that decides
+   * whether a customer receives anything. The number this was written for
+   * read back CONNECTED, GREEN and AVAILABLE_WITHOUT_REVIEW while
+   * health_status called it LIMITED — and health_status was right.
+   *
+   * Meta's own sentence is used verbatim rather than translated. Every
+   * rewording here is a guess about a state Meta may have changed since,
+   * and the raw sentence is both current and quotable in a support
+   * ticket, which a paraphrase is not.
+   */
+  const verdict = (input.canSendMessage ?? '').toUpperCase();
+  if (verdict && verdict !== 'AVAILABLE') {
+    const limited = verdict === 'LIMITED';
+    return {
+      level: limited ? 'warn' : 'critical',
+      headline: limited
+        ? 'Meta is limiting this number — some messages may not arrive'
+        : 'Meta is not delivering from this number',
+      detail:
+        (input.sendBlockReason ? `Meta says: ${input.sendBlockReason} ` : '') +
+        'A message can be accepted by WhatsApp and then refused at delivery, so a failed message here ' +
+        `is not a fault in this app.${tier}`,
+      stale,
+    };
+  }
+
   const nameState = (input.nameStatus ?? '').toUpperCase();
   const nameHealth = describeNameStatus(nameState, tier, stale);
   if (nameHealth) return nameHealth;

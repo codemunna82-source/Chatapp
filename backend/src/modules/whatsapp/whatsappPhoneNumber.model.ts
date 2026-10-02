@@ -47,6 +47,19 @@ const whatsappPhoneNumberSchema = new Schema(
      * gets a number banned.
      */
     nameStatus: { type: String },
+    /**
+     * Meta's own answer to "can this number send right now" — AVAILABLE,
+     * LIMITED, BLOCKED — from health_status, with the sentence it gives.
+     *
+     * Stored alongside the quality rating because the two disagree, and
+     * when they do this one is right. A number read back CONNECTED, with a
+     * High rating and an approved-looking nameStatus, while health_status
+     * called it LIMITED and every message it sent was accepted by the API
+     * and then refused at delivery. Nothing on any screen carried the one
+     * field that was telling the truth.
+     */
+    canSendMessage: { type: String },
+    sendBlockReason: { type: String },
     codeVerificationStatus: { type: String },
     /**
      * Meta's own live verdict on the number, read back on the same refresh
