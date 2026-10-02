@@ -1,5 +1,6 @@
 import { maybeSendGuestLinkAutoReply } from '../guest/guestAutoReply.service';
 import { logger } from '../../lib/logger';
+import { logSendBlockDiagnostics } from '../whatsapp/sendBlockDiagnostics';
 import type { NormalizedCallItem, NormalizedWebhookItem } from '../../integrations/meta/webhookPayload';
 import { parseWebhookPayload, type NormalizedMessageItem, type NormalizedStatusItem } from '../../integrations/meta/webhookPayload';
 import { recordWebhookEventOnce, markWebhookEventProcessed, markWebhookEventFailed } from './webhookEvent.repository';
@@ -224,6 +225,10 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
       { tenantId, messageId: item.messageId, reasons: failureReasons(item.errors) },
       'Meta refused to deliver a message it had already accepted — the customer did not receive it',
     );
+    // Ask Meta why, in its own words — throttled, and deliberately not
+    // awaited. The status update below is what the agent's screen is
+    // waiting on; a diagnostic Graph call must not sit in front of it.
+    void logSendBlockDiagnostics(item.phoneNumberId);
   }
 
   // item.timestamp is Meta's own — see the model's note on why the webhook's

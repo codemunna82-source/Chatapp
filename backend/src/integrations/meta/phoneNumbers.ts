@@ -58,6 +58,41 @@ export async function fetchPhoneNumberProfile(
   };
 }
 
+/**
+ * Meta's own verdict on whether this number can send right now, and why not.
+ *
+ * Separate from the profile fetch above, which reports what the number IS
+ * (name, quality, tier) rather than what it may DO. A number can read back
+ * CONNECTED with a High quality rating and still have every message
+ * refused at delivery, because the block lives on the WhatsApp Business
+ * Account or the business portfolio above it — two levels the number's own
+ * fields say nothing about.
+ *
+ * `health_status` is the one field that crosses those levels: it answers
+ * for the number, its WABA and the business together, and names the reason
+ * and the remedy for each. It is what turns "Business Account locked" —
+ * which says only that something, somewhere, is wrong — into a sentence
+ * someone can act on.
+ *
+ * Returned raw and untyped on purpose. Meta adds entity kinds and error
+ * codes to this structure without notice, and a diagnostic that drops the
+ * field it has not seen before is worse than useless: the unknown one is
+ * exactly the one being chased.
+ */
+export async function fetchNumberHealthStatus(
+  accessToken: string,
+  phoneNumberId: string,
+): Promise<unknown> {
+  const config: AxiosRequestConfig = {
+    ...authConfig(accessToken),
+    params: { fields: 'health_status' },
+  };
+  const res = await metaRequest<{ health_status?: unknown }>((client) =>
+    client.get(`/${phoneNumberId}`, config),
+  );
+  return res.health_status ?? null;
+}
+
 export interface PhoneNumberCallingSettings {
   /** ENABLED | DISABLED, as Meta reports it. Undefined when Meta returns no
    *  calling object at all — which is how a number with calling unavailable
