@@ -76,17 +76,6 @@ async function main(): Promise<void> {
   // the first number's thread. Idempotent, and never fatal.
   await migrateConversationNumberIndexAtBoot();
 
-  if (isRedisConfigured()) {
-    startWebhookWorker();
-    logger.info('Webhook processing worker started (BullMQ + Redis)');
-    startSubscriptionExpiryWorker();
-    await scheduleSubscriptionExpirySweep();
-    logger.info('Subscription expiry sweep worker started (hourly, BullMQ + Redis)');
-  } else {
-    logger.warn('REDIS_URL not configured — webhook deliveries will be processed inline, not queued');
-    logger.warn('REDIS_URL not configured — subscription expiry sweep will not run (auth middleware stays authoritative regardless)');
-  }
-
   // Surfaced at boot, not on first failure: Meta refuses to save a callback
   // URL whose challenge fails, so a missing verify token has to be visible
   // in the deploy log before anyone tries to subscribe the webhook.
@@ -125,6 +114,55 @@ async function main(): Promise<void> {
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+
+  // Deliberately after listen(), and deliberately not awaited.
+  //
+  // These need Redis, and the shared connection is built with
+  // maxRetriesPerRequest: null because BullMQ requires it of a blocking
+  // connection — which means a command issued while Redis is unreachable
+  // never resolves and never rejects, it just waits. Awaiting one of them
+  // on the boot path therefore does not fail the deploy with an error: it
+  // hangs before the port is ever bound, and the platform eventually gives
+  // up waiting for a listener that was one `await` away. That is exactly
+  // how a suspended Redis instance took this service down for three
+  // deploys in a row, with a green build and nothing in the log but
+  // ECONNREFUSED.
+  //
+  // Queued webhook processing and the hourly sweep are both background
+  // concerns. Neither is allowed to decide whether this process serves
+  // HTTP, and both pick up on their own once Redis answers again.
+  startBackgroundQueues();
+}
+
+/**
+ * Starts the Redis-backed background workers, reporting rather than
+ * throwing.
+ *
+ * Not async on purpose: nothing here is safe to await on a path that must
+ * reach a bound port (see the call site). A sweep that never gets scheduled
+ * delays a notification; it can never grant access, because the auth
+ * middleware does its own live validity check and never reads the cached
+ * subscription status.
+ */
+function startBackgroundQueues(): void {
+  if (!isRedisConfigured()) {
+    logger.warn('REDIS_URL not configured — webhook deliveries will be processed inline, not queued');
+    logger.warn(
+      'REDIS_URL not configured — subscription expiry sweep will not run (auth middleware stays authoritative regardless)',
+    );
+    return;
+  }
+
+  startWebhookWorker();
+  logger.info('Webhook processing worker started (BullMQ + Redis)');
+  startSubscriptionExpiryWorker();
+
+  // The .catch is for a genuine rejection (a malformed REDIS_URL, say).
+  // An unreachable Redis does not reject — it stays pending until the
+  // server is back, and the sweep is scheduled then.
+  scheduleSubscriptionExpirySweep()
+    .then(() => logger.info('Subscription expiry sweep scheduled (hourly, BullMQ + Redis)'))
+    .catch((err) => logger.error({ err }, 'Could not schedule the subscription expiry sweep'));
 }
 
 main().catch((err) => {
