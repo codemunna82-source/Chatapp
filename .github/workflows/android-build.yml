@@ -39,6 +39,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Needed to attach the APK to a release. The default token is
+    # read-only on this repository, and a release step without this fails
+    # at the very end, after the fifteen minutes of building.
+    permissions:
+      contents: write
     # Safeguard so a genuinely stuck run doesn't tie up a runner until
     # GitHub's own 6-hour default job timeout.
     timeout-minutes: 25
@@ -290,3 +295,32 @@ jobs:
           path: mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      # The artifact above is a zip, and GitHub only serves it to someone
+      # signed in to an account with access to this repository. On a phone
+      # that is a sign-in, a zip, an unzip and a file manager before
+      # anything can be installed — which is where getting the build onto
+      # a device actually kept failing.
+      #
+      # So the same file also goes to a release, where it is a plain .apk
+      # on a direct link that Android installs by tapping it. The tag is
+      # fixed and the release is replaced on every build: this is "the
+      # latest test build", not a version history, and a new tag per run
+      # would leave a list of near-identical releases nobody prunes.
+      - name: Publish the APK as a downloadable release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-apk
+          name: VOXO — latest test build
+          body: |
+            Debug-signed test build of VOXO. Tap `voxo.apk` below to install
+            on Android (allow installs from this source when asked).
+
+            Commit: ${{ github.sha }}
+            Branch: ${{ github.ref_name }}
+            Built: ${{ github.run_started_at }}
+          files: mobile/android/app/build/outputs/apk/release/app-release.apk#voxo.apk
+          make_latest: true
+          # Replaced rather than appended, so the link always points at
+          # this run's build and never at a stale one beside it.
+          prerelease: false
