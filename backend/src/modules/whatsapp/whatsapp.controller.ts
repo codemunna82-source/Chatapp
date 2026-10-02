@@ -9,6 +9,7 @@ import {
   setNumberEnabled,
   setCallingEnabled,
   moveNumberToBusinessManager,
+  removeNumberFromTenant,
 } from './whatsapp.service';
 import {
   connectWhatsAppForUser,
@@ -16,6 +17,7 @@ import {
   getConnectionStatus,
 } from './embeddedSignup.service';
 import { rotateLinkApiKey, revokeLinkApiKey } from './linkApiKey';
+import { recordAudit } from '../audit/auditLog.service';
 
 export const listPhoneNumbersHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
@@ -135,4 +137,18 @@ export const revokeLinkApiKeyHandler = asyncHandler(async (req: Request, res: Re
   const revoked = await revokeLinkApiKey(req.params.id as string, auth.tenantId);
   if (!revoked) throw ApiError.notFound('NUMBER_NOT_FOUND', 'WhatsApp number not found');
   res.status(200).json({ success: true, data: { revoked: true } });
+});
+
+export const removeNumberHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const result = await removeNumberFromTenant(auth.tenantId, req.params.id as string);
+  await recordAudit({
+    tenantId: auth.tenantId,
+    actorUserId: auth.userId,
+    action: 'whatsapp_number.delete',
+    targetType: 'WhatsAppPhoneNumber',
+    targetId: result.id,
+    metadata: { unassignedUsers: result.unassignedUsers },
+  });
+  res.status(200).json({ success: true, data: result });
 });

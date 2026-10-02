@@ -51,6 +51,12 @@ export const disableUserHandler = asyncHandler(async (req: Request, res: Respons
   res.status(200).json({ success: true, data: user });
 });
 
+export const removeUserHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const result = await userService.removeUserForTenant(auth.tenantId, auth.userId, req.params.id as string);
+  res.status(200).json({ success: true, data: result });
+});
+
 export const updateOwnAvatarHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const file = req.file;

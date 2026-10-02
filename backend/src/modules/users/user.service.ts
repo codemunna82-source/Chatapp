@@ -4,9 +4,12 @@ import { hashPassword } from '../../lib/password';
 import { revokeAllSessionsForUser } from '../auth/auth.service';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './user.repository';
+import { refuseUserRemoval } from './userRemoval';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
 import { isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer, deleteCloudinaryAsset } from '../../integrations/cloudinary';
-import type { UserDoc } from './user.model';
+import { User, type UserDoc } from './user.model';
+import { DeviceToken } from '../devices/deviceToken.model';
+import { invalidateAuthContext } from '../auth/authContext.service';
 import type { z } from 'zod';
 import type { createUserSchema, updateUserSchema, listUsersQuerySchema } from './user.validation';
 
@@ -309,6 +312,106 @@ export async function getUserAvatarForTenant(
 }
 
 /** DELETE /api/users/:id is implemented as a soft-disable — see user.repository.ts. */
+/**
+ * Removes a member from the workspace for good.
+ *
+ * Distinct from disable, which is the right answer most of the time and
+ * stays the default: disable keeps the row, so every message the person
+ * sent still shows who sent it, and it is reversible the day they come
+ * back. This is for the other case — the account was created by mistake,
+ * or the person is gone and the admin wants them out of the list.
+ *
+ * Two refusals, both of which exist to stop an admin locking themselves
+ * out of their own workspace permanently:
+ *
+ *  - You cannot remove yourself. The request would succeed and the next
+ *    one would 401, with no way back in.
+ *  - You cannot remove the last MASTER_ADMIN. A workspace with no admin
+ *    has no one who can create users, add numbers or manage credentials,
+ *    and nothing in the product can promote a SUB_USER to fix it.
+ *
+ * What travels with the row: refresh tokens (so an open session cannot
+ * refresh its way back in) and device tokens (so their phone stops
+ * receiving this workspace's push). What deliberately does not: messages,
+ * call logs and audit entries. Those point at the user by id and record
+ * what actually happened; rewriting them to hide a removed member would be
+ * falsifying the history, and deleting them would take the customer's side
+ * of the conversation with it. The audit entry carries the name and email
+ * so the trail still says WHO was removed once the row is gone.
+ */
+export async function removeUserForTenant(
+  tenantId: string,
+  actorUserId: string,
+  id: string,
+): Promise<{ id: string; removed: true; removedDevices: number }> {
+  // Self-removal is refused before the lookup: it needs no database, and
+  // the answer does not depend on what the row says.
+  const selfRefusal = refuseUserRemoval({
+    actorUserId,
+    targetUserId: id,
+    targetRole: '',
+    masterAdminCount: Number.POSITIVE_INFINITY,
+  });
+  if (selfRefusal) throw ApiError.badRequest(selfRefusal.code, selfRefusal.message);
+
+  const user = await repo.findUserByIdAndTenant(id, tenantId);
+  if (!user) {
+    throw ApiError.notFound('USER_NOT_FOUND', 'User not found');
+  }
+
+  // Counted only for an admin: for a SUB_USER the answer cannot change, and
+  // this is a collection scan on a path that is already rare.
+  const masterAdminCount =
+    user.role === 'MASTER_ADMIN'
+      ? await User.countDocuments({ tenantId, role: 'MASTER_ADMIN' })
+      : Number.POSITIVE_INFINITY;
+  const refusal = refuseUserRemoval({
+    actorUserId,
+    targetUserId: id,
+    targetRole: user.role,
+    masterAdminCount,
+  });
+  if (refusal) {
+    throw refusal.kind === 'conflict'
+      ? ApiError.conflict(refusal.code, refusal.message)
+      : ApiError.badRequest(refusal.code, refusal.message);
+  }
+
+  // Captured before the delete — this is the only copy that will exist
+  // once the row is gone, and an audit entry that names an id nobody can
+  // resolve answers nothing.
+  const identity = { displayName: user.displayName, email: user.email, role: user.role };
+
+  // revokeAllSessionsForUser rather than a second copy of the same
+  // updateMany: it already carries the tenant filter and the reuse-detection
+  // semantics the auth module relies on.
+  const [, devices] = await Promise.all([
+    revokeAllSessionsForUser(String(user._id), tenantId),
+    DeviceToken.deleteMany({ tenantId, userId: user._id }),
+  ]);
+
+  await User.deleteOne({ _id: user._id, tenantId });
+  invalidateAuthContext(String(user._id), tenantId);
+
+  await recordAudit({
+    tenantId,
+    actorUserId,
+    action: 'user.delete',
+    targetType: 'User',
+    targetId: user._id,
+    metadata: {
+      ...identity,
+      removedDevices: devices.deletedCount ?? 0,
+    },
+  });
+
+  return {
+    id: String(user._id),
+    removed: true,
+    removedDevices: devices.deletedCount ?? 0,
+  };
+}
+
 export async function disableUserForTenant(
   tenantId: string,
   actorUserId: string,

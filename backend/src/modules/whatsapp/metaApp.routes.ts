@@ -14,6 +14,7 @@ import { MetaApp, type MetaAppDoc } from './metaApp.model';
 import { WhatsAppAccount } from './whatsappAccount.model';
 import { WhatsAppPhoneNumber } from './whatsappPhoneNumber.model';
 import { listMetaAppsForTenant, findMetaAppByIdAndTenant } from './metaApp.repository';
+import { blockBusinessManagerRemoval } from './removalGuards';
 
 /**
  * Business Managers, as the workspace sees them.
@@ -428,5 +429,63 @@ metaAppRouter.patch(
     });
 
     res.status(200).json({ success: true, data: toPublic(app, baseUrlFor(req)) });
+  }),
+);
+
+/**
+ * Removes a Business Manager from the workspace.
+ *
+ * Refused while any WhatsApp account still belongs to it, and that refusal
+ * is the point of the endpoint rather than an obstacle in front of it:
+ * deleting the credentials a number sends on does not stop the number
+ * existing, it leaves one that accepts a send, reports no error an admin
+ * would see, and silently delivers nothing. The counts are named so the
+ * admin knows what to move first — /numbers/:id/business-manager moves a
+ * number between Business Managers, and a number that has nowhere to go
+ * can be removed outright.
+ *
+ * The secrets go with the row. There is no soft-delete here on purpose:
+ * `status: DISABLED` already exists for "stop using this but keep it", so
+ * a delete that only hid the row would leave an app secret and an access
+ * token on file that the admin believes they have removed.
+ */
+metaAppRouter.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const app = await findMetaAppByIdAndTenant(req.params.id as string, auth.tenantId);
+    if (!app) throw ApiError.notFound('META_APP_NOT_FOUND', 'Business Manager not found');
+
+    const accounts = await WhatsAppAccount.find({ tenantId: auth.tenantId, metaAppId: app._id })
+      .select('_id')
+      .lean();
+    const numberCount =
+      accounts.length > 0
+        ? await WhatsAppPhoneNumber.countDocuments({
+            tenantId: auth.tenantId,
+            whatsappAccountId: { $in: accounts.map((a) => a._id) },
+          })
+        : 0;
+    const blocked = blockBusinessManagerRemoval({
+      name: app.name,
+      accountCount: accounts.length,
+      numberCount,
+    });
+    if (blocked) throw ApiError.conflict(blocked.code, blocked.message);
+
+    await MetaApp.deleteOne({ _id: app._id, tenantId: auth.tenantId });
+
+    await recordAudit({
+      tenantId: auth.tenantId,
+      actorUserId: auth.userId,
+      action: 'meta_app.delete',
+      targetType: 'MetaApp',
+      targetId: app._id,
+      // Name and app id so the trail still says WHICH Business Manager was
+      // removed once the row it pointed at is gone. Never the secrets.
+      metadata: { name: app.name, appId: app.appId },
+    });
+
+    res.status(200).json({ success: true, data: { id: String(app._id), removed: true } });
   }),
 );

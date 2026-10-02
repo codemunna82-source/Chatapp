@@ -22,6 +22,7 @@ import {
   setNumberBusinessManagerHandler,
   rotateLinkApiKeyHandler,
   revokeLinkApiKeyHandler,
+  removeNumberHandler,
 } from './whatsapp.controller';
 import { whatsappSignupPageHandler, whatsappSignupCallbackHandler } from './signupPage.controller';
 
@@ -100,4 +101,13 @@ whatsappRouter.delete(
   '/numbers/:id/link-api-key',
   validate({ params: numberIdParamSchema }),
   revokeLinkApiKeyHandler,
+);
+
+// Removing a number from the workspace. Refused while it carries customer
+// chats — see removeNumberFromTenant for why there is no silent version of
+// that, and for the enabled switch above being the answer instead.
+whatsappRouter.delete(
+  '/numbers/:id',
+  validate({ params: numberIdParamSchema }),
+  removeNumberHandler,
 );

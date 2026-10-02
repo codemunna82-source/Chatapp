@@ -11,8 +11,10 @@ import { logger } from '../../lib/logger';
 import { getMetaGateway } from '../../integrations/meta';
 import type { MetaCredentials } from '../../integrations/meta';
 import { describeNumberHealth, type NumberHealth } from './numberHealth';
+import { blockNumberRemoval } from './removalGuards';
 import { registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta/oauth';
 import { User } from '../users/user.model';
+import { Conversation } from '../conversations/conversation.model';
 import { invalidateAuthContext } from '../auth/authContext.service';
 
 /**
@@ -598,6 +600,61 @@ export async function setNumberEnabled(
   );
 
   return toPublicWhatsAppNumber(number);
+}
+
+/**
+ * Removes a number from the workspace.
+ *
+ * Refused while the number carries conversation history, and that is the
+ * whole design rather than a limitation of it: a Conversation's
+ * whatsappPhoneNumberId is a required field, so deleting the number it
+ * points at does not tidy anything up — it leaves every one of those
+ * customer threads pointing at a row that no longer exists. There is no
+ * silent-data-loss version of this operation, so the refusal names the
+ * count and points at the switch that does what the admin usually wants:
+ * `enabled: false` locks every member out of the number and keeps the
+ * history intact and readable.
+ *
+ * What it DOES handle, when the number is clean: unassigning every member
+ * who was sending from it, so no account is left pointing at a number that
+ * is gone, and invalidating their cached auth context so the change is
+ * immediate rather than up to a cache lifetime later.
+ */
+export async function removeNumberFromTenant(
+  tenantId: string,
+  numberId: string,
+): Promise<{ id: string; removed: true; unassignedUsers: number }> {
+  const number = await findPhoneNumberByIdAndTenant(numberId, tenantId);
+  if (!number) {
+    throw ApiError.notFound('WHATSAPP_NUMBER_NOT_FOUND', 'That number is not registered to this workspace.');
+  }
+
+  const conversationCount = await Conversation.countDocuments({ tenantId, whatsappPhoneNumberId: numberId });
+  const blocked = blockNumberRemoval({ displayPhoneNumber: number.displayPhoneNumber, conversationCount });
+  if (blocked) throw ApiError.conflict(blocked.code, blocked.message);
+
+  // Before the delete, so a failure here leaves the number in place rather
+  // than removed with members still pointing at it.
+  const assigned = await User.find({ tenantId, whatsappPhoneNumberId: numberId }).select('_id').lean();
+  if (assigned.length > 0) {
+    await User.updateMany(
+      { tenantId, whatsappPhoneNumberId: numberId },
+      // $unset rather than null: the field is optional, and leaving it
+      // present holding null makes every reader treat absent and null
+      // as separate cases for no reason.
+      { $unset: { whatsappPhoneNumberId: '' } },
+    );
+    for (const u of assigned) invalidateAuthContext(String(u._id), tenantId);
+  }
+
+  await WhatsAppPhoneNumber.deleteOne({ _id: number._id, tenantId });
+
+  logger.info(
+    { numberId, displayPhoneNumber: number.displayPhoneNumber, unassignedUsers: assigned.length },
+    'WhatsApp number removed from the workspace by an admin',
+  );
+
+  return { id: String(number._id), removed: true, unassignedUsers: assigned.length };
 }
 
 /**

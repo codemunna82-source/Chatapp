@@ -20,6 +20,7 @@ import {
   updateOwnAvatarHandler,
   getUserAvatarHandler,
   resetUserPasswordHandler,
+  removeUserHandler,
 } from './user.controller';
 
 export const userRouter = Router();
@@ -56,4 +57,13 @@ userRouter.post(
   validate({ params: userIdParamSchema, body: resetUserPasswordSchema }),
   resetUserPasswordHandler,
 );
+// DELETE keeps meaning "disable" — the safe, reversible action, and the
+// one an admin usually wants: the row stays, so every message the person
+// sent still shows who sent it.
 userRouter.delete('/:id', validate({ params: userIdParamSchema }), disableUserHandler);
+// Removing the account for good is a separate, explicit path rather than a
+// flag on the one above. Nobody deletes a colleague's account by mistyping
+// a URL, and the two outcomes are far enough apart to be worth spelling
+// out — see removeUserForTenant for what travels with the row and what
+// deliberately does not.
+userRouter.delete('/:id/permanently', validate({ params: userIdParamSchema }), removeUserHandler);
