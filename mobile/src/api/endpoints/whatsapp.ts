@@ -36,3 +36,17 @@ export async function registerNumberForCloudApi(
   );
   return res.data.data;
 }
+
+/**
+ * The caller's own assigned number and its current quality rating.
+ *
+ * Unlike listWhatsAppNumbers this is open to every signed-in member, and
+ * returns only their own number — the server scopes it to the assignment,
+ * so there is nothing here of anyone else's. `null` means they have no
+ * number of their own (an admin, or a member nobody has assigned yet),
+ * which is an ordinary state and not an error.
+ */
+export async function fetchMyWhatsAppNumber(): Promise<WhatsAppNumber | null> {
+  const res = await apiClient.get<ApiSuccess<WhatsAppNumber | null>>('/whatsapp/my-number');
+  return res.data.data ?? null;
+}

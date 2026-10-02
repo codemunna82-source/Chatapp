@@ -10,6 +10,7 @@ import {
   setCallingEnabled,
   moveNumberToBusinessManager,
   removeNumberFromTenant,
+  findOwnNumberHealth,
 } from './whatsapp.service';
 import {
   connectWhatsAppForUser,
@@ -23,6 +24,19 @@ export const listPhoneNumbersHandler = asyncHandler(async (req: Request, res: Re
   const auth = getTenantContext(req);
   const items = await listPhoneNumbersForTenant(auth.tenantId);
   res.status(200).json({ success: true, data: items });
+});
+
+/**
+ * The caller's own number and its quality.
+ *
+ * 200 with `data: null` rather than 404 when the user has no number of
+ * their own: having none is an ordinary state (an admin, or a member
+ * nobody has assigned yet), not a failure the app should show an error for.
+ */
+export const myNumberHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const number = await findOwnNumberHealth(auth);
+  res.status(200).json({ success: true, data: number });
 });
 
 export const registerPhoneNumberHandler = asyncHandler(async (req: Request, res: Response) => {

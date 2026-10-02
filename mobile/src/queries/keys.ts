@@ -23,6 +23,7 @@ export const queryKeys = {
   dashboard: ['dashboard'] as const,
   calls: ['calls'] as const,
   whatsappNumbers: ['whatsappNumbers'] as const,
+  myWhatsAppNumber: ['myWhatsAppNumber'] as const,
   whatsappConnection: ['whatsappConnection'] as const,
   /** Workspace-wide settings, including the name customers see. */
   tenantSettings: ['tenantSettings'] as const,

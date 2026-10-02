@@ -21,6 +21,7 @@ import { Badge } from '../../components/Badge';
 import { Avatar } from '../../components/Avatar';
 import { useAuthStore } from '../../store/authStore';
 import { useWhatsAppConnection } from '../../queries/useWhatsAppConnection';
+import { MyNumberQualityCard } from './MyNumberQualityCard';
 import { useThemePreferenceStore, type ThemePreference } from '../../store/themePreferenceStore';
 import {
   useChatWallpaperStore,
@@ -578,6 +579,13 @@ export function SettingsScreen({ navigation }: Props) {
           {user?.role === 'MASTER_ADMIN' ? 'Master Admin' : 'Team member'}
         </Text>
       </View>
+
+      {/* Directly under the account block, above the preference sections:
+          a falling quality rating is the one thing on this screen that is
+          time-sensitive, and burying it under wallpaper and alert toggles
+          would put it where nobody scrolls. Renders nothing at all for an
+          admin or an unassigned member. */}
+      <MyNumberQualityCard />
 
       <AppearanceSection />
       <ChatWallpaperSection />

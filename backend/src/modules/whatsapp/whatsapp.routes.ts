@@ -23,6 +23,7 @@ import {
   rotateLinkApiKeyHandler,
   revokeLinkApiKeyHandler,
   removeNumberHandler,
+  myNumberHandler,
 } from './whatsapp.controller';
 import { whatsappSignupPageHandler, whatsappSignupCallbackHandler } from './signupPage.controller';
 
@@ -44,6 +45,13 @@ whatsappRouter.get('/signup/callback', whatsappSignupCallbackHandler);
 whatsappRouter.post('/connect', requireAuth, validate({ body: connectWhatsAppSchema }), connectWhatsAppHandler);
 whatsappRouter.get('/status', requireAuth, whatsappStatusHandler);
 whatsappRouter.post('/disconnect', requireAuth, disconnectWhatsAppHandler);
+
+// A member reading their OWN number's quality — deliberately above the
+// MASTER_ADMIN guard below, because the person who can act on a falling
+// rating is the agent sending the messages, not only the admin. The
+// handler scopes it to the caller's own assignment, so this grants no
+// visibility of anyone else's number.
+whatsappRouter.get('/my-number', requireAuth, myNumberHandler);
 
 // MASTER_ADMIN only: the sole consumer is the Team screen's "sends from"
 // picker, which is itself admin-only. A SUB_USER has no use for the list —

@@ -19,6 +19,23 @@ export function useWhatsAppNumbers(enabled = true) {
   });
 }
 
+/**
+ * The signed-in member's own number and its quality rating.
+ *
+ * Open to every role, unlike useWhatsAppNumbers — so no `enabled` flag.
+ * A short staleTime rather than the five minutes the admin list uses: the
+ * server already refreshes a reading older than fifteen minutes when this
+ * is called, and a rating the user opened Settings specifically to read
+ * should not come back out of a cache from an hour ago.
+ */
+export function useMyWhatsAppNumber() {
+  return useQuery({
+    queryKey: queryKeys.myWhatsAppNumber,
+    queryFn: whatsappApi.fetchMyWhatsAppNumber,
+    staleTime: 60 * 1000,
+  });
+}
+
 export function useRegisterWhatsAppNumber() {
   const queryClient = useQueryClient();
   return useMutation({

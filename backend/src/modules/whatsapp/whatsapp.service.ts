@@ -16,6 +16,8 @@ import { registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta
 import { User } from '../users/user.model';
 import { Conversation } from '../conversations/conversation.model';
 import { invalidateAuthContext } from '../auth/authContext.service';
+import { visibleWhatsAppPhoneNumberId } from '../conversations/conversation.access';
+import type { AuthContext } from '../../types/express';
 
 /**
  * Turns a stored `accessTokenRef` into the token to actually call Meta with.
@@ -382,6 +384,43 @@ export async function listPhoneNumbersForTenant(tenantId: string): Promise<Publi
     const info = accountOfNumber.get(String(n.whatsappAccountId));
     return toPublicWhatsAppNumber(n, info?.app ?? null, info?.accountStatus);
   });
+}
+
+/**
+ * The caller's own assigned number, with a current health reading.
+ *
+ * Exists because quality was admin-only, and the person who can actually
+ * change what a rating does is the agent sending the messages. Meta lowers
+ * the sending limit before it restricts a number, so a drop is the last
+ * point at which anything can still be done about it — and the agent found
+ * out only when sends started failing, with nothing on screen to connect
+ * the two.
+ *
+ * Scoped through visibleWhatsAppPhoneNumberId, so this can only ever
+ * return the number assigned to this user. Null for MASTER_ADMIN (who has
+ * the whole list on the admin screen) and for a user with no assignment —
+ * both are "no number of your own", not an error.
+ *
+ * Refreshed inline rather than in the background, unlike the admin list:
+ * that screen renders a dozen rows and must not wait on a dozen Graph
+ * round trips, while this is one number on a screen the user opened to
+ * read exactly this. A stale rating is the one thing it must not show.
+ * Never fatal — refreshNumberHealth swallows its own failures, and the
+ * stored reading is rendered either way.
+ */
+export async function findOwnNumberHealth(auth: AuthContext): Promise<PublicWhatsAppNumber | null> {
+  const scope = visibleWhatsAppPhoneNumberId(auth);
+  if (!scope) return null;
+
+  const number = await findPhoneNumberByIdAndTenant(scope, auth.tenantId);
+  if (!number) return null;
+
+  await refreshNumberHealthIfStale(number);
+
+  const info = (await resolveBusinessManagerOfNumbers(auth.tenantId, [number])).get(
+    String(number.whatsappAccountId),
+  );
+  return toPublicWhatsAppNumber(number, info?.app ?? null, info?.accountStatus);
 }
 
 /** account id → the Business Manager it belongs to, for a tenant's numbers. */
