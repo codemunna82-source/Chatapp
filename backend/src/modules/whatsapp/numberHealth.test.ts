@@ -79,3 +79,68 @@ describe('friendlyTier', () => {
     expect(friendlyTier('TIER_500K')).toBe('TIER_500K');
   });
 });
+
+/**
+ * The display name, which is what actually decided whether a message
+ * arrived — and which nothing on any screen reported.
+ *
+ * The number read back CONNECTED with a High quality rating while every
+ * send was accepted and then refused at delivery, because Meta holds a
+ * number at a limit until the business name shown to customers is
+ * approved. Its own code for that refusal says "Business Account locked",
+ * naming the one level that was fine.
+ */
+describe('describeNumberHealth — display name', () => {
+  const checkedAt = new Date('2026-10-02T19:00:00Z');
+  const now = new Date('2026-10-02T19:05:00Z');
+
+  it('reports a pending display name even while quality is GREEN', () => {
+    // The case that misleads: a healthy rating on a number nothing can
+    // leave reads as an all-clear.
+    const health = describeNumberHealth({
+      qualityRating: 'GREEN',
+      nameStatus: 'PENDING_REVIEW',
+      healthCheckedAt: checkedAt,
+      now,
+    });
+    expect(health.level).toBe('critical');
+    expect(health.headline).toMatch(/display name/i);
+  });
+
+  it('reports a rejected display name', () => {
+    const health = describeNumberHealth({ nameStatus: 'DECLINED', healthCheckedAt: checkedAt, now });
+    expect(health.level).toBe('critical');
+    expect(health.headline).toMatch(/rejected/i);
+  });
+
+  it('reports an expired approval and a name never submitted', () => {
+    expect(describeNumberHealth({ nameStatus: 'EXPIRED', healthCheckedAt: checkedAt, now }).level).toBe(
+      'critical',
+    );
+    expect(describeNumberHealth({ nameStatus: 'NONE', healthCheckedAt: checkedAt, now }).level).toBe('warn');
+  });
+
+  it('stays out of the way once the name is settled', () => {
+    // APPROVED and AVAILABLE_WITHOUT_REVIEW are both fine, and an unread
+    // number must not be reported as a problem it has never had.
+    for (const nameStatus of ['APPROVED', 'AVAILABLE_WITHOUT_REVIEW', undefined]) {
+      const health = describeNumberHealth({
+        qualityRating: 'GREEN',
+        nameStatus,
+        healthCheckedAt: checkedAt,
+        now,
+      });
+      expect(health.level).toBe('ok');
+    }
+  });
+
+  it('still carries the sending limit into the display-name wording', () => {
+    const health = describeNumberHealth({
+      nameStatus: 'PENDING_REVIEW',
+      messagingLimitTier: 'TIER_250',
+      healthCheckedAt: checkedAt,
+      now,
+    });
+    expect(health.detail).toContain('250 customers/day');
+  });
+});

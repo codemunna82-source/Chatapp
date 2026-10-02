@@ -29,6 +29,8 @@ export const MESSAGING_TIERS = ['TIER_250', 'TIER_1K', 'TIER_10K', 'TIER_100K', 
 export function describeNumberHealth(input: {
   qualityRating?: string;
   messagingLimitTier?: string;
+  /** Meta's review state for the business display name shown to customers. */
+  nameStatus?: string;
   healthCheckedAt?: Date | string;
   now?: Date;
 }): NumberHealth {
@@ -38,6 +40,27 @@ export function describeNumberHealth(input: {
 
   const rating = (input.qualityRating ?? '').toUpperCase();
   const tier = input.messagingLimitTier ? ` Current limit: ${friendlyTier(input.messagingLimitTier)}.` : '';
+
+  /**
+   * The display name comes first, ahead of the quality rating.
+   *
+   * Quality describes a trend — how customers have reacted to what was
+   * sent. The display name describes whether the number may send at all:
+   * until Meta has approved it, the number is held at a limit, and Meta
+   * reports that as can_send_message: LIMITED on the number while the
+   * account, the business and the app all read AVAILABLE. A send in that
+   * state is accepted by the API and then refused at delivery, which
+   * reaches the agent as a bare failed tick and reaches an admin, in
+   * Meta's own words, as "Business Account locked" — naming the one thing
+   * that is NOT the problem.
+   *
+   * It is reported even when quality is GREEN, because that is exactly
+   * the case that misleads: a healthy rating on a number nothing can
+   * leave reads as an all-clear.
+   */
+  const nameState = (input.nameStatus ?? '').toUpperCase();
+  const nameHealth = describeNameStatus(nameState, tier, stale);
+  if (nameHealth) return nameHealth;
 
   switch (rating) {
     case 'GREEN':
@@ -74,6 +97,60 @@ export function describeNumberHealth(input: {
           `this is not published also shows nothing here.${tier}`,
         stale,
       };
+  }
+}
+
+/**
+ * The display name's review state, when it is something to act on.
+ *
+ * Null for the two states that are fine — APPROVED, and the
+ * AVAILABLE_WITHOUT_REVIEW that Meta gives a name needing no review — and
+ * null for an empty value, which means the number has never been read
+ * rather than that anything is wrong.
+ */
+function describeNameStatus(nameStatus: string, tier: string, stale: boolean): NumberHealth | null {
+  switch (nameStatus) {
+    case 'DECLINED':
+      return {
+        level: 'critical',
+        headline: 'Display name was rejected — messages will not arrive',
+        detail:
+          'Meta rejected the business name shown to customers, so this number is held at a limit and ' +
+          'messages can be accepted and then not delivered. Submit a name that matches the real, ' +
+          'registered business — a generic word, a misspelling, or a name that does not match the ' +
+          `business is the usual reason for a rejection.${tier}`,
+        stale,
+      };
+    case 'PENDING_REVIEW':
+      return {
+        level: 'critical',
+        headline: 'Display name is waiting for Meta — messages may not arrive',
+        detail:
+          'Until Meta approves the business name shown to customers, this number is held at a limit. ' +
+          'A message can be accepted by WhatsApp and then refused at delivery, with the customer ' +
+          `receiving nothing. Nothing is wrong with this app — the approval is the thing to chase.${tier}`,
+        stale,
+      };
+    case 'EXPIRED':
+      return {
+        level: 'critical',
+        headline: 'Display name approval has expired',
+        detail:
+          'Meta no longer treats the business name on this number as approved, which holds it at a ' +
+          `limit. Resubmit the display name in WhatsApp Manager.${tier}`,
+        stale,
+      };
+    case 'NONE':
+      return {
+        level: 'warn',
+        headline: 'No display name submitted yet',
+        detail:
+          'Customers see no approved business name on this number, and it stays at a limit until one ' +
+          `is submitted and approved.${tier}`,
+        stale,
+      };
+    default:
+      return null;
   }
 }
 

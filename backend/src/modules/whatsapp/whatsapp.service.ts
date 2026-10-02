@@ -272,6 +272,7 @@ export function toPublicWhatsAppNumber(
     health: describeNumberHealth({
       qualityRating: n.qualityRating ?? undefined,
       messagingLimitTier: n.messagingLimitTier ?? undefined,
+      nameStatus: n.nameStatus ?? undefined,
       healthCheckedAt: n.healthCheckedAt ?? undefined,
     }),
     linkApiKeyCreatedAt: n.linkApiKeyCreatedAt ? n.linkApiKeyCreatedAt.toISOString() : null,
