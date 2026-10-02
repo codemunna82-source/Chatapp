@@ -47,8 +47,16 @@ export function nudgeWindowStart(
 /**
  * Whether this particular send is one the allowance governs.
  *
- * Three things are outside it, and each for its own reason:
+ * Four things are outside it, and each for its own reason:
  *
+ * - A customer who wrote to us within the last 24 hours. This is the big
+ *   one, and leaving it out was the bug: the allowance is for customers
+ *   who have NOT engaged, but the only sends that ever reached this check
+ *   were the ones Meta's 24-hour window had already let through — so a
+ *   plain reply to a customer who had just messaged was refused as if it
+ *   were an unsolicited nudge, on every number and every business
+ *   account. Inside that window Meta itself allows a free-form reply, and
+ *   so do we.
  * - The private-chat INVITATION. It is the way out of the cap; capping it
  *   would trap a customer who has not opened their link with no way left
  *   to be sent one. It is `internal` and never appears in the agent's
@@ -58,12 +66,27 @@ export function nudgeWindowStart(
  *   just a broken sandbox.
  * - A reaction. It is not a message, it does not open a conversation with
  *   Meta, and a thumbs-up should not spend the reply someone needs.
+ *
+ * An approved template is NOT outside it. Template spam to customers who
+ * never engaged is the thing Meta's reviewers act on hardest, so the
+ * count is the one brake left once the window has closed.
  */
 export function countsAgainstNudgeQuota(input: {
   messageType: string;
   internal?: boolean;
   isDemoContact: boolean;
+  /**
+   * Whether Meta's 24-hour customer-service window is open — which is
+   * only ever true because the customer messaged us inside it, since that
+   * is the single thing that opens it (conversation.repository.ts).
+   *
+   * Required rather than optional: a caller that forgets it would get the
+   * old behaviour back, and the old behaviour was an inbox that could not
+   * reply.
+   */
+  withinCustomerServiceWindow: boolean;
 }): boolean {
+  if (input.withinCustomerServiceWindow) return false;
   if (input.internal) return false;
   if (input.isDemoContact) return false;
   if (input.messageType === 'reaction') return false;

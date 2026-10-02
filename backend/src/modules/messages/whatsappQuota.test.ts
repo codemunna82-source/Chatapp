@@ -13,14 +13,28 @@ import {
  */
 
 describe('countsAgainstNudgeQuota', () => {
-  const ordinary = { messageType: 'text', isDemoContact: false };
+  // Shut, which is the only state in which the allowance applies at all.
+  const ordinary = { messageType: 'text', isDemoContact: false, withinCustomerServiceWindow: false };
 
-  it('counts an ordinary reply', () => {
+  it('counts an ordinary reply to a customer who has not written in 24 hours', () => {
     expect(countsAgainstNudgeQuota(ordinary)).toBe(true);
-    expect(countsAgainstNudgeQuota({ messageType: 'image', isDemoContact: false })).toBe(true);
+    expect(countsAgainstNudgeQuota({ ...ordinary, messageType: 'image' })).toBe(true);
     // A template is a message to the customer like any other. It is also
     // the expensive one, so exempting it would be the largest hole.
-    expect(countsAgainstNudgeQuota({ messageType: 'template', isDemoContact: false })).toBe(true);
+    expect(countsAgainstNudgeQuota({ ...ordinary, messageType: 'template' })).toBe(true);
+  });
+
+  it('never counts a reply made inside the 24-hour window', () => {
+    // The regression this is here for: every ordinary reply used to be
+    // counted and then refused for its wording, because the only sends
+    // reaching the check were the ones the window had let through. An
+    // inbox that cannot answer a customer who just wrote is not an inbox.
+    expect(countsAgainstNudgeQuota({ ...ordinary, withinCustomerServiceWindow: true })).toBe(false);
+    for (const messageType of ['text', 'image', 'video', 'audio', 'document', 'location', 'template']) {
+      expect(countsAgainstNudgeQuota({ ...ordinary, messageType, withinCustomerServiceWindow: true })).toBe(
+        false,
+      );
+    }
   });
 
   it('never counts the private-chat invitation', () => {
@@ -28,9 +42,7 @@ describe('countsAgainstNudgeQuota', () => {
     // has not opened their link become unreachable, with no way left to
     // send them one.
     expect(countsAgainstNudgeQuota({ ...ordinary, internal: true })).toBe(false);
-    expect(countsAgainstNudgeQuota({ messageType: 'template', isDemoContact: false, internal: true })).toBe(
-      false,
-    );
+    expect(countsAgainstNudgeQuota({ ...ordinary, messageType: 'template', internal: true })).toBe(false);
   });
 
   it('never counts a demo contact', () => {
@@ -40,7 +52,7 @@ describe('countsAgainstNudgeQuota', () => {
   });
 
   it('never counts a reaction', () => {
-    expect(countsAgainstNudgeQuota({ messageType: 'reaction', isDemoContact: false })).toBe(false);
+    expect(countsAgainstNudgeQuota({ ...ordinary, messageType: 'reaction' })).toBe(false);
   });
 });
 

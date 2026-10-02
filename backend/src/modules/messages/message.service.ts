@@ -414,8 +414,20 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     return deliverToWebChat(input, conversation, contact, perf);
   }
 
+  /**
+   * Whether the customer wrote to us in the last 24 hours.
+   *
+   * Read once and reused, because two separate rules below turn on it and
+   * they must agree: the one that demands a template when it is shut, and
+   * the one that fixes the wording when it is shut. Computed twice, a
+   * conversation whose window expired between the two calls would be told
+   * both that a template is required and that only free-form nudge text
+   * may be sent.
+   */
+  const withinCustomerServiceWindow = isWithinCustomerServiceWindow(conversation);
+
   // Server-side 24h window enforcement — never trust an Android countdown.
-  if (!isDemoContact && input.type !== 'template' && !isWithinCustomerServiceWindow(conversation)) {
+  if (!isDemoContact && input.type !== 'template' && !withinCustomerServiceWindow) {
     throw new ApiError(
       422,
       'MESSAGE_TEMPLATE_REQUIRED',
@@ -442,7 +454,14 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * more specific problem and has its own fix (a template), and reporting
    * the allowance first would send someone to the wrong one.
    */
-  if (countsAgainstNudgeQuota({ messageType: input.type, internal: input.internal, isDemoContact })) {
+  if (
+    countsAgainstNudgeQuota({
+      messageType: input.type,
+      internal: input.internal,
+      isDemoContact,
+      withinCustomerServiceWindow,
+    })
+  ) {
     const [used, policy] = await Promise.all([
       countWhatsAppNudges(input.tenantId, input.conversationId, nudgeWindowStart(session)),
       nudgePolicyFor(input.tenantId),
@@ -472,8 +491,16 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
      * refused outright here: there is no approved wording for them, and a
      * photo is exactly the kind of unsolicited content this is guarding
      * against.
+     *
+     * An approved template is the one exception. Meta approved its text
+     * before it could be used at all, so there is no improvising left to
+     * prevent — and the branch below rewrites the send into plain text,
+     * which outside the window is the one thing Meta will not deliver. An
+     * agent sending a template used to be refused here and told to "use
+     * the suggested wording", naming something that could not legally go
+     * out in its place.
      */
-    if (policy.enforced) {
+    if (policy.enforced && input.type !== 'template') {
       const expected = nudgeAt(policy.nudges, used);
       if (!expected) {
         throw new ApiError(422, 'WHATSAPP_NUDGE_LIMIT_REACHED', nudgeQuotaMessage(policy.limit));

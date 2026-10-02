@@ -14,7 +14,6 @@ import { toPublicContact, type PublicContact } from '../contacts/contact.service
 import type { ConversationLean, ConversationStatus } from './conversation.model';
 import type { ContactLean } from '../contacts/contact.model';
 import { nudgePolicyFor } from '../messages/nudgePolicy';
-import { nudgeAt } from '../messages/nudgeTemplates';
 
 export interface PublicConversation {
   id: string;
@@ -184,7 +183,13 @@ export async function getConversationForTenant(auth: AuthContext, id: string): P
   ]);
 
   const view = toPublicConversation(conversation, contact ?? undefined);
-  const nudge = await whatsappRepliesLeftFor(tenantId, id, contact, session);
+  const nudge = await whatsappRepliesLeftFor(
+    tenantId,
+    id,
+    contact,
+    session,
+    repo.isWithinCustomerServiceWindow(conversation),
+  );
   view.whatsappRepliesLeft = nudge.left;
   view.nextNudge = nudge.nextNudge;
   return view;
@@ -198,36 +203,38 @@ export async function getConversationForTenant(auth: AuthContext, id: string): P
  * discovering the limit by hitting it — with a message typed and a
  * customer waiting, which is the worst moment to learn a rule.
  *
- * Null rather than a number in the two cases where there is no limit: a
- * demo contact (not a real WhatsApp number at all) and a customer who is
+ * Null rather than a number in the three cases where there is no limit: a
+ * demo contact (not a real WhatsApp number at all), a customer who is
  * currently in their private window (replies go there, and there is no
- * cap on that).
+ * cap on that), and a customer who wrote to us in the last 24 hours —
+ * inside Meta's window the reply is free-form and uncapped, and the
+ * composer must offer a text box rather than a fixed message.
+ *
+ * `nextNudge` is null whenever the window is shut as well, which leaves
+ * it null in every case: the fixed wording is ordinary free-form text,
+ * and outside the window Meta refuses to deliver that whatever it says.
+ * A card offering to send it was a button that could only fail.
  */
 async function whatsappRepliesLeftFor(
   tenantId: string,
   conversationId: string,
   contact: ContactLean | null,
   session: Awaited<ReturnType<typeof findActiveSessionForConversation>>,
+  withinCustomerServiceWindow: boolean,
 ): Promise<{ left: number | null; nextNudge: NextNudge | null }> {
   if (contact?.isDemo) return { left: null, nextNudge: null };
   if (hasMovedToWebChat(session)) return { left: null, nextNudge: null };
+  if (withinCustomerServiceWindow) return { left: null, nextNudge: null };
 
   const [used, policy] = await Promise.all([
     countWhatsAppNudges(tenantId, conversationId, nudgeWindowStart(session)),
     nudgePolicyFor(tenantId),
   ]);
 
-  const left = nudgesLeft(used, policy.limit);
-  if (!policy.enforced || left === 0) return { left, nextNudge: null };
-
-  const text = nudgeAt(policy.nudges, used);
-  return {
-    left,
-    // The composer needs the actual wording, not just a count: with the
-    // message fixed, an empty box the agent cannot type into is a worse
-    // answer than showing them exactly what will be sent.
-    nextNudge: text ? { index: used, position: used + 1, total: policy.limit, text } : null,
-  };
+  // Only the count survives out here. What may be sent once the window is
+  // shut is an approved template, which the agent picks from the template
+  // sheet — not a wording this would hand them.
+  return { left: nudgesLeft(used, policy.limit), nextNudge: null };
 }
 
 export interface UpdateConversationBody {
