@@ -6,6 +6,17 @@ import { captureBackgroundError } from '../lib/sentry';
 
 export const WEBHOOK_QUEUE_NAME = 'meta-webhook-processing';
 
+/**
+ * How long to wait for Redis to accept a webhook before giving up on the
+ * queue and processing it in this request instead.
+ *
+ * Short on purpose. A healthy Redis answers in single-digit milliseconds,
+ * and what is left of Meta's delivery timeout after this has to be enough
+ * to actually process the message — so this is a liveness check, not a
+ * retry budget.
+ */
+const ENQUEUE_TIMEOUT_MS = 2000;
+
 export interface WebhookJobData {
   rawPayload: unknown;
   receivedAt: string;
@@ -27,7 +38,7 @@ function getWebhookQueue(): Queue<WebhookJobData> {
  * re-processing an already-handled item is always a safe no-op.
  */
 export async function enqueueWebhookDelivery(rawPayload: unknown): Promise<void> {
-  await getWebhookQueue().add(
+  const add = getWebhookQueue().add(
     'process',
     { rawPayload, receivedAt: new Date().toISOString() },
     {
@@ -37,6 +48,49 @@ export async function enqueueWebhookDelivery(rawPayload: unknown): Promise<void>
       removeOnFail: { count: 5000 },
     },
   );
+
+  /**
+   * Bounded, because an unreachable Redis does not fail this call — it
+   * hangs it, forever.
+   *
+   * The shared connection is built with maxRetriesPerRequest: null, which
+   * BullMQ requires of a blocking connection: ioredis then retries a
+   * command for as long as it takes and never rejects. So `await`ing this
+   * against a Redis that is down does not throw, and the caller's
+   * try/catch — the one whose whole purpose is to fall back to inline
+   * processing — never runs.
+   *
+   * The cost of that was total: the webhook handler never returned, Meta
+   * never got its 200, and every inbound message was redelivered and hung
+   * again. A suspended Redis instance took inbound messaging down
+   * completely while the service looked healthy and the logs showed
+   * deliveries arriving.
+   *
+   * Rejecting on a timeout turns that back into the error the caller
+   * already knows how to handle. The underlying add() is left pending
+   * rather than cancelled — BullMQ offers no cancel, and if Redis returns
+   * later the job simply runs, which is harmless: processing is idempotent
+   * per item on metaEventId, so a job that duplicates work already done
+   * inline is a no-op.
+   */
+  await Promise.race([
+    add,
+    new Promise<never>((_resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`Redis did not accept the webhook within ${ENQUEUE_TIMEOUT_MS}ms`)),
+        ENQUEUE_TIMEOUT_MS,
+      );
+      // Never hold the process open for this: it is a guard on a request
+      // that has its own lifetime, not work of its own.
+      timer.unref?.();
+      // Stop the timer as soon as the real call settles, so a healthy
+      // enqueue does not leave a pending rejection behind it.
+      void add.then(
+        () => clearTimeout(timer),
+        () => clearTimeout(timer),
+      );
+    }),
+  ]);
 }
 
 let worker: Worker<WebhookJobData> | null = null;
