@@ -126,6 +126,10 @@ const PAGE = `<!doctype html>
   .composer { display: flex; gap: 8px; margin-top: 10px; }
   .composer input { flex: 1; }
   .composer button { white-space: nowrap; }
+
+  .acts { display: flex; gap: 7px; flex-wrap: wrap; }
+  button.quiet { background: transparent; color: inherit; border: 1px solid var(--line); }
+  .warnline { font-size: 12.5px; color: var(--danger); font-weight: 600; margin-top: 3px; }
 </style>
 </head>
 <body>
@@ -274,6 +278,41 @@ const SCRIPT = `(function () {
     return btn;
   }
 
+  /**
+   * The token prompt.
+   *
+   * window.prompt rather than a field on every row: this is typed once
+   * when something has broken, and six permanent password boxes on a page
+   * whose other buttons delete things is a worse trade. The token never
+   * touches the DOM or storage — it goes straight into the request.
+   */
+  function tokenButton(a) {
+    var btn = node('button', 'quiet', 'Update token');
+    btn.addEventListener('click', async function () {
+      var token = window.prompt('Paste the new system user access token for ' + a.name + ':');
+      if (!token) return;
+      token = token.trim();
+      if (token.length < 20) { say('That does not look like an access token.', true); return; }
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        var out = await call('PATCH', '/api/meta-apps/' + a.id, { accessToken: token });
+        // The count is the useful part: it says how many numbers this
+        // just un-blocked, which is the question being asked.
+        var back = out && typeof out.reconnectedAccounts === 'number' ? out.reconnectedAccounts : 0;
+        say('Token saved' + (back ? ' — ' + back + ' connection(s) reconnected.' : '.') +
+            ' Send a message to test it.', false);
+        await refresh();
+      } catch (err) {
+        say(err.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Update token';
+      }
+    });
+    return btn;
+  }
+
   function renderApps(apps) {
     var box = el('apps');
     box.innerHTML = '';
@@ -286,10 +325,60 @@ const SCRIPT = `(function () {
       grow.appendChild(node('div', 'meta',
         'App ID ' + a.appId + ' · ' + a.numberCount + ' number' + (a.numberCount === 1 ? '' : 's') +
         (a.accountStatus ? ' · ' + a.accountStatus : '')));
+      /**
+       * An expired connection is the quietest outage in the app: every
+       * send from this Business Manager's numbers is refused before it
+       * reaches Meta, the agent sees a failed tick, and nothing anywhere
+       * says the token is the reason. 378 messages died this way before
+       * this line existed.
+       */
+      if (a.accountStatus === 'EXPIRED') {
+        grow.appendChild(node('div', 'warnline',
+          'Connection expired — nothing can be sent from this Business Manager\u2019s numbers ' +
+          'until a working token is saved.'));
+      }
+
       row.appendChild(grow);
-      row.appendChild(removeButton('Remove', 'Tap again to remove', function () {
+
+      var acts = node('div', 'acts');
+
+      /**
+       * Pasting a replacement token, which had no button anywhere.
+       * The endpoint has existed all along and clears the expired mark on
+       * every account under this Business Manager — so the fix was one
+       * request away and unreachable without curl.
+       */
+      acts.appendChild(tokenButton(a));
+
+      /**
+       * Retry without a new token, for the case where nothing was wrong
+       * with the token at all: a System User that had lost the asset, a
+       * WABA that needed re-sharing. Fixed entirely on Meta's side, those
+       * leave the stored token perfectly good and the account still
+       * marked expired, with no way to say "try again".
+       */
+      if (a.accountStatus === 'EXPIRED') {
+        var retry = node('button', 'quiet', 'Retry');
+        retry.addEventListener('click', async function () {
+          retry.disabled = true;
+          retry.textContent = 'Retrying…';
+          try {
+            var out = await call('POST', '/api/meta-apps/' + a.id + '/retry-connection');
+            say('Reconnected ' + (out && out.reconnectedAccounts) + ' account(s). Send a message to test.', false);
+            await refresh();
+          } catch (err) {
+            say(err.message, true);
+            retry.disabled = false;
+            retry.textContent = 'Retry';
+          }
+        });
+        acts.appendChild(retry);
+      }
+
+      acts.appendChild(removeButton('Remove', 'Tap again to remove', function () {
         return call('DELETE', '/api/meta-apps/' + a.id);
       }));
+      row.appendChild(acts);
       box.appendChild(row);
     });
   }

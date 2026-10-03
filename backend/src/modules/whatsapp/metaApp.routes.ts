@@ -428,7 +428,17 @@ metaAppRouter.patch(
       },
     });
 
-    res.status(200).json({ success: true, data: toPublic(app, baseUrlFor(req)) });
+    /**
+     * The reconnect count rides along in the response, not only in the
+     * audit log. Saving a token is a fix someone is making BECAUSE
+     * sending is broken, and "two connections reconnected" is the
+     * difference between knowing it worked and going back to guessing —
+     * which, with the old response, was the only option.
+     */
+    res.status(200).json({
+      success: true,
+      data: { ...toPublic(app, baseUrlFor(req)), reconnectedAccounts: reconnected },
+    });
   }),
 );
 
