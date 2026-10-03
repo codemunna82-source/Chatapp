@@ -129,6 +129,31 @@ export interface ListConversationsQuery {
   /** The chat list's read/unread filter — see listConversationsQuerySchema. */
   unread?: boolean;
   status?: ConversationStatus;
+  /** Narrow to one number. Only ever narrows — see conversationListNumberScope. */
+  whatsappPhoneNumberId?: string;
+}
+
+/**
+ * Which number's chats this request may see.
+ *
+ * The caller's own scope wins whenever they have one. A member assigned a
+ * number sees that number and nothing else, and the query parameter must
+ * not be able to change that — it arrives from the client, and a filter
+ * that can widen what someone sees is not a filter, it is a way into
+ * another team's conversations.
+ *
+ * So the parameter only narrows, and only for someone who could already
+ * see everything. For them it is the difference between an inbox and a
+ * question: "is anything arriving on this number?"
+ */
+export function conversationListNumberScope(
+  auth: AuthContext,
+  requested: string | undefined,
+): string | undefined {
+  const scope = visibleWhatsAppPhoneNumberId(auth);
+  if (scope) return scope;
+  const narrowed = requested?.trim();
+  return narrowed ? narrowed : undefined;
 }
 
 export async function listConversationsForTenant(auth: AuthContext, query: ListConversationsQuery) {
@@ -152,7 +177,7 @@ export async function listConversationsForTenant(auth: AuthContext, query: ListC
     unread: query.unread,
     status: query.status,
     contactIds,
-    whatsappPhoneNumberId: visibleWhatsAppPhoneNumberId(auth),
+    whatsappPhoneNumberId: conversationListNumberScope(auth, query.whatsappPhoneNumberId),
   });
 
   return { items: await enrichWithContacts(tenantId, items), nextCursor };

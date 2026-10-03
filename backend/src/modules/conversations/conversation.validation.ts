@@ -19,6 +19,16 @@ export const listConversationsQuerySchema = z.object({
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
   status: z.enum(CONVERSATION_STATUSES).optional(),
+  /**
+   * Narrow the list to one WhatsApp number.
+   *
+   * For an admin, who sees every number's chats at once — which is the
+   * right default for an inbox and the wrong one for answering "is
+   * anything arriving on THIS number". It can only ever narrow: a member
+   * scoped to a number keeps seeing exactly that number whatever they
+   * send here (listConversationsForTenant).
+   */
+  whatsappPhoneNumberId: z.string().trim().min(1).max(64).optional(),
 });
 
 export const updateConversationSchema = z

@@ -93,6 +93,35 @@ const PAGE = `<!doctype html>
   .ok { color: #067647; }
   .hide { display: none; }
   .empty { font-size: 13.5px; opacity: .65; padding: 4px 2px 0; }
+
+  select {
+    width: 100%; padding: 11px 13px; font: inherit; border-radius: 10px;
+    border: 1px solid var(--line); background: Field; color: inherit;
+  }
+  /* Tall enough to show a conversation rather than a peephole, capped so
+     the page is still scrollable past it on a phone. */
+  .scroll { max-height: 300px; overflow-y: auto; margin-top: 10px; }
+  .chat { max-height: 420px; }
+  .conv {
+    display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left;
+    padding: 11px 13px; margin-bottom: 7px; cursor: pointer; font: inherit; color: inherit;
+    background: rgba(128,128,128,.05); border: 1px solid var(--line); border-radius: 10px;
+  }
+  .conv.on { border-color: var(--accent); background: rgba(99,102,241,.1); }
+  .conv .grow { flex: 1; min-width: 0; }
+  .conv .name { font-weight: 600; }
+  .conv .meta { font-size: 12.5px; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv .when { font-size: 11.5px; opacity: .6; white-space: nowrap; }
+
+  /* Direction is carried by the side the bubble sits on, the way every
+     chat app does it — an agent should not have to read a label to tell
+     an incoming message from one of their own. */
+  .bub { max-width: 82%; padding: 9px 12px; border-radius: 13px; margin-bottom: 8px; font-size: 14px; }
+  .bub.in { background: rgba(128,128,128,.14); border-bottom-left-radius: 4px; }
+  .bub.out { background: rgba(99,102,241,.16); margin-left: auto; border-bottom-right-radius: 4px; }
+  .bub .t { white-space: pre-wrap; word-break: break-word; }
+  .bub .s { font-size: 11.5px; opacity: .72; margin-top: 4px; }
+  .bub .fail { color: var(--danger); opacity: 1; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -126,6 +155,16 @@ const PAGE = `<!doctype html>
         <span class="note">Quality is Meta's own rating. Removal is refused once a number has chats.</span>
       </div>
       <div id="numbers"></div>
+    </section>
+
+    <section>
+      <div class="head">
+        <h2>Message check</h2>
+        <span class="note">Pick a number to see what is arriving and leaving on it.</span>
+      </div>
+      <select id="chatNumber"><option value="">Loading numbers…</option></select>
+      <div id="convs" class="scroll"></div>
+      <div id="chat" class="scroll chat"></div>
     </section>
 
     <section>
@@ -304,6 +343,161 @@ const SCRIPT = `(function () {
     });
   }
 
+  /**
+   * The message check: one number, its chats, and what actually happened
+   * to each message.
+   *
+   * This exists because "did it send?" could not be answered anywhere. The
+   * agent's app shows a failed tick with no reason; the logs have the
+   * reason but nobody reads logs during a customer conversation. Meta
+   * accepts a message and refuses it seconds later, so "sent" and
+   * "arrived" are different claims and only the delivery status tells
+   * them apart.
+   */
+  var chatNumberId = '';
+  var openConvId = '';
+  var pollTimer = null;
+
+  function when(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    var today = new Date();
+    var sameDay = d.toDateString() === today.toDateString();
+    var time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // The date is noise on today's messages and essential on older ones,
+    // which is the whole question being asked here: did this arrive now?
+    return sameDay ? time : d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + time;
+  }
+
+  /** Meta's status, said the way an agent would ask about it. */
+  function statusWord(m) {
+    if (m.direction === 'IN') return 'received';
+    switch (m.status) {
+      case 'READ': return 'read by customer';
+      case 'DELIVERED': return 'delivered';
+      case 'SENT': return 'sent to WhatsApp';
+      case 'QUEUED': return 'queued';
+      case 'FAILED': return 'FAILED — not delivered';
+      default: return m.status || '';
+    }
+  }
+
+  function renderChat(messages) {
+    var box = el('chat');
+    box.innerHTML = '';
+    if (!messages.length) { box.appendChild(node('p', 'empty', 'No messages in this chat.')); return; }
+    messages.forEach(function (m) {
+      var out = m.direction === 'OUT';
+      var b = node('div', 'bub ' + (out ? 'out' : 'in'));
+      b.appendChild(node('div', 't', m.text || ('[' + (m.type || 'message') + ']')));
+      var line = node('div', 's', when(m.createdAt) + ' · ' + statusWord(m));
+      if (m.status === 'FAILED') line.className = 's fail';
+      b.appendChild(line);
+      // Meta's own sentence for the refusal. Shown in full rather than
+      // summarised: it is the only place the reason appears outside the
+      // server logs, and it is what gets quoted in a support ticket.
+      if (m.failureReason) b.appendChild(node('div', 's fail', m.failureReason));
+      box.appendChild(b);
+    });
+    box.scrollTop = box.scrollHeight;
+  }
+
+  async function loadChat(convId) {
+    openConvId = convId;
+    try {
+      var messages = await call('GET', '/api/conversations/' + convId + '/messages?limit=50');
+      // The list comes back newest first; a chat reads oldest first.
+      renderChat((messages || []).slice().reverse());
+    } catch (err) {
+      el('chat').innerHTML = '';
+      el('chat').appendChild(node('p', 'empty', err.message));
+    }
+  }
+
+  function renderConvs(convs) {
+    var box = el('convs');
+    box.innerHTML = '';
+    if (!convs.length) {
+      box.appendChild(node('p', 'empty', 'No chats on this number yet.'));
+      el('chat').innerHTML = '';
+      return;
+    }
+    convs.forEach(function (c) {
+      var btn = node('button', 'conv' + (c.id === openConvId ? ' on' : ''));
+      var grow = node('div', 'grow');
+      var who = (c.contact && (c.contact.name || c.contact.phone)) || 'Unknown';
+      grow.appendChild(node('div', 'name', who + (c.unreadCount ? ' (' + c.unreadCount + ' new)' : '')));
+      grow.appendChild(node('div', 'meta',
+        (c.lastMessageDirection === 'OUT' ? 'You: ' : '') + (c.lastMessagePreview || 'No messages')));
+      btn.appendChild(grow);
+      btn.appendChild(node('div', 'when', when(c.lastMessageAt)));
+      btn.addEventListener('click', function () {
+        openConvId = c.id;
+        Array.prototype.forEach.call(box.children, function (n) { n.classList.remove('on'); });
+        btn.classList.add('on');
+        loadChat(c.id);
+      });
+      box.appendChild(btn);
+    });
+  }
+
+  async function loadConvs() {
+    if (!chatNumberId) {
+      el('convs').innerHTML = '';
+      el('chat').innerHTML = '';
+      return;
+    }
+    try {
+      var convs = await call('GET',
+        '/api/conversations?limit=25&whatsappPhoneNumberId=' + encodeURIComponent(chatNumberId));
+      renderConvs(convs || []);
+    } catch (err) {
+      el('convs').innerHTML = '';
+      el('convs').appendChild(node('p', 'empty', err.message));
+    }
+  }
+
+  /**
+   * Polled rather than pushed. The socket needs a connection this page
+   * does not otherwise keep, and the question being asked — "is anything
+   * arriving?" — is answered well enough by a look every few seconds.
+   * Only while a number is selected, so an idle page is silent.
+   */
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(function () {
+      if (!chatNumberId || document.hidden) return;
+      loadConvs();
+      if (openConvId) loadChat(openConvId);
+    }, 5000);
+  }
+
+  function fillNumberPicker(numbers) {
+    var sel = el('chatNumber');
+    sel.innerHTML = '';
+    var first = document.createElement('option');
+    first.value = '';
+    first.textContent = numbers.length ? 'Choose a number…' : 'No numbers registered';
+    sel.appendChild(first);
+    numbers.forEach(function (n) {
+      var opt = document.createElement('option');
+      opt.value = n.id;
+      opt.textContent = n.displayPhoneNumber + (n.metaAppName ? ' · ' + n.metaAppName : '');
+      sel.appendChild(opt);
+    });
+    // Survives the refresh that follows every removal, so checking a
+    // number does not get undone by an unrelated action on the page.
+    sel.value = chatNumberId;
+  }
+
+  el('chatNumber').addEventListener('change', function () {
+    chatNumberId = this.value;
+    openConvId = '';
+    el('chat').innerHTML = '';
+    loadConvs();
+  });
+
   async function refresh() {
     // One failing list must not blank the other two: a workspace with no
     // Business Managers still needs its numbers and members on screen.
@@ -313,7 +507,10 @@ const SCRIPT = `(function () {
       call('GET', '/api/users')
     ]);
     if (results[0].status === 'fulfilled') renderApps(results[0].value || []);
-    if (results[1].status === 'fulfilled') renderNumbers(results[1].value || []);
+    if (results[1].status === 'fulfilled') {
+      renderNumbers(results[1].value || []);
+      fillNumberPicker(results[1].value || []);
+    }
     if (results[2].status === 'fulfilled') renderUsers(results[2].value || []);
 
     var failed = results.filter(function (r) { return r.status === 'rejected'; });
@@ -340,6 +537,7 @@ const SCRIPT = `(function () {
       show(el('loginForm'), false);
       show(el('panel'), true);
       await refresh();
+      startPolling();
     } catch (err) {
       msg.textContent = err.message;
       show(msg, true);
