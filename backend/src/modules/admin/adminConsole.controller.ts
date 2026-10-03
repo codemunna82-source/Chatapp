@@ -122,6 +122,10 @@ const PAGE = `<!doctype html>
   .bub .t { white-space: pre-wrap; word-break: break-word; }
   .bub .s { font-size: 11.5px; opacity: .72; margin-top: 4px; }
   .bub .fail { color: var(--danger); opacity: 1; font-weight: 600; }
+
+  .composer { display: flex; gap: 8px; margin-top: 10px; }
+  .composer input { flex: 1; }
+  .composer button { white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -165,6 +169,11 @@ const PAGE = `<!doctype html>
       <select id="chatNumber"><option value="">Loading numbers…</option></select>
       <div id="convs" class="scroll"></div>
       <div id="chat" class="scroll chat"></div>
+      <div id="composer" class="composer hide">
+        <input id="replyText" type="text" placeholder="Type a reply…" autocomplete="off" />
+        <button id="replyBtn" type="button">Send</button>
+      </div>
+      <p class="msg hide" id="replyMsg"></p>
     </section>
 
     <section>
@@ -405,6 +414,7 @@ const SCRIPT = `(function () {
 
   async function loadChat(convId) {
     openConvId = convId;
+    show(el('composer'), Boolean(convId));
     try {
       var messages = await call('GET', '/api/conversations/' + convId + '/messages?limit=50');
       // The list comes back newest first; a chat reads oldest first.
@@ -421,6 +431,7 @@ const SCRIPT = `(function () {
     if (!convs.length) {
       box.appendChild(node('p', 'empty', 'No chats on this number yet.'));
       el('chat').innerHTML = '';
+      show(el('composer'), false);
       return;
     }
     convs.forEach(function (c) {
@@ -495,7 +506,66 @@ const SCRIPT = `(function () {
     chatNumberId = this.value;
     openConvId = '';
     el('chat').innerHTML = '';
+    show(el('composer'), false);
+    show(el('replyMsg'), false);
     loadConvs();
+  });
+
+  /**
+   * Replying from here, which is the other half of "did it send?".
+   *
+   * An admin checking a number can now try it rather than only watch it:
+   * send one message and read, in the same window, whether it reached the
+   * customer or was refused and why. That loop used to need the phone, the
+   * app, and then the server logs.
+   *
+   * It goes through the ordinary send endpoint, so every rule an agent is
+   * held to applies here too — the 24-hour window, the content policy, the
+   * number's own scope. Nothing about this page is a way around them, and
+   * a refusal is shown exactly as the server worded it.
+   */
+  async function sendReply() {
+    var input = el('replyText');
+    var btn = el('replyBtn');
+    var msg = el('replyMsg');
+    var text = input.value.trim();
+    if (!text || !openConvId) return;
+
+    show(msg, false);
+    btn.disabled = true;
+    input.disabled = true;
+    var original = btn.textContent;
+    btn.textContent = 'Sending…';
+    try {
+      await call('POST', '/api/conversations/' + openConvId + '/messages', {
+        type: 'text',
+        text: text,
+        // Stable for this attempt, so a double tap or a retry after a
+        // response that never arrived cannot put the same message in the
+        // customer's thread twice.
+        clientMessageId: 'admin-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10)
+      });
+      input.value = '';
+      await loadChat(openConvId);
+      await loadConvs();
+    } catch (err) {
+      // The server's wording, verbatim: these refusals name the actual
+      // rule — a shut 24-hour window, a blocked number — and rewording
+      // them here would lose the one useful part.
+      msg.textContent = err.message;
+      msg.className = 'msg err';
+      show(msg, true);
+    } finally {
+      btn.disabled = false;
+      input.disabled = false;
+      btn.textContent = original;
+      input.focus();
+    }
+  }
+
+  el('replyBtn').addEventListener('click', sendReply);
+  el('replyText').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); sendReply(); }
   });
 
   async function refresh() {
