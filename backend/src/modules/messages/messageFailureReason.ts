@@ -37,7 +37,20 @@ export function messageFailureReason(errors: unknown): string | undefined {
     case 130472:
       return 'WhatsApp held this back to limit marketing messages to this customer. Nothing is wrong with the message.';
     case 131031:
-      return 'The WhatsApp Business account is restricted or suspended, so nothing can be sent from it.';
+      /**
+       * Meta's own title for this code is "Business Account locked", and
+       * following that wording costs hours: the account, the business
+       * portfolio and the app can all report AVAILABLE while every message
+       * from one number is refused. Meta returns this same code for a
+       * limit on the NUMBER — an unapproved display name being the common
+       * one — so the sentence points at the number first, which is both
+       * the more likely cause and the one with a screen to check.
+       */
+      return (
+        'WhatsApp would not deliver this. Meta calls it an account restriction, but it reports the ' +
+        'same thing when the number itself is held at a limit, which is more common — check this ' +
+        "number's status under WhatsApp numbers."
+      );
     default:
       return first.title
         ? `WhatsApp did not deliver this: ${first.title}.`
