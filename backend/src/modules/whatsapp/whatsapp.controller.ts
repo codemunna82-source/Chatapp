@@ -155,14 +155,18 @@ export const revokeLinkApiKeyHandler = asyncHandler(async (req: Request, res: Re
 
 export const removeNumberHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  const result = await removeNumberFromTenant(auth.tenantId, req.params.id as string);
+  // ?force=true is the admin's explicit "delete it anyway" after seeing the
+  // conversation-count warning — it takes the chat history with the number
+  // rather than leaving it orphaned, so it is opt-in and never the default.
+  const force = req.query.force === 'true';
+  const result = await removeNumberFromTenant(auth.tenantId, req.params.id as string, { force });
   await recordAudit({
     tenantId: auth.tenantId,
     actorUserId: auth.userId,
     action: 'whatsapp_number.delete',
     targetType: 'WhatsAppPhoneNumber',
     targetId: result.id,
-    metadata: { unassignedUsers: result.unassignedUsers },
+    metadata: { unassignedUsers: result.unassignedUsers, deletedConversations: result.deletedConversations },
   });
   res.status(200).json({ success: true, data: result });
 });

@@ -15,6 +15,7 @@ import { WhatsAppAccount } from './whatsappAccount.model';
 import { WhatsAppPhoneNumber } from './whatsappPhoneNumber.model';
 import { listMetaAppsForTenant, findMetaAppByIdAndTenant } from './metaApp.repository';
 import { blockBusinessManagerRemoval } from './removalGuards';
+import { removeNumberFromTenant } from './whatsapp.service';
 
 /**
  * Business Managers, as the workspace sees them.
@@ -469,19 +470,38 @@ metaAppRouter.delete(
     const accounts = await WhatsAppAccount.find({ tenantId: auth.tenantId, metaAppId: app._id })
       .select('_id')
       .lean();
-    const numberCount =
+    const numbers =
       accounts.length > 0
-        ? await WhatsAppPhoneNumber.countDocuments({
+        ? await WhatsAppPhoneNumber.find({
             tenantId: auth.tenantId,
             whatsappAccountId: { $in: accounts.map((a) => a._id) },
           })
-        : 0;
+            .select('_id')
+            .lean()
+        : [];
     const blocked = blockBusinessManagerRemoval({
       name: app.name,
       accountCount: accounts.length,
-      numberCount,
+      numberCount: numbers.length,
     });
-    if (blocked) throw ApiError.conflict(blocked.code, blocked.message);
+    // ?force=true is the admin's explicit "delete it anyway" after seeing
+    // the attached-numbers warning. It cascades through the same path a
+    // standalone number delete takes — including that one's own cascade
+    // into the number's conversations — so nothing is left pointing at a
+    // Business Manager, a number, or a chat that no longer exists.
+    const force = req.query.force === 'true';
+    if (blocked && !force) throw ApiError.conflict(blocked.code, blocked.message);
+
+    let removedNumbers = 0;
+    if (blocked && force) {
+      for (const n of numbers) {
+        await removeNumberFromTenant(auth.tenantId, String(n._id), { force: true });
+        removedNumbers += 1;
+      }
+      if (accounts.length > 0) {
+        await WhatsAppAccount.deleteMany({ tenantId: auth.tenantId, metaAppId: app._id });
+      }
+    }
 
     await MetaApp.deleteOne({ _id: app._id, tenantId: auth.tenantId });
 
@@ -493,9 +513,9 @@ metaAppRouter.delete(
       targetId: app._id,
       // Name and app id so the trail still says WHICH Business Manager was
       // removed once the row it pointed at is gone. Never the secrets.
-      metadata: { name: app.name, appId: app.appId },
+      metadata: { name: app.name, appId: app.appId, removedNumbers },
     });
 
-    res.status(200).json({ success: true, data: { id: String(app._id), removed: true } });
+    res.status(200).json({ success: true, data: { id: String(app._id), removed: true, removedNumbers } });
   }),
 );

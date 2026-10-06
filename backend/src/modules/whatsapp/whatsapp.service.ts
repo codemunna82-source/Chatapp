@@ -17,6 +17,11 @@ import { blockNumberRemoval } from './removalGuards';
 import { registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta/oauth';
 import { User } from '../users/user.model';
 import { Conversation } from '../conversations/conversation.model';
+import { Message } from '../messages/message.model';
+import { CallLog } from '../calls/callLog.model';
+import { GuestPushToken } from '../guest/guestPushToken.model';
+import { GuestSession } from '../guest/guestSession.model';
+import { GuestReport } from '../guest/guestReport.model';
 import { invalidateAuthContext } from '../auth/authContext.service';
 import { visibleWhatsAppPhoneNumberId } from '../conversations/conversation.access';
 import type { AuthContext } from '../../types/express';
@@ -738,18 +743,57 @@ export async function setNumberEnabled(
  * is gone, and invalidating their cached auth context so the change is
  * immediate rather than up to a cache lifetime later.
  */
+/**
+ * Deletes every record that points at a conversation, then the conversation
+ * itself — messages, call logs, and the three guest-web-chat collections
+ * that all require a conversationId (so leaving them behind is not inert
+ * data, it is a row a future read crashes on).
+ *
+ * Not touched: Notification.data may carry a conversationId for
+ * deep-linking, but it is an unstructured Mixed field, not a real
+ * reference — a stale deep link just fails to open, the same as any
+ * notification about a since-deleted chat.
+ */
+async function cascadeDeleteConversations(tenantId: string, conversationIds: Types.ObjectId[]): Promise<void> {
+  if (conversationIds.length === 0) return;
+  const filter = { tenantId, conversationId: { $in: conversationIds } };
+  await Promise.all([
+    Message.deleteMany(filter),
+    CallLog.deleteMany(filter),
+    GuestPushToken.deleteMany(filter),
+    GuestSession.deleteMany(filter),
+    GuestReport.deleteMany(filter),
+  ]);
+  await Conversation.deleteMany({ tenantId, _id: { $in: conversationIds } });
+}
+
 export async function removeNumberFromTenant(
   tenantId: string,
   numberId: string,
-): Promise<{ id: string; removed: true; unassignedUsers: number }> {
+  options: { force?: boolean } = {},
+): Promise<{ id: string; removed: true; unassignedUsers: number; deletedConversations: number }> {
   const number = await findPhoneNumberByIdAndTenant(numberId, tenantId);
   if (!number) {
     throw ApiError.notFound('WHATSAPP_NUMBER_NOT_FOUND', 'That number is not registered to this workspace.');
   }
 
-  const conversationCount = await Conversation.countDocuments({ tenantId, whatsappPhoneNumberId: numberId });
-  const blocked = blockNumberRemoval({ displayPhoneNumber: number.displayPhoneNumber, conversationCount });
-  if (blocked) throw ApiError.conflict(blocked.code, blocked.message);
+  const conversations = await Conversation.find({ tenantId, whatsappPhoneNumberId: numberId })
+    .select('_id')
+    .lean();
+  const blocked = blockNumberRemoval({
+    displayPhoneNumber: number.displayPhoneNumber,
+    conversationCount: conversations.length,
+  });
+  // force=true is the admin explicitly choosing to take the chat history
+  // with the number, rather than this silently leaving every one of those
+  // conversations pointing at a row that no longer exists.
+  if (blocked && !options.force) throw ApiError.conflict(blocked.code, blocked.message);
+  if (blocked && options.force) {
+    await cascadeDeleteConversations(
+      tenantId,
+      conversations.map((c) => c._id as Types.ObjectId),
+    );
+  }
 
   // Before the delete, so a failure here leaves the number in place rather
   // than removed with members still pointing at it.
@@ -768,11 +812,21 @@ export async function removeNumberFromTenant(
   await WhatsAppPhoneNumber.deleteOne({ _id: number._id, tenantId });
 
   logger.info(
-    { numberId, displayPhoneNumber: number.displayPhoneNumber, unassignedUsers: assigned.length },
+    {
+      numberId,
+      displayPhoneNumber: number.displayPhoneNumber,
+      unassignedUsers: assigned.length,
+      deletedConversations: blocked && options.force ? conversations.length : 0,
+    },
     'WhatsApp number removed from the workspace by an admin',
   );
 
-  return { id: String(number._id), removed: true, unassignedUsers: assigned.length };
+  return {
+    id: String(number._id),
+    removed: true,
+    unassignedUsers: assigned.length,
+    deletedConversations: blocked && options.force ? conversations.length : 0,
+  };
 }
 
 /**
