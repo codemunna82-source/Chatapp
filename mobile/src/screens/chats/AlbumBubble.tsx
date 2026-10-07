@@ -10,23 +10,15 @@ import type { ReactionSummary } from './deriveConversationView';
 /**
  * Past this the album stops adding cells and the last one carries a +N.
  *
- * Three, not four. The layout below is one photo across the top and two
- * beneath it — what the messenger does — and a fourth cell would mean a
- * second full row, which is the vertical strip an album exists to avoid.
+ * Four, as a 2×2 grid — two photos across the top, two beneath. A batch
+ * of exactly three fills the top row and gives the bottom row its one
+ * photo the full width, rather than leaving half of it empty.
  */
-const MAX_TILES = 3;
+const MAX_TILES = 4;
 
 /** Frame padding, and the hairline between cells. Both are load-bearing arithmetic. */
 const PAD = 3;
 const GAP = 2;
-
-/**
- * How tall the top photo is, as a fraction of the album's width.
- *
- * Wider than it is tall, so the two beneath it are not squeezed into
- * slivers and the album as a whole still occupies about one message.
- */
-const LEAD_RATIO = 0.62;
 
 /**
  * Several photos sent together, as one grid instead of a column.
@@ -38,11 +30,10 @@ const LEAD_RATIO = 0.62;
  * one message.
  *
  * The shape is the messenger's own: two photos sit side by side, and
- * three or more become one across the top with two beneath it. The last
- * cell carries "+N" when there are more behind it and opens the same
- * viewer as the rest, which is where the others are — an album that grew
- * a cell per photo would be the original problem again in a different
- * shape.
+ * three or more become a 2×2 grid. The last cell carries "+N" when there
+ * are more behind it and opens the same viewer as the rest, which is
+ * where the others are — an album that grew a cell per photo would be
+ * the original problem again in a different shape.
  */
 export function AlbumBubble({
   messages,
@@ -92,7 +83,6 @@ export function AlbumBubble({
    */
   const inner = side - PAD * 2;
   const half = Math.floor((inner - GAP) / 2);
-  const leadHeight = Math.round(inner * LEAD_RATIO);
 
   // The album's own stamp is the LAST photo's: that is when the batch
   // finished arriving, and it is the status the whole group is waiting on.
@@ -114,8 +104,9 @@ export function AlbumBubble({
           },
         ]}
       >
-        {/* Two photos: one row, two columns. Three or more: the first
-            across the top, the next two beneath it. */}
+        {/* Two photos: one row, two columns. Three or more: a 2×2 grid,
+            with a lone third photo given the bottom row's full width
+            rather than leaving half of it empty. */}
         {pair ? (
           <View style={styles.row2}>
             {tiles.map((m) => (
@@ -134,18 +125,8 @@ export function AlbumBubble({
           </View>
         ) : (
           <>
-            <Tile
-              message={tiles[0]!}
-              width={inner}
-              height={leadHeight}
-              album={messages}
-              reactions={reactionsByTarget?.get(tiles[0]!.id)}
-              highlighted={highlightedId === tiles[0]!.id}
-              onOpenImage={onOpenImage}
-              onLongPress={onLongPress}
-            />
-            <View style={[styles.row2, { marginTop: GAP }]}>
-              {tiles.slice(1).map((m, i) => (
+            <View style={styles.row2}>
+              {tiles.slice(0, 2).map((m) => (
                 <Tile
                   key={m.id}
                   message={m}
@@ -153,16 +134,36 @@ export function AlbumBubble({
                   height={half}
                   album={messages}
                   reactions={reactionsByTarget?.get(m.id)}
-                highlighted={highlightedId === m.id}
-                  // The bottom-right cell carries the count. Tapping it
-                  // opens the viewer like any other — the rest are in
-                  // there.
-                  more={i === tiles.length - 2 && hidden > 0 ? hidden : 0}
+                  highlighted={highlightedId === m.id}
                   onOpenImage={onOpenImage}
                   onLongPress={onLongPress}
                 />
               ))}
             </View>
+            {tiles.length > 2 && (
+              <View style={[styles.row2, { marginTop: GAP }]}>
+                {tiles.slice(2).map((m, i) => {
+                  const index = i + 2;
+                  const bottomRowWidth = tiles.length === 3 ? inner : half;
+                  return (
+                    <Tile
+                      key={m.id}
+                      message={m}
+                      width={bottomRowWidth}
+                      height={half}
+                      album={messages}
+                      reactions={reactionsByTarget?.get(m.id)}
+                      highlighted={highlightedId === m.id}
+                      // The last cell carries the count. Tapping it opens
+                      // the viewer like any other — the rest are in there.
+                      more={index === tiles.length - 1 ? hidden : 0}
+                      onOpenImage={onOpenImage}
+                      onLongPress={onLongPress}
+                    />
+                  );
+                })}
+              </View>
+            )}
           </>
         )}
 
