@@ -1,4 +1,4 @@
-import { summariseHealthStatus } from './healthStatusSummary';
+import { summariseHealthStatus, summariseWabaHealth } from './healthStatusSummary';
 
 /**
  * The payload below is the real one, captured from the number that could
@@ -110,5 +110,61 @@ describe('summariseHealthStatus', () => {
       ],
     });
     expect(summary.reason).toBe('Payment method missing. Add one in Business Settings.');
+  });
+});
+
+describe('summariseWabaHealth', () => {
+  /**
+   * Captured from a real refusal: the number itself read LIMITED over a
+   * pending display name (a per-number, admin-fixable issue), while its
+   * WABA was separately BLOCKED on a payment-method error (an
+   * account-level issue nobody could see without reading a raw server
+   * log, because summariseHealthStatus reports the first blocked entity
+   * it meets — PHONE_NUMBER here — and stops).
+   */
+  const PAYMENT_BLOCKED_WABA = {
+    can_send_message: 'BLOCKED',
+    entities: [
+      {
+        entity_type: 'PHONE_NUMBER',
+        can_send_message: 'LIMITED',
+        additional_info: ['Your display name has not been approved yet.'],
+      },
+      {
+        entity_type: 'WABA',
+        id: '1800964844423739',
+        can_send_message: 'BLOCKED',
+        errors: [
+          {
+            error_code: 141006,
+            error_description: 'There is an error with the payment method. This will block business initiated conversations.',
+            possible_solution: 'There was an error with your payment method. Please add a new payment method to the account.',
+          },
+        ],
+      },
+      { entity_type: 'BUSINESS', can_send_message: 'AVAILABLE' },
+    ],
+  };
+
+  it('reports the WABA entity even when a different entity is the one summariseHealthStatus would report', () => {
+    expect(summariseHealthStatus(PAYMENT_BLOCKED_WABA).reason).toMatch(/display name/i);
+
+    const waba = summariseWabaHealth(PAYMENT_BLOCKED_WABA);
+    expect(waba.canSendMessage).toBe('BLOCKED');
+    expect(waba.reason).toMatch(/payment method/i);
+  });
+
+  it('reports AVAILABLE with no reason when the WABA itself is fine', () => {
+    expect(summariseWabaHealth(REAL)).toEqual({ canSendMessage: 'AVAILABLE' });
+  });
+
+  it('says nothing when there is no WABA entity to report', () => {
+    expect(summariseWabaHealth({ can_send_message: 'LIMITED', entities: [{ entity_type: 'PHONE_NUMBER' }] })).toEqual({});
+  });
+
+  it('survives the shapes Meta has not sent yet', () => {
+    expect(summariseWabaHealth(null)).toEqual({});
+    expect(summariseWabaHealth(undefined)).toEqual({});
+    expect(summariseWabaHealth({ entities: 'nope' })).toEqual({});
   });
 });

@@ -84,3 +84,31 @@ export function summariseHealthStatus(raw: unknown): HealthStatusSummary {
 
   return { canSendMessage };
 }
+
+/**
+ * The WABA entity's own verdict, apart from whichever entity
+ * `summariseHealthStatus` above happens to report first.
+ *
+ * The two can disagree, and when they do it is never noise: a number can
+ * read PHONE_NUMBER: LIMITED (display name pending — a per-number issue
+ * with a per-number fix) while its WABA reads BLOCKED on a payment-method
+ * error (an account-level issue a completely different person has to fix,
+ * in Business Manager, not WhatsApp Manager). `summariseHealthStatus`
+ * returns whichever of the two it meets first in Meta's array and stops —
+ * which, on exactly that combination, was the display-name sentence,
+ * leaving the payment block invisible anywhere in this app except a raw
+ * server log. This is read separately so both can be shown.
+ */
+export function summariseWabaHealth(raw: unknown): HealthStatusSummary {
+  const root = asRecord(raw);
+  if (!root) return {};
+  const entities = Array.isArray(root.entities) ? root.entities : [];
+  for (const candidate of entities) {
+    const entity = asRecord(candidate);
+    if (!entity || entity.entity_type !== 'WABA') continue;
+    const verdict = typeof entity.can_send_message === 'string' ? entity.can_send_message : undefined;
+    if (!verdict || verdict === 'AVAILABLE') return { canSendMessage: verdict };
+    return { canSendMessage: verdict, reason: reasonFor(entity) };
+  }
+  return {};
+}

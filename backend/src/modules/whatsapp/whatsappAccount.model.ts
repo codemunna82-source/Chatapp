@@ -54,6 +54,21 @@ const whatsappAccountSchema = new Schema(
      * treated as expired. Only a date in the past is.
      */
     tokenExpiresAt: { type: Date },
+    /**
+     * Meta's own verdict on THIS Business Account, read from the WABA
+     * entity inside a number's health_status response — AVAILABLE,
+     * LIMITED, BLOCKED, … Distinct from `status` above (VOXO's own local
+     * EXPIRED/ERROR bookkeeping, set the instant a send gets an auth
+     * error) and from a phone number's own `canSendMessage`: a number can
+     * read AVAILABLE while the WABA it belongs to is the thing actually
+     * refusing delivery — a payment-method failure on the WABA is exactly
+     * this shape, and until this field existed nothing surfaced it short
+     * of reading raw server logs.
+     */
+    wabaCanSendMessage: { type: String },
+    /** The sentence Meta gives for wabaCanSendMessage, when not AVAILABLE. */
+    wabaBlockReason: { type: String },
+    wabaHealthCheckedAt: { type: Date },
   },
   { timestamps: true },
 );

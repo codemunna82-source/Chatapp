@@ -67,7 +67,18 @@ const updateSchema = z.object({
  * Meta puts it in URLs and client-side config — and hiding it would only
  * make the page harder to match against Meta's dashboard.
  */
-function toPublic(app: MetaAppDoc, baseUrl: string, numberCount = 0, accountStatus: string | null = null) {
+interface WabaBlock {
+  canSendMessage: string;
+  reason?: string;
+}
+
+function toPublic(
+  app: MetaAppDoc,
+  baseUrl: string,
+  numberCount = 0,
+  accountStatus: string | null = null,
+  wabaBlock: WabaBlock | null = null,
+) {
   return {
     id: String(app._id),
     name: app.name,
@@ -84,6 +95,14 @@ function toPublic(app: MetaAppDoc, baseUrl: string, numberCount = 0, accountStat
     // switch; this is the one that says whether Meta will actually accept
     // a send from anything under this BM right now.
     accountStatus,
+    // Meta's verdict on the Business Account ITSELF — read off the WABA
+    // entity in a number's health_status, worst-case across every
+    // WhatsAppAccount this app holds. A payment-method failure is exactly
+    // this shape: every number under it can individually read AVAILABLE
+    // while nothing sends, because what Meta is refusing is the Business
+    // Manager's own standing, not any one number's.
+    wabaCanSendMessage: wabaBlock?.canSendMessage ?? null,
+    wabaBlockReason: wabaBlock?.reason ?? null,
     isDefault: false,
     createdAt: app.get('createdAt'),
   };
@@ -154,6 +173,32 @@ async function summarizeAccountStatusByApp(tenantId: string): Promise<Map<string
 }
 
 /**
+ * Meta's own verdict on each Business Account, aggregated up to the
+ * Business Manager it lives under — the WABA-level counterpart of
+ * `summarizeAccountStatusByApp` above, read from `refreshNumberHealth`'s
+ * WABA-entity capture rather than from this app's own local `status`.
+ *
+ * Any non-AVAILABLE beats AVAILABLE; among two non-AVAILABLE readings the
+ * one with a reason wins, since a bare verdict with nothing to say is the
+ * less useful of the two to show an admin.
+ */
+async function summarizeWabaBlockByApp(tenantId: string): Promise<Map<string, WabaBlock>> {
+  const accounts = await WhatsAppAccount.find({ tenantId })
+    .select('metaAppId wabaCanSendMessage wabaBlockReason')
+    .lean();
+  const worst = new Map<string, WabaBlock>();
+  for (const a of accounts) {
+    if (!a.wabaCanSendMessage || a.wabaCanSendMessage === 'AVAILABLE') continue;
+    const key = a.metaAppId ? String(a.metaAppId) : '';
+    const current = worst.get(key);
+    if (!current || (!current.reason && a.wabaBlockReason)) {
+      worst.set(key, { canSendMessage: a.wabaCanSendMessage, reason: a.wabaBlockReason ?? undefined });
+    }
+  }
+  return worst;
+}
+
+/**
  * The configuration this deployment has been running on all along.
  *
  * Presented as a row beside the added Business Managers rather than left
@@ -164,7 +209,12 @@ async function summarizeAccountStatusByApp(tenantId: string): Promise<Map<string
  * the server's environment, and a form that appeared to edit it would be
  * lying.
  */
-function defaultAppRow(baseUrl: string, numberCount: number, accountStatus: string | null) {
+function defaultAppRow(
+  baseUrl: string,
+  numberCount: number,
+  accountStatus: string | null,
+  wabaBlock: WabaBlock | null = null,
+) {
   return {
     id: null,
     name: 'Server default',
@@ -175,6 +225,8 @@ function defaultAppRow(baseUrl: string, numberCount: number, accountStatus: stri
     hasAccessToken: env.META_ACCESS_TOKEN.length > 0,
     numberCount,
     accountStatus,
+    wabaCanSendMessage: wabaBlock?.canSendMessage ?? null,
+    wabaBlockReason: wabaBlock?.reason ?? null,
     isDefault: true,
     createdAt: null,
   };
@@ -202,10 +254,11 @@ metaAppRouter.get(
   asyncHandler(async (req, res) => {
     const auth = getTenantContext(req);
     const baseUrl = baseUrlFor(req);
-    const [apps, counts, accountStatuses] = await Promise.all([
+    const [apps, counts, accountStatuses, wabaBlocks] = await Promise.all([
       listMetaAppsForTenant(auth.tenantId),
       countNumbersByApp(auth.tenantId),
       summarizeAccountStatusByApp(auth.tenantId),
+      summarizeWabaBlockByApp(auth.tenantId),
     ]);
 
     // The environment's own configuration, shown first when anything still
@@ -221,10 +274,23 @@ metaAppRouter.get(
       success: true,
       data: [
         ...(defaultNumberCount > 0
-          ? [defaultAppRow(baseUrl, defaultNumberCount, accountStatuses.get('') ?? null)]
+          ? [
+              defaultAppRow(
+                baseUrl,
+                defaultNumberCount,
+                accountStatuses.get('') ?? null,
+                wabaBlocks.get('') ?? null,
+              ),
+            ]
           : []),
         ...apps.map((a) =>
-          toPublic(a, baseUrl, counts.get(String(a._id)) ?? 0, accountStatuses.get(String(a._id)) ?? null),
+          toPublic(
+            a,
+            baseUrl,
+            counts.get(String(a._id)) ?? 0,
+            accountStatuses.get(String(a._id)) ?? null,
+            wabaBlocks.get(String(a._id)) ?? null,
+          ),
         ),
       ],
     });

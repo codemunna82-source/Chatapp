@@ -11,7 +11,7 @@ import { logger } from '../../lib/logger';
 import { getMetaGateway } from '../../integrations/meta';
 import type { MetaCredentials } from '../../integrations/meta';
 import { describeNumberHealth, type NumberHealth } from './numberHealth';
-import { summariseHealthStatus } from './healthStatusSummary';
+import { summariseHealthStatus, summariseWabaHealth } from './healthStatusSummary';
 import { fetchNumberHealthStatus } from '../../integrations/meta/phoneNumbers';
 import { blockNumberRemoval } from './removalGuards';
 import { registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta/oauth';
@@ -398,9 +398,8 @@ export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promi
      * and an older rating beats no health reading at all.
      */
     try {
-      const summary = summariseHealthStatus(
-        await fetchNumberHealthStatus(credentials.accessToken, number.phoneNumberId),
-      );
+      const rawHealth = await fetchNumberHealthStatus(credentials.accessToken, number.phoneNumberId);
+      const summary = summariseHealthStatus(rawHealth);
       number.canSendMessage = summary.canSendMessage;
       number.sendBlockReason = summary.reason;
       if (summary.canSendMessage && summary.canSendMessage !== 'AVAILABLE') {
@@ -412,6 +411,26 @@ export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promi
             reason: summary.reason,
           },
           'Meta will not fully deliver from this number',
+        );
+      }
+
+      // The WABA entity in the same response, read separately: a number
+      // can be AVAILABLE while its own WABA is BLOCKED on something that
+      // has nothing to do with this number specifically — a payment
+      // failure on the Business Manager is exactly that shape, and
+      // summariseHealthStatus above would never surface it if a different
+      // entity (usually this number) happens to be the first one blocked.
+      const wabaSummary = summariseWabaHealth(rawHealth);
+      if (wabaSummary.canSendMessage) {
+        await WhatsAppAccount.updateOne(
+          { _id: number.whatsappAccountId },
+          {
+            $set: {
+              wabaCanSendMessage: wabaSummary.canSendMessage,
+              wabaBlockReason: wabaSummary.reason,
+              wabaHealthCheckedAt: new Date(),
+            },
+          },
         );
       }
     } catch (err) {
