@@ -5,7 +5,7 @@ import { revokeAllSessionsForUser } from '../auth/auth.service';
 import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './user.repository';
 import { refuseUserRemoval } from './userRemoval';
-import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
+import { findPhoneNumberByIdAndTenant, findPhoneNumberByDisplayNumberAndTenant } from '../whatsapp/whatsapp.repository';
 import { isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer, deleteCloudinaryAsset } from '../../integrations/cloudinary';
 import { User, type UserDoc } from './user.model';
 import { DeviceToken } from '../devices/deviceToken.model';
@@ -72,6 +72,27 @@ async function assertPhoneNumberBelongsToTenant(tenantId: string, phoneNumberId:
   }
 }
 
+/**
+ * The number isolation should turn on for, when nobody said so explicitly.
+ *
+ * Only `visibleWhatsAppPhoneNumberId` — a number assigned by id — turns
+ * isolation on for a SUB_USER; everyone else sees the whole workspace
+ * (see conversation.access.ts). That default is usually wrong for a
+ * member whose own sign-in phone IS one of the tenant's WhatsApp numbers:
+ * an admin would otherwise have to find and pick it from a dropdown by
+ * hand for every such person, and until they do, that member's inbox is
+ * everyone's. Matching it automatically is the same assignment an admin
+ * would have made anyway, just made the moment it became obvious instead
+ * of whenever someone happens to notice it was never done.
+ *
+ * Never overrides an id the request itself named — this only fills in
+ * what was left unset.
+ */
+async function autoMatchPhoneNumberId(tenantId: string, phone: string): Promise<string | undefined> {
+  const match = await findPhoneNumberByDisplayNumberAndTenant(phone, tenantId);
+  return match ? String(match._id) : undefined;
+}
+
 type CreateUserBody = z.infer<typeof createUserSchema>;
 type UpdateUserBody = z.infer<typeof updateUserSchema>;
 type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
@@ -98,8 +119,11 @@ export async function createUserForTenant(
     throw ApiError.conflict('PHONE_ALREADY_EXISTS', 'A user with this phone number already exists');
   }
 
-  if (body.whatsappPhoneNumberId) {
-    await assertPhoneNumberBelongsToTenant(tenantId, body.whatsappPhoneNumberId);
+  let whatsappPhoneNumberId = body.whatsappPhoneNumberId;
+  if (whatsappPhoneNumberId) {
+    await assertPhoneNumberBelongsToTenant(tenantId, whatsappPhoneNumberId);
+  } else {
+    whatsappPhoneNumberId = await autoMatchPhoneNumberId(tenantId, phone);
   }
 
   const passwordHash = await hashPassword(body.password);
@@ -113,7 +137,7 @@ export async function createUserForTenant(
     validFrom: body.validFrom,
     validUntil: body.validUntil,
     displayName: body.displayName,
-    whatsappPhoneNumberId: body.whatsappPhoneNumberId,
+    whatsappPhoneNumberId,
   });
 
   await recordAudit({
@@ -167,6 +191,17 @@ export async function updateUserForTenant(
       throw ApiError.conflict('PHONE_ALREADY_EXISTS', 'A user with this phone number already exists');
     }
     normalizedPatch = { ...patch, phone };
+
+    // The same auto-match createUserForTenant does, re-run because the
+    // phone that might match one of the tenant's own numbers just
+    // changed. Only when this request did not also name a number
+    // itself — an admin assigning one by hand in the same edit is never
+    // second-guessed by a phone number that happens to match something
+    // else.
+    if (patch.whatsappPhoneNumberId === undefined) {
+      const matched = await autoMatchPhoneNumberId(tenantId, phone);
+      if (matched) normalizedPatch = { ...normalizedPatch, whatsappPhoneNumberId: matched };
+    }
   }
 
   // Same shape of check as the phone number above, and for the same

@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { normalizePhone } from '../../lib/phone';
 import { WhatsAppAccount, type WhatsAppAccountDoc, type WabaStatus } from './whatsappAccount.model';
 import { WhatsAppPhoneNumber, type WhatsAppPhoneNumberDoc } from './whatsappPhoneNumber.model';
 
@@ -61,6 +62,26 @@ export async function findPhoneNumberByIdAndTenant(
 ): Promise<WhatsAppPhoneNumberDoc | null> {
   if (!Types.ObjectId.isValid(id)) return null;
   return WhatsAppPhoneNumber.findOne({ _id: id, tenantId });
+}
+
+/**
+ * The tenant's own WhatsApp number matching a phone number, if any — a
+ * team member's sign-in phone is often also the number their own device
+ * sends on, and this is what lets that number assign itself instead of
+ * an admin having to pick it from a dropdown.
+ *
+ * Compared normalised on both sides: Meta's displayPhoneNumber carries
+ * spaces ("+91 92329 46140") a sign-in phone never does, and the two
+ * would never match compared as raw strings.
+ */
+export async function findPhoneNumberByDisplayNumberAndTenant(
+  displayPhoneNumber: string,
+  tenantId: string,
+): Promise<WhatsAppPhoneNumberDoc | null> {
+  const target = normalizePhone(displayPhoneNumber);
+  if (!target) return null;
+  const numbers = await WhatsAppPhoneNumber.find({ tenantId });
+  return numbers.find((n) => normalizePhone(n.displayPhoneNumber) === target) ?? null;
 }
 
 /**
