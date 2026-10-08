@@ -124,7 +124,6 @@ function MessageContent({
       <MediaImage
         mediaId={message.mediaId}
         localUri={message.localUri}
-        uploadProgress={message.uploadProgress}
         onOpen={onOpenImage}
         onLongPress={onLongPress}
       />
@@ -135,7 +134,6 @@ function MessageContent({
       <VideoMessageBubble
         mediaId={message.mediaId}
         localUri={message.localUri}
-        uploadProgress={message.uploadProgress}
         onLongPress={onLongPress}
       />
     );

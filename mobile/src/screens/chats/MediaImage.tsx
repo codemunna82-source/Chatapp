@@ -5,7 +5,6 @@ import { downloadMedia } from './mediaCache';
 import { clampRatio, readMediaRatio, writeMediaRatio } from '../../storage/mediaShape';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeProvider';
-import { UploadProgress } from './UploadProgress';
 
 /**
  * Inline authenticated image — the media proxy (backend GET /api/media/:id)
@@ -22,17 +21,21 @@ import { UploadProgress } from './UploadProgress';
 function MediaImageImpl({
   mediaId,
   localUri: providedUri,
-  uploadProgress,
   width: fixedWidth,
   height: fixedHeight,
   onOpen,
   onLongPress,
 }: {
   mediaId?: string;
-  /** A local file to render directly — used for a just-picked, still-uploading photo. */
+  /**
+   * A local file to render directly — used for a just-picked,
+   * still-uploading photo. Rendered at full clarity immediately, with no
+   * loading cover of its own: the bubble's own status tick (a clock
+   * while this is QUEUED, see MessageStatusIcon) is what says it is
+   * still going out, the same way every other message type already
+   * says so.
+   */
   localUri?: string;
-  /** 0-1 while this photo's bytes are still going up; absent once sent. */
-  uploadProgress?: number;
   /**
    * An exact box, for a caller that has already decided the layout — an
    * album cell. Both or neither; absent means the standalone bubble
@@ -164,11 +167,6 @@ function MediaImageImpl({
   // whatever the download produced.
   const displayUri = providedUri ?? localUri;
 
-  // A photo we are sending: it is rendered from a local file and has no
-  // server id yet. Once the send resolves the row is replaced by the real
-  // message, which has a mediaId and no progress.
-  const uploading = Boolean(providedUri) && !mediaId;
-
   if (failed) {
     return (
       <View style={[box, styles.center, { backgroundColor: colors.surfaceAlt, borderRadius: radius.sm }]}>
@@ -198,11 +196,6 @@ function MediaImageImpl({
           <ActivityIndicator color={colors.primary} />
         </View>
       )}
-      {/* Only while the bytes are going up. `uploading` is the local photo
-          being sent, never the downloading of someone else's — those are
-          two different waits and conflating them would put a percentage
-          on an image that is merely loading. */}
-      {uploading && <UploadProgress progress={uploadProgress} />}
     </Pressable>
   );
 }

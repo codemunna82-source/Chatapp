@@ -227,7 +227,6 @@ function Tile({
       <MediaImage
         mediaId={message.mediaId}
         localUri={message.localUri}
-        uploadProgress={message.uploadProgress}
         onOpen={(localUri, mediaId) => onOpenImage?.(localUri, mediaId, album)}
         onLongPress={() => onLongPress(message)}
         width={width}

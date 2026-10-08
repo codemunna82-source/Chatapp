@@ -15,7 +15,6 @@ import { downloadPoster, downloadVideo } from './mediaCache';
 import { clampRatio, readMediaRatio, writeMediaRatio } from '../../storage/mediaShape';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeProvider';
-import { UploadProgress } from './UploadProgress';
 import { impactLight } from '../../utils/haptics';
 
 /**
@@ -36,13 +35,15 @@ import { impactLight } from '../../utils/haptics';
 export function VideoMessageBubble({
   mediaId,
   localUri: providedUri,
-  uploadProgress,
   onLongPress,
 }: {
   mediaId?: string;
-  /** 0-1 while this video's bytes are still going up; absent once sent. */
-  uploadProgress?: number;
-  /** A just-picked local file, still uploading. */
+  /**
+   * A just-picked local file, still uploading. The poster renders at
+   * full clarity immediately — no cover of its own — with the bubble's
+   * own status tick (a clock while QUEUED) the thing that says it is
+   * still going out.
+   */
   localUri?: string;
   onLongPress?: () => void;
 }) {
@@ -238,7 +239,6 @@ export function VideoMessageBubble({
           )}
         </Pressable>
       ) : null}
-      {uploading && <UploadProgress progress={uploadProgress} />}
     </View>
   );
 }
