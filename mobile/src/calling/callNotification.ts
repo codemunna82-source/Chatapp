@@ -197,6 +197,27 @@ export async function displayIncomingCall(call: IncomingCallNotification): Promi
   await notifee.displayNotification(notification);
 }
 
+/**
+ * Takes down the push-drawn ring WITHOUT marking the call over.
+ *
+ * The moment the socket (or PendingCallSync) puts the in-app call screen
+ * up, useRinger becomes the one ringtone for this call — but if the push
+ * got here first (doze, a socket still reconnecting) its own notification
+ * channel is still looping its own sound, with nothing to stop it once a
+ * second ringer starts. Unlike cancelIncomingCall, this never calls
+ * markCallEnded: the call is still live, only its presentation moved from
+ * a push to the app, and a later duplicate push for it must still be
+ * recognised as one to ring from, not one already dealt with.
+ */
+export async function silenceIncomingCallNotification(callId: string): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    await notifee.cancelNotification(callNotificationId(callId));
+  } catch {
+    // Already gone, which is the outcome this wanted anyway.
+  }
+}
+
 /** Takes the ring back — answered elsewhere, rejected, cancelled or timed
  *  out. Harmless when there is nothing showing. */
 export async function cancelIncomingCall(callId: string): Promise<void> {

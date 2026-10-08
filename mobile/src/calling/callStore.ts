@@ -12,7 +12,8 @@ import {
   emitWebCallInvite,
   emitWebCallReject,
 } from '../sockets/actions';
-import { markCallEnded } from './endedCalls';
+import { markCallEnded, wasCallEnded } from './endedCalls';
+import { silenceIncomingCallNotification } from './callNotification';
 
 /**
  * The one live call this device is handling.
@@ -191,13 +192,46 @@ let pendingLocalIce: unknown[] = [];
  */
 let pendingAnswer: { callId: string; sdp: string } | null = null;
 
-/** Gives up on an outgoing call nobody answers, rather than sitting on "Connecting…". */
+/**
+ * Gives up on a call nobody answers, rather than sitting on "Connecting…"
+ * or, for an incoming one, ringing forever.
+ *
+ * One timer for both directions — never both armed at once, since a
+ * second ring is refused while one is already live (see ring/ringWeb).
+ * The incoming side exists because everything that normally ends a ring
+ * (answer, reject, the caller cancelling) depends on a message actually
+ * arriving over the socket; this is the local backstop for the one that
+ * does not, so a dropped `call:ended` cannot leave the phone ringing
+ * indefinitely with nothing left to stop it.
+ */
 let ringTimer: ReturnType<typeof setTimeout> | null = null;
 const RING_TIMEOUT_MS = 45_000;
+/** Matches the Android notification's own timeoutAfter (callNotification.ts)
+ *  and the server's RINGING_TTL_MS — by the time this fires, every other
+ *  layer has already given up on this call too. */
+const INCOMING_RING_TIMEOUT_MS = 60_000;
 
 function clearRingTimer() {
   if (ringTimer) clearTimeout(ringTimer);
   ringTimer = null;
+}
+
+/**
+ * The local backstop for an incoming call nobody's `call:ended` ever
+ * arrives for.
+ *
+ * Tied to the specific callId it was armed for, the same way the outgoing
+ * ringTimer above is tied to the invite's callId — so a timeout that fires
+ * late, after this call has already moved on to connecting or ended some
+ * other way, finds a mismatched id and does nothing rather than tearing
+ * down whatever call is live by then.
+ */
+function armIncomingRingTimeout(callId: string): void {
+  ringTimer = setTimeout(() => {
+    if (useCallStore.getState().callId !== callId) return;
+    closeSession();
+    useCallStore.setState({ phase: 'ended', message: 'Missed call', connectedAt: null });
+  }, INCOMING_RING_TIMEOUT_MS);
 }
 
 function closeSession() {
@@ -239,6 +273,11 @@ export const useCallStore = create<CallState>((set, get) => ({
     // second caller. Either way, replacing the live call would drop a
     // conversation already in progress — so the newcomer is ignored.
     if (get().phase !== 'idle') return;
+    // A webhook redelivery, or PendingCallSync's own foreground poll
+    // racing a decline already in flight, for a call this phone has
+    // already answered, rejected, cancelled or let time out. Without
+    // this it looked exactly like a fresh call and rang again.
+    if (wasCallEnded(payload.callId)) return;
 
     set({
       phase: 'ringing',
@@ -251,6 +290,11 @@ export const useCallStore = create<CallState>((set, get) => ({
       connectedAt: null,
       message: null,
     });
+    armIncomingRingTimeout(payload.callId);
+    // Handing off from any push that beat this socket event here — from
+    // now on useRinger is the one ringtone, and the notification's own
+    // loop sound must not keep playing behind it.
+    void silenceIncomingCallNotification(payload.callId);
   },
 
   ringWeb: (payload) => {
@@ -258,6 +302,7 @@ export const useCallStore = create<CallState>((set, get) => ({
     // would drop a conversation already in progress, and a second ring is
     // far more often a reconnect replaying than a real second caller.
     if (get().phase !== 'idle') return;
+    if (wasCallEnded(payload.callId)) return;
 
     pendingRemoteIce = [];
     set({
@@ -275,6 +320,8 @@ export const useCallStore = create<CallState>((set, get) => ({
       // rectangle with no way to tell whether it is broken or deliberate.
       media: payload.media === 'video' ? 'video' : 'audio',
     });
+    armIncomingRingTimeout(payload.callId);
+    void silenceIncomingCallNotification(payload.callId);
   },
 
   addRemoteIce: (callId, candidate) => {
@@ -416,6 +463,10 @@ export const useCallStore = create<CallState>((set, get) => ({
   answer: async () => {
     const { callId, sdpOffer, phase } = get();
     if (phase !== 'ringing' || !callId) return;
+    // This call is leaving 'ringing' for good — the backstop above must
+    // not fire mid-connection and tear down a call that is no longer the
+    // one it was armed for.
+    clearRingTimer();
 
     if (!sdpOffer) {
       // Meta sent a ring with no session offer. There is nothing to answer
