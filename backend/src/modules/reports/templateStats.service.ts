@@ -70,6 +70,14 @@ export interface TemplateStatsByDay {
   failed: number;
 }
 
+export interface MessageVolumeByDay {
+  date: string;
+  /** From the customer. */
+  in: number;
+  /** From this workspace — template, plain text, media, everything. */
+  out: number;
+}
+
 export interface MessageTally {
   total: number;
   delivered: number;
@@ -94,6 +102,15 @@ export interface TemplateStats {
   byNumber: TemplateStatsByNumber[];
   /** Windowed to windowDays. */
   byDay: TemplateStatsByDay[];
+  /**
+   * The whole WhatsApp conversation, both directions, every message
+   * type — not just templates. "How many messages came in and went out
+   * today, on this number" is a different question from "is our
+   * template traffic healthy", and the by-template/by-day figures above
+   * can't answer it: those are OUT-only and template-only by design.
+   * Windowed to windowDays.
+   */
+  messagesByDay: MessageVolumeByDay[];
   /**
    * Minutes from Meta accepting the send (sentAt) to the customer's
    * device confirming it (deliveredAt), across delivered templates in
@@ -167,7 +184,8 @@ export async function getTemplateStats(
   // same scope. The other half of what a number actually sent.
   const plainMatch = { tenantId: tenantObjectId, type: 'text', direction: 'OUT', channel: 'whatsapp', ...conversationScope };
 
-  const [namedRaw, unnamedRows, byNumberRaw, byDayRaw, latencyRaw, recentFailures, plainRaw] = await Promise.all([
+  const [namedRaw, unnamedRows, byNumberRaw, byDayRaw, latencyRaw, recentFailures, plainRaw, volumeByDayRaw] =
+    await Promise.all([
     Message.aggregate<{ _id: { name: string; status: string }; count: number }>([
       { $match: namedMatch },
       { $group: { _id: { name: '$templateName', status: '$status' }, count: { $sum: 1 } } },
@@ -228,6 +246,27 @@ export async function getTemplateStats(
     Message.aggregate<{ _id: string; count: number }>([
       { $match: plainMatch },
       { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
+
+    // Every message, both directions — the whole WhatsApp conversation on
+    // this scope, not just what this workspace sent. channel: 'whatsapp'
+    // only: a reply routed to the private web window never touches Meta
+    // and is not part of "how much did this number talk to Meta today".
+    Message.aggregate<{ _id: { day: string; direction: string }; count: number }>([
+      {
+        $match: {
+          tenantId: tenantObjectId,
+          channel: 'whatsapp',
+          createdAt: { $gte: since },
+          ...conversationScope,
+        },
+      },
+      {
+        $group: {
+          _id: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, direction: '$direction' },
+          count: { $sum: 1 },
+        },
+      },
     ]),
   ]);
 
@@ -319,6 +358,22 @@ export async function getTemplateStats(
     plainTally[bucketOf(row._id)] += row.count;
   }
 
+  const volumeByDayMap = new Map<string, { in: number; out: number }>();
+  for (let i = 0; i < windowDays; i += 1) {
+    const d = new Date(since.getTime() + i * 24 * 60 * 60 * 1000);
+    volumeByDayMap.set(d.toISOString().slice(0, 10), { in: 0, out: 0 });
+  }
+  for (const row of volumeByDayRaw) {
+    const bucket = volumeByDayMap.get(row._id.day);
+    if (!bucket) continue;
+    if (row._id.direction === 'IN') bucket.in += row.count;
+    else if (row._id.direction === 'OUT') bucket.out += row.count;
+  }
+  const messagesByDay: MessageVolumeByDay[] = Array.from(volumeByDayMap.entries()).map(([date, v]) => ({
+    date,
+    ...v,
+  }));
+
   const stats: TemplateStats = {
     windowDays,
     whatsappPhoneNumberId,
@@ -327,6 +382,7 @@ export async function getTemplateStats(
     byTemplate,
     byNumber,
     byDay,
+    messagesByDay,
     medianDeliveryMinutes,
     averageDeliveryMinutes,
   };
