@@ -233,6 +233,42 @@ export function ImageViewerModal({
           )}
         </Pressable>
 
+        {/* A second, swipe-free way through the album besides the strip
+            below. A horizontal swipe on the photo itself was deliberately
+            never added — it is the same gesture space as the pan this
+            viewer already runs once zoomed in, and the two would fight
+            each other the moment anyone pinched in past fit-scale. An
+            arrow has no such conflict. Hidden at either end of the
+            album rather than wrapping, matching the strip. */}
+        {photos && photos.length > 1 && current > 0 ? (
+          <Pressable
+            onPress={() => setPicked({ key: albumKey, at: current - 1 })}
+            style={[styles.navArrow, styles.navArrowLeft]}
+            accessibilityRole="button"
+            accessibilityLabel="Previous photo"
+          >
+            {({ pressed }) => (
+              <View style={[styles.closeDot, { opacity: pressed ? 0.6 : 1 }]}>
+                <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
+              </View>
+            )}
+          </Pressable>
+        ) : null}
+        {photos && photos.length > 1 && current < photos.length - 1 ? (
+          <Pressable
+            onPress={() => setPicked({ key: albumKey, at: current + 1 })}
+            style={[styles.navArrow, styles.navArrowRight]}
+            accessibilityRole="button"
+            accessibilityLabel="Next photo"
+          >
+            {({ pressed }) => (
+              <View style={[styles.closeDot, { opacity: pressed ? 0.6 : 1 }]}>
+                <Ionicons name="chevron-forward" size={22} color="#FFFFFF" />
+              </View>
+            )}
+          </Pressable>
+        ) : null}
+
         {/* Reply, on whichever photo is on screen. The whole point of the
             strip below: a photo behind "+N" had no bubble to long-press,
             so there was no way to answer one of five pictures. */}
@@ -304,6 +340,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hint: { position: 'absolute', alignSelf: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12.5 },
+  navArrow: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -touchTarget.min / 2,
+    width: touchTarget.min,
+    height: touchTarget.min,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navArrowLeft: { left: 4 },
+  navArrowRight: { right: 4 },
   reply: { position: 'absolute', left: 8, width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   strip: { position: 'absolute', left: 0, right: 0, maxHeight: 64 },
   stripInner: { paddingHorizontal: 12, gap: 8, alignItems: 'center' },
