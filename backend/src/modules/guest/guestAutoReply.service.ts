@@ -19,6 +19,7 @@ import { guestChatUrl } from '../tenants/guestDomain';
 import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
 import { WhatsAppAccount } from '../whatsapp/whatsappAccount.model';
+import { tryReserveAutomaticSendSlot } from '../whatsapp/outboundPacing';
 
 /** The invitation config's own shape, independent of which slot it came from. */
 interface AutoGuestLinkConfig {
@@ -208,6 +209,18 @@ async function deliverGuestLinkInvitation(
   }
 
   if (auto && !shouldSendInvite(existing, maxSends)) return null;
+
+  // Paced, not gated by config — see outboundPacing.ts for why this one
+  // send is what absorbs a throughput spike instead of every send on the
+  // number. A customer skipped here is not left with nothing: an agent can
+  // still send the link by hand, and their next message gets a fresh try.
+  if (auto && !(await tryReserveAutomaticSendSlot(input.whatsappPhoneNumberId))) {
+    logger.info(
+      { tenantId: input.tenantId, conversationId: input.conversationId, whatsappPhoneNumberId: input.whatsappPhoneNumberId },
+      'Skipped the automatic private-chat invitation — too many automatic sends on this number in the last minute',
+    );
+    return null;
+  }
 
   // Re-send on the SAME link rather than minting a new one. Their
   // WhatsApp thread keeps every copy ever sent, and a fresh token would
