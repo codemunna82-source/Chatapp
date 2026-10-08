@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { Types } from 'mongoose';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { getTemplateStats } from './templateStats.service';
@@ -15,8 +16,20 @@ function resolveWindowDays(raw: unknown): number {
   return Math.min(MAX_WINDOW_DAYS, Math.max(MIN_WINDOW_DAYS, Math.round(parsed)));
 }
 
+/** A malformed id can't match anything server-side (getTemplateStats
+ *  scopes every lookup to this tenant too), but it would still throw a
+ *  Mongoose cast error instead of just returning nothing — so a bad or
+ *  stale value is treated as "no number chosen" rather than a 500. */
+function resolveNumberId(raw: unknown): string | undefined {
+  return typeof raw === 'string' && Types.ObjectId.isValid(raw) ? raw : undefined;
+}
+
 export const getTemplateStatsHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
-  const stats = await getTemplateStats(auth.tenantId, resolveWindowDays(req.query.days));
+  const stats = await getTemplateStats(
+    auth.tenantId,
+    resolveWindowDays(req.query.days),
+    resolveNumberId(req.query.number),
+  );
   res.status(200).json({ success: true, data: stats });
 });

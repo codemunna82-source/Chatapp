@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import { Message } from '../messages/message.model';
+import { Conversation } from '../conversations/conversation.model';
 import { WhatsAppPhoneNumber } from '../whatsapp/whatsappPhoneNumber.model';
 import { firstError } from '../messages/messageFailureReason';
 import { createTtlCache } from '../../lib/ttlCache';
@@ -8,7 +9,8 @@ import { createTtlCache } from '../../lib/ttlCache';
  * How admins answer "is our template traffic healthy" without reading
  * Meta's own dashboard or grepping production logs — which template is
  * failing, how often, why, on which number, and whether a delivered one
- * is taking its time about it.
+ * is taking its time about it. Scopable to one WhatsApp number, the same
+ * drill-down the main dashboard offers a reader limited to one.
  *
  * MASTER_ADMIN only (see templateStats.routes.ts): a failure breakdown
  * names the exact reason Meta refused a send, which is diagnostic detail
@@ -22,9 +24,22 @@ const DEFAULT_WINDOW_DAYS = 30;
  *  one that is not should still get an answer in one request rather than
  *  scanning its entire failure history every time the page loads. */
 const MAX_FAILURES_READ = 5000;
+/**
+ * How many un-named rows to read and back-fill a name for in JS.
+ *
+ * `templateName` is a real field now, but every template message sent
+ * before that existed has none — only the display text "Template: X" it
+ * was always written with. This population only shrinks: every new
+ * template send already carries the field, so there is nothing recurring
+ * here to outgrow a single bounded read.
+ */
+const MAX_LEGACY_READ = 20_000;
+/** `text` for a template send is always exactly "Template: <name>" — see
+ *  message.service.ts. Its own length, so the name starts right after it. */
+const LEGACY_TEXT_PREFIX = 'Template: ';
 
 const STATS_TTL_MS = 30_000;
-const statsCache = createTtlCache<TemplateStats>({ ttlMs: STATS_TTL_MS, maxEntries: 200 });
+const statsCache = createTtlCache<TemplateStats>({ ttlMs: STATS_TTL_MS, maxEntries: 500 });
 
 export interface TemplateFailureReason {
   reason: string;
@@ -55,13 +70,27 @@ export interface TemplateStatsByDay {
   failed: number;
 }
 
+export interface MessageTally {
+  total: number;
+  delivered: number;
+  failed: number;
+}
+
 export interface TemplateStats {
   windowDays: number;
-  /** Lifetime — every template this tenant has ever sent, not windowed.
-   *  "How many have failed" is a question about the whole record, not
-   *  just the recent window the trend chart covers. */
-  totals: { total: number; delivered: number; failed: number };
+  /** The number this report is scoped to, or undefined for the whole workspace. */
+  whatsappPhoneNumberId?: string;
+  /** Lifetime — every template this tenant (or this number) has ever
+   *  sent, not windowed. "How many have failed" is a question about the
+   *  whole record, not just the recent window the trend chart covers. */
+  totals: MessageTally;
+  /** The same lifetime shape for plain (non-template) outbound WhatsApp
+   *  text — the other half of "what did this number actually send". */
+  plainTotals: MessageTally;
   byTemplate: TemplateStatsRow[];
+  /** Only computed for the whole-workspace view — scoped to one number
+   *  this is necessarily that number's own single row, which the caller
+   *  already has in `totals`. */
   byNumber: TemplateStatsByNumber[];
   /** Windowed to windowDays. */
   byDay: TemplateStatsByDay[];
@@ -74,14 +103,6 @@ export interface TemplateStats {
    */
   medianDeliveryMinutes: number | null;
   averageDeliveryMinutes: number | null;
-}
-
-/** Every outbound template this tenant has sent through Meta. Excludes
- *  the private web channel — a template routed there, if it ever is,
- *  never touches Meta's own delivery pipeline, so "failed" and "delivery
- *  time" mean nothing on it. */
-function baseMatch(tenantId: Types.ObjectId): Record<string, unknown> {
-  return { tenantId, type: 'template', direction: 'OUT', channel: 'whatsapp' };
 }
 
 /**
@@ -99,36 +120,68 @@ function emptyTally(): { pending: number; delivered: number; failed: number } {
   return { pending: 0, delivered: 0, failed: 0 };
 }
 
+function toMessageTally(t: ReturnType<typeof emptyTally>): MessageTally {
+  return { total: t.pending + t.delivered + t.failed, delivered: t.delivered, failed: t.failed };
+}
+
+/** The approved template's name, from the real field when a send has one
+ *  and from its display text when it predates that field. Never null for
+ *  an actual template send — every one of them was written with this
+ *  exact prefix. */
+function resolveTemplateName(doc: { templateName?: string | null; text?: string | null }): string {
+  if (doc.templateName) return doc.templateName;
+  if (doc.text?.startsWith(LEGACY_TEXT_PREFIX)) return doc.text.slice(LEGACY_TEXT_PREFIX.length);
+  return '(unnamed)';
+}
+
 export async function getTemplateStats(
   tenantId: string,
   windowDays: number = DEFAULT_WINDOW_DAYS,
+  whatsappPhoneNumberId?: string,
 ): Promise<TemplateStats> {
-  const cacheKey = `${tenantId}:${windowDays}`;
+  const cacheKey = `${tenantId}:${windowDays}:${whatsappPhoneNumberId ?? 'all'}`;
   const cached = statsCache.get(cacheKey);
   if (cached) return cached;
 
   const tenantObjectId = new Types.ObjectId(tenantId);
-  const match = baseMatch(tenantObjectId);
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
-  const [byTemplateRaw, byNumberRaw, byDayRaw, latencyRaw, recentFailures] = await Promise.all([
-    Message.aggregate<{ _id: { name: string | null; status: string }; count: number }>([
-      { $match: match },
+  // Messages carry no number of their own — only their conversation does.
+  // Scoping to one number means scoping to that number's conversations
+  // first, the same join the main dashboard uses for a limited reader.
+  let conversationScope: Record<string, unknown> = {};
+  if (whatsappPhoneNumberId) {
+    const scoped = await Conversation.find({
+      tenantId: tenantObjectId,
+      whatsappPhoneNumberId: new Types.ObjectId(whatsappPhoneNumberId),
+    })
+      .select('_id')
+      .lean();
+    conversationScope = { conversationId: { $in: scoped.map((c) => c._id) } };
+  }
+
+  const templateMatch = { tenantId: tenantObjectId, type: 'template', direction: 'OUT', channel: 'whatsapp', ...conversationScope };
+  const namedMatch = { ...templateMatch, templateName: { $exists: true, $ne: null } };
+  const unnamedMatch = { ...templateMatch, $or: [{ templateName: { $exists: false } }, { templateName: null }] };
+  // "Plain" — an ordinary WhatsApp text, never a template, same wire and
+  // same scope. The other half of what a number actually sent.
+  const plainMatch = { tenantId: tenantObjectId, type: 'text', direction: 'OUT', channel: 'whatsapp', ...conversationScope };
+
+  const [namedRaw, unnamedRows, byNumberRaw, byDayRaw, latencyRaw, recentFailures, plainRaw] = await Promise.all([
+    Message.aggregate<{ _id: { name: string; status: string }; count: number }>([
+      { $match: namedMatch },
       { $group: { _id: { name: '$templateName', status: '$status' }, count: { $sum: 1 } } },
     ]),
 
-    // Messages carry no number of their own — only their conversation
-    // does — the same join the main dashboard uses for a scoped reader.
+    // Bounded, JS-side: see MAX_LEGACY_READ.
+    Message.find(unnamedMatch).select('text status').sort({ _id: -1 }).limit(MAX_LEGACY_READ).lean(),
+
+    // Only meaningful for the whole-workspace view — scoped to one
+    // number this still runs but produces exactly that number's row,
+    // which `totals` already carries; cheap enough not to special-case.
     Message.aggregate<{ _id: Types.ObjectId | null; total: number; failed: number }>([
-      { $match: match },
-      {
-        $lookup: {
-          from: 'conversations',
-          localField: 'conversationId',
-          foreignField: '_id',
-          as: 'conversation',
-        },
-      },
+      { $match: templateMatch },
+      { $lookup: { from: 'conversations', localField: 'conversationId', foreignField: '_id', as: 'conversation' } },
       { $unwind: '$conversation' },
       {
         $group: {
@@ -140,7 +193,7 @@ export async function getTemplateStats(
     ]),
 
     Message.aggregate<{ _id: { day: string; status: string }; count: number }>([
-      { $match: { ...match, createdAt: { $gte: since } } },
+      { $match: { ...templateMatch, createdAt: { $gte: since } } },
       {
         $group: {
           _id: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, status: '$status' },
@@ -151,7 +204,14 @@ export async function getTemplateStats(
     ]),
 
     Message.aggregate<{ minutes: number }>([
-      { $match: { ...match, createdAt: { $gte: since }, sentAt: { $exists: true }, deliveredAt: { $exists: true } } },
+      {
+        $match: {
+          ...templateMatch,
+          createdAt: { $gte: since },
+          sentAt: { $exists: true },
+          deliveredAt: { $exists: true },
+        },
+      },
       { $project: { minutes: { $divide: [{ $subtract: ['$deliveredAt', '$sentAt'] }, 60000] } } },
     ]),
 
@@ -159,27 +219,39 @@ export async function getTemplateStats(
     // whatever shape Meta's webhook sent (see messageFailureReason.ts) —
     // which a Mongo aggregation cannot parse as defensively as the same
     // JS firstError() already does. Read lean and grouped here instead.
-    Message.find({ ...match, status: 'FAILED' })
-      .select('templateName error')
+    Message.find({ ...templateMatch, status: 'FAILED' })
+      .select('templateName text error')
       .sort({ _id: -1 })
       .limit(MAX_FAILURES_READ)
       .lean(),
+
+    Message.aggregate<{ _id: string; count: number }>([
+      { $match: plainMatch },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
   ]);
 
   const tallyByTemplate = new Map<string, ReturnType<typeof emptyTally>>();
   const lifetimeTally = emptyTally();
-  for (const row of byTemplateRaw) {
-    const name = row._id.name ?? '(unnamed)';
-    const tally = tallyByTemplate.get(name) ?? emptyTally();
+  for (const row of namedRaw) {
+    const tally = tallyByTemplate.get(row._id.name) ?? emptyTally();
     const bucket = bucketOf(row._id.status);
     tally[bucket] += row.count;
     lifetimeTally[bucket] += row.count;
+    tallyByTemplate.set(row._id.name, tally);
+  }
+  for (const doc of unnamedRows as unknown as { text?: string; status?: string }[]) {
+    const name = resolveTemplateName({ text: doc.text });
+    const tally = tallyByTemplate.get(name) ?? emptyTally();
+    const bucket = bucketOf(doc.status);
+    tally[bucket] += 1;
+    lifetimeTally[bucket] += 1;
     tallyByTemplate.set(name, tally);
   }
 
   const reasonsByTemplate = new Map<string, Map<string, number>>();
-  for (const doc of recentFailures as unknown as { templateName?: string; error?: unknown }[]) {
-    const name = doc.templateName ?? '(unnamed)';
+  for (const doc of recentFailures as unknown as { templateName?: string; text?: string; error?: unknown }[]) {
+    const name = resolveTemplateName(doc);
     const reason = firstError(doc.error)?.title ?? 'Unknown reason';
     const byReason = reasonsByTemplate.get(name) ?? new Map<string, number>();
     byReason.set(reason, (byReason.get(reason) ?? 0) + 1);
@@ -192,13 +264,7 @@ export async function getTemplateStats(
         .map(([reason, count]) => ({ reason, count }))
         .sort((a, b) => b.count - a.count)
         .slice(0, 5);
-      return {
-        templateName,
-        total: tally.pending + tally.delivered + tally.failed,
-        delivered: tally.delivered,
-        failed: tally.failed,
-        topFailureReasons,
-      };
+      return { templateName, ...toMessageTally(tally), topFailureReasons };
     })
     .sort((a, b) => b.total - a.total);
 
@@ -229,9 +295,7 @@ export async function getTemplateStats(
   }
   const byDay: TemplateStatsByDay[] = Array.from(byDayMap.entries()).map(([date, tally]) => ({
     date,
-    total: tally.pending + tally.delivered + tally.failed,
-    delivered: tally.delivered,
-    failed: tally.failed,
+    ...toMessageTally(tally),
   }));
 
   // Computed in JS rather than with $median, the same reasoning the main
@@ -250,13 +314,16 @@ export async function getTemplateStats(
   const averageDeliveryMinutes =
     minutes.length === 0 ? null : Math.round(minutes.reduce((sum, m) => sum + m, 0) / minutes.length);
 
+  const plainTally = emptyTally();
+  for (const row of plainRaw) {
+    plainTally[bucketOf(row._id)] += row.count;
+  }
+
   const stats: TemplateStats = {
     windowDays,
-    totals: {
-      total: lifetimeTally.pending + lifetimeTally.delivered + lifetimeTally.failed,
-      delivered: lifetimeTally.delivered,
-      failed: lifetimeTally.failed,
-    },
+    whatsappPhoneNumberId,
+    totals: toMessageTally(lifetimeTally),
+    plainTotals: toMessageTally(plainTally),
     byTemplate,
     byNumber,
     byDay,
