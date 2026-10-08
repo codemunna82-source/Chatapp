@@ -25,6 +25,13 @@ import type { Message, Conversation, MessageStatus } from '../api/types';
  *  socket payload, so this only governs the list row behind it. */
 const CONVERSATION_LIST_COALESCE_MS = 700;
 
+/** How often to pull fresh data over plain HTTPS while the socket is
+ *  stuck reconnecting — see the effect below. Not a tight poll: the
+ *  socket's own fast path (500ms–5s backoff) handles an ordinary blip
+ *  well before this ever fires once, so this only ever matters for the
+ *  outage that the socket cannot climb out of on its own. */
+const SOCKET_STUCK_REFETCH_MS = 45_000;
+
 interface MessageStatusPayload {
   conversationId: string;
   messageId: string;
@@ -103,7 +110,7 @@ export function RealtimeSync({
   // Socket.IO replays nothing on reconnect. Refetching closes the hole.
   // Skipped on the first connect, where the screens' own queries have just
   // loaded the same data.
-  const { generation } = useSocketConnection();
+  const { connected, generation } = useSocketConnection();
   const lastGeneration = useRef(0);
   useEffect(() => {
     if (generation === 0) return;
@@ -118,6 +125,31 @@ export function RealtimeSync({
     void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
     void queryClient.invalidateQueries({ queryKey: queryKeys.messagesAll });
   }, [generation, queryClient]);
+
+  /**
+   * The backstop for a socket that never gets to reconnect at all.
+   *
+   * Everything above closes the hole once the socket comes back — but
+   * socketClient.ts retries forever by design (a phone's network is
+   * unreliable, not dead), and "retrying forever" and "stuck" look
+   * identical from here. A captive portal, a carrier that cannot carry
+   * voice and data at once mid-call, a corporate proxy that passes HTTPS
+   * but blocks the WebSocket upgrade — any of these can leave the socket
+   * reconnecting for minutes with no 'connect' event ever to trigger the
+   * invalidation above, while a plain HTTPS request would have gone
+   * through the whole time. So once the socket has been down for a while,
+   * this reaches for the data the same way a reconnect would, on its own
+   * clock, and keeps trying again at the same interval for as long as it
+   * stays down — each attempt is a no-op if nothing was actually missed.
+   */
+  useEffect(() => {
+    if (connected) return;
+    const timer = setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.messagesAll });
+    }, SOCKET_STUCK_REFETCH_MS);
+    return () => clearInterval(timer);
+  }, [connected, queryClient]);
 
   const alert = useMessageAlert();
 
