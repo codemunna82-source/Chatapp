@@ -688,9 +688,18 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
    * the state they left it, with the Unblock button where they can see it.
    */
   blocked: boolean;
+  /**
+   * When every agent socket for this workspace last went offline, or
+   * undefined when nobody ever has (while this field existed). The
+   * header's starting value, before any `agent:presence` socket event
+   * has arrived — without it a customer who loads the page while
+   * everyone is offline sees nothing in that line until the next time
+   * someone connects or disconnects.
+   */
+  agentLastSeenAt?: string;
 }> {
   const [tenant, contact, phoneNumber, memberName] = await Promise.all([
-    Tenant.findById(guest.tenantId).select('name displayName').lean(),
+    Tenant.findById(guest.tenantId).select('name displayName agentLastSeenAt').lean(),
     findContactByIdAndTenant(guest.contactId, guest.tenantId),
     findPhoneNumberByIdAndTenant(guest.whatsappPhoneNumberId, guest.tenantId),
     findCustomerFacingNameForPhoneNumber(guest.tenantId, guest.whatsappPhoneNumberId),
@@ -738,6 +747,7 @@ export async function getGuestSessionView(guest: GuestContext): Promise<{
     verifiedByWhatsApp,
     businessPhone: phoneNumber?.displayPhoneNumber ?? undefined,
     blocked: Boolean(guest.blockedAt),
+    agentLastSeenAt: tenant?.agentLastSeenAt ? tenant.agentLastSeenAt.toISOString() : undefined,
   };
 }
 

@@ -106,6 +106,18 @@ const tenantSchema = new Schema(
      */
     displayName: { type: String, trim: true, maxlength: 120 },
     /**
+     * The last moment every agent socket for this tenant went offline —
+     * written the instant the online count drops to zero (see
+     * broadcastAgentPresence in sockets/presence.ts), never on every
+     * disconnect. What a customer's web chat header shows when nobody is
+     * online right now: "online" when someone is, this formatted
+     * otherwise, the same as WhatsApp's own "last seen". Absent means
+     * nobody from this workspace has ever gone offline while this field
+     * existed — a brand new workspace, or one that has been online every
+     * time a customer happened to look.
+     */
+    agentLastSeenAt: { type: Date },
+    /**
      * The workspace's photo, as a customer sees it at the top of the web
      * chat window.
      *

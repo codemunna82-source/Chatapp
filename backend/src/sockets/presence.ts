@@ -1,4 +1,5 @@
 import { logger } from '../lib/logger';
+import { Tenant } from '../modules/tenants/tenant.model';
 import { agentsRoom, conversationRoom, guestPresenceRoom, phoneNumberRoom, tenantRoom } from './rooms';
 import type { AppServer } from './types';
 
@@ -31,7 +32,21 @@ export async function countOnlineAgents(io: AppServer, tenantId: string): Promis
 /** Pushes the current state to every customer watching this workspace. */
 export async function broadcastAgentPresence(io: AppServer, tenantId: string): Promise<void> {
   const online = (await countOnlineAgents(io, tenantId)) > 0;
-  io.to(guestPresenceRoom(tenantId)).emit('agent:presence', { online });
+
+  // The moment stamped is THIS instant, not whatever a fresh read of the
+  // document would give a moment later — the customer's header has to
+  // show the same time this broadcast is announcing, not a slightly
+  // later one from a second round trip. Not awaited: a customer's
+  // "nobody is online anymore" must not wait on a write finishing.
+  let lastSeenAt: string | undefined;
+  if (!online) {
+    lastSeenAt = new Date().toISOString();
+    void Tenant.updateOne({ _id: tenantId }, { $set: { agentLastSeenAt: lastSeenAt } }).catch((err) => {
+      logger.warn({ err, tenantId }, 'Could not record agentLastSeenAt');
+    });
+  }
+
+  io.to(guestPresenceRoom(tenantId)).emit('agent:presence', online ? { online } : { online, lastSeenAt });
 }
 
 /**
