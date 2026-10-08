@@ -8,7 +8,8 @@ import { findFirstPhoneNumberForTenant, findPhoneNumberByIdAndTenant } from '../
 import { findAssignedPhoneNumberId } from '../users/user.repository';
 import { countWhatsAppNudges, deleteMessagesByConversation } from '../messages/message.repository';
 import { nudgesLeft, nudgeWindowStart } from '../messages/whatsappQuota';
-import { findActiveSessionForConversation } from '../guest/guestSession.repository';
+import { findActiveSessionForConversation, revokeSessionsForConversation } from '../guest/guestSession.repository';
+import { deleteGuestPushTokensForConversation } from '../guest/guestPushToken.repository';
 import { hasMovedToWebChat } from '../guest/webChatRouting';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
 import type { ConversationLean, ConversationStatus } from './conversation.model';
@@ -353,6 +354,14 @@ export async function startConversationForTenant(
  * Deletes a chat from this workspace: the conversation and every message in
  * it. Local to VOXO only — Meta's Cloud API cannot recall anything already
  * delivered, so the customer's own WhatsApp thread is untouched.
+ *
+ * Also revokes any live private-chat link for it, the same cleanup
+ * revokeGuestLinkForConversation does. Without this, a customer who still
+ * had the link open kept a working-looking header (their GuestSession was
+ * never touched) while every send failed underneath it with a raw
+ * CONVERSATION_NOT_FOUND — a confusing dead end instead of the clean
+ * "this chat link is no longer valid" the guest app already shows for
+ * every other way a link stops working.
  */
 export async function deleteConversationForTenant(auth: AuthContext, id: string): Promise<void> {
   const tenantId = auth.tenantId;
@@ -360,6 +369,8 @@ export async function deleteConversationForTenant(auth: AuthContext, id: string)
   await loadVisibleConversation(auth, id);
   await deleteMessagesByConversation(tenantId, id);
   await repo.deleteConversation(id, tenantId);
+  await revokeSessionsForConversation(id, tenantId);
+  await deleteGuestPushTokensForConversation(tenantId, id);
   await recordAudit({
     tenantId,
     actorUserId: actorId,
@@ -410,11 +421,16 @@ export async function bulkUpdateConversationsForTenant(
 
   if (action === 'delete') {
     const deletedIds = await repo.deleteConversationsByIds(permitted, tenantId);
-    // Messages are cascaded for exactly the ids that were really deleted —
-    // deleteConversationsByIds returns those, so nothing belonging to
-    // another tenant can be reached through this.
+    // Messages — and any live private-chat link — are cascaded for exactly
+    // the ids that were really deleted, the same cleanup the single-delete
+    // path does and for the same reason: a link left live after its
+    // conversation is gone fails every send with a raw not-found instead
+    // of the clean "no longer valid" the guest app already shows for an
+    // actually-revoked one.
     for (const id of deletedIds) {
       await deleteMessagesByConversation(tenantId, id);
+      await revokeSessionsForConversation(id, tenantId);
+      await deleteGuestPushTokensForConversation(tenantId, id);
     }
     affected = deletedIds.length;
   } else if (action === 'read') {
