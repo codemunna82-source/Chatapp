@@ -36,7 +36,7 @@ import { AttachmentSheet } from './AttachmentSheet';
 import { ForwardSheet, buildForwardBody } from './ForwardSheet';
 import { ImageViewerModal, type ViewerPhoto } from './ImageViewerModal';
 import { canDeleteForEveryone } from './messageRevoke';
-import { contactDisplayName } from '../../utils/formatPhone';
+import { contactDisplayName, formatPhoneForDisplay } from '../../utils/formatPhone';
 import { clearMessageNotification } from '../../notifications/messageNotification';
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
@@ -957,6 +957,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         <ChatHeaderTitle
           foreground={headerFg}
           name={contactLabel}
+          phone={formatPhoneForDisplay(conversationQuery.data?.contact?.phone)}
           contactId={contactId}
           avatarUpdatedAt={conversationQuery.data?.contact?.avatarUpdatedAt}
           onPressAvatar={pickContactPhoto}

@@ -5,6 +5,17 @@ import { formatWindowRemaining } from '../../utils/formatTime';
 
 interface ChatHeaderTitleProps {
   name: string;
+  /**
+   * The customer's WhatsApp number, formatted for reading.
+   *
+   * Shown beside the name whenever the two differ — which is whenever a
+   * real name is saved, since `name` falls back to this exact value when
+   * none is. An agent on a business inbox regularly needs the number
+   * itself (to call it outside the app, to tell them apart from a
+   * same-named contact, to read it back to someone), and a saved name
+   * used to hide it from this screen entirely.
+   */
+  phone?: string;
   /** Meta's 24-hour customer-service window expiry, from the conversation. */
   windowExpiresAt?: string;
   withinWindow: boolean;
@@ -58,6 +69,7 @@ const TICK_MS = 60_000;
  */
 export function ChatHeaderTitle({
   name,
+  phone,
   windowExpiresAt,
   withinWindow,
   isDemo = false,
@@ -113,6 +125,9 @@ export function ChatHeaderTitle({
       <View style={styles.wrap}>
       <Text style={[styles.name, { color: fg }]} numberOfLines={1}>
         {name}
+        {phone && phone !== name ? (
+          <Text style={[styles.phone, { color: sub }]}> {phone}</Text>
+        ) : null}
       </Text>
       {/* Ahead of the window countdown, because it outranks it: a customer
           sitting in the web window can be replied to whatever Meta's
@@ -190,6 +205,7 @@ const styles = StyleSheet.create({
   // chatHeaderBackground / chatHeaderForeground), so the name and subtitle
   // take their colour from the caller rather than assuming white on navy.
   name: { fontSize: 17, fontWeight: '600' },
+  phone: { fontSize: 13, fontWeight: '400' },
   subtitle: { fontSize: 11, marginTop: 1 },
   urgentColor: { color: '#F0B84B' },
   urgent: { color: '#E8A33D' },
