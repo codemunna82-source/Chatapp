@@ -179,6 +179,18 @@ let pendingRemoteIce: RTCIceCandidateInit[] = [];
  */
 let pendingLocalIce: unknown[] = [];
 
+/**
+ * The customer's answer, if it arrives before the invite's own ack does.
+ *
+ * `web:call:answered` and the ack to `emitWebCallInvite` are two separate
+ * round trips with no ordering between them. The id `applyWebAnswer` needs
+ * to match against is only set inside that ack's callback — so an answer
+ * that wins the race arrived with nothing to compare it to and used to be
+ * dropped on the floor, leaving the caller's phone stuck announcing
+ * "Ringing…" forever even though the customer had already picked up.
+ */
+let pendingAnswer: { callId: string; sdp: string } | null = null;
+
 /** Gives up on an outgoing call nobody answers, rather than sitting on "Connecting…". */
 let ringTimer: ReturnType<typeof setTimeout> | null = null;
 const RING_TIMEOUT_MS = 45_000;
@@ -191,6 +203,7 @@ function clearRingTimer() {
 function closeSession() {
   clearRingTimer();
   pendingLocalIce = [];
+  pendingAnswer = null;
   session?.close();
   session = null;
   webSession?.close();
@@ -290,6 +303,7 @@ export const useCallStore = create<CallState>((set, get) => ({
     // invitation is going out to a page nobody is looking at, and the
     // honest word is "Calling".
     pendingRemoteIce = [];
+    pendingAnswer = null;
     set({
       ...IDLE,
       phase: 'connecting',
@@ -353,6 +367,14 @@ export const useCallStore = create<CallState>((set, get) => ({
         for (const queued of pendingRemoteIce.splice(0)) outgoing.addRemoteCandidate(queued);
         for (const queued of pendingLocalIce.splice(0)) emitWebCallIce(res.callId, queued);
 
+        // The answer itself may have won the race against this very ack —
+        // apply it now that there is finally an id to apply it against.
+        if (pendingAnswer && pendingAnswer.callId === res.callId) {
+          const buffered = pendingAnswer;
+          pendingAnswer = null;
+          get().applyWebAnswer(buffered.callId, buffered.sdp);
+        }
+
         ringTimer = setTimeout(() => {
           if (get().callId !== res.callId) return;
           emitWebCallEnd(res.callId);
@@ -373,7 +395,15 @@ export const useCallStore = create<CallState>((set, get) => ({
   },
 
   applyWebAnswer: (callId, sdp) => {
-    if (get().callId !== callId || !outgoingWebSession) return;
+    if (!outgoingWebSession) return;
+    if (get().callId !== callId) {
+      // Most likely this answer beat the invite's own ack back here — see
+      // pendingAnswer. The ack's callback replays it once the id lands;
+      // anything else (a stale id from a call already over) is correctly
+      // dropped, the same as it always was.
+      if (get().callId === null) pendingAnswer = { callId, sdp };
+      return;
+    }
     outgoingWebSession
       .applyAnswer(sdp)
       .then(() => set({ phase: 'active', connectedAt: Date.now() }))
