@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { File, Paths } from 'expo-file-system';
 import { mediaUrl } from '../../api/endpoints/media';
 import { useAuthStore } from '../../store/authStore';
@@ -89,12 +89,33 @@ export function AudioMessageBubble({
     setSpeedIndex((i) => (i + 1) % SPEEDS.length);
   }, []);
 
+  /**
+   * A voice note the agent tapped to play must be heard, whatever the
+   * ringer is doing.
+   *
+   * expo-audio's audio mode is one global, unnamespaced setting the whole
+   * app shares. useMessageAlert sets `playsInSilentMode: false` the first
+   * time a chime plays — deliberately, so a silenced phone stays silent
+   * for notifications — and never sets it back, because nothing in that
+   * file has a reason to. From that point on every player in the app
+   * inherits it, including this one: on Android, `false` means playback
+   * is SUPPRESSED outright while the ringer is on silent or vibrate,
+   * which is exactly how most agents keep a work phone. Asserted here,
+   * right before playing, because this is content the user explicitly
+   * asked to hear — the same category as a voice note in any other
+   * messenger, which plays regardless of the ringer.
+   */
+  const ensureAudible = useCallback(() => {
+    void setAudioModeAsync({ playsInSilentMode: true }).catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     if (autoPlayRef.current && status.isLoaded) {
       autoPlayRef.current = false;
+      ensureAudible();
       player.play();
     }
-  }, [status.isLoaded, player]);
+  }, [status.isLoaded, player, ensureAudible]);
 
   const handlePress = async () => {
     // Guards its own re-entry now that the Pressable is no longer
@@ -129,6 +150,7 @@ export function AudioMessageBubble({
       if (status.currentTime >= status.duration && status.duration > 0) {
         await player.seekTo(0);
       }
+      ensureAudible();
       player.play();
     }
   };
