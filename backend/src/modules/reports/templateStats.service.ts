@@ -49,10 +49,17 @@ export interface TemplateFailureReason {
 export interface TemplateStatsRow {
   templateName: string;
   /** Every send counted once, whatever it ended up doing — delivered,
-   *  failed, or still waiting on a status webhook. */
+   *  failed, or still waiting on a status webhook. automatic + agent. */
   total: number;
   delivered: number;
   failed: number;
+  /** Sent by the system — the automatic private-chat invitation
+   *  (guestAutoReply.service.ts), the only thing that ever writes
+   *  `internal: true`. Configured on the Automatic Replies page, not
+   *  picked per-send by an agent. */
+  automatic: MessageTally;
+  /** Picked by an agent from the template list, per conversation. */
+  agent: MessageTally;
   topFailureReasons: TemplateFailureReason[];
 }
 
@@ -186,13 +193,18 @@ export async function getTemplateStats(
 
   const [namedRaw, unnamedRows, byNumberRaw, byDayRaw, latencyRaw, recentFailures, plainRaw, volumeByDayRaw] =
     await Promise.all([
-    Message.aggregate<{ _id: { name: string; status: string }; count: number }>([
+    Message.aggregate<{ _id: { name: string; status: string; internal: boolean }; count: number }>([
       { $match: namedMatch },
-      { $group: { _id: { name: '$templateName', status: '$status' }, count: { $sum: 1 } } },
+      {
+        $group: {
+          _id: { name: '$templateName', status: '$status', internal: { $ifNull: ['$internal', false] } },
+          count: { $sum: 1 },
+        },
+      },
     ]),
 
     // Bounded, JS-side: see MAX_LEGACY_READ.
-    Message.find(unnamedMatch).select('text status').sort({ _id: -1 }).limit(MAX_LEGACY_READ).lean(),
+    Message.find(unnamedMatch).select('text status internal').sort({ _id: -1 }).limit(MAX_LEGACY_READ).lean(),
 
     // Only meaningful for the whole-workspace view — scoped to one
     // number this still runs but produces exactly that number's row,
@@ -270,22 +282,28 @@ export async function getTemplateStats(
     ]),
   ]);
 
-  const tallyByTemplate = new Map<string, ReturnType<typeof emptyTally>>();
+  // Per template, two tallies rather than one: `internal` (set only by
+  // the automatic private-chat invitation) is the one bit that tells a
+  // system send apart from one an agent picked, and the admin asking
+  // "how many of this template went out" needs to know which is which —
+  // a number configured on the Automatic Replies page reads very
+  // differently from the same number run up by agents individually.
+  const tallyByTemplate = new Map<string, { automatic: ReturnType<typeof emptyTally>; agent: ReturnType<typeof emptyTally> }>();
   const lifetimeTally = emptyTally();
-  for (const row of namedRaw) {
-    const tally = tallyByTemplate.get(row._id.name) ?? emptyTally();
-    const bucket = bucketOf(row._id.status);
-    tally[bucket] += row.count;
-    lifetimeTally[bucket] += row.count;
-    tallyByTemplate.set(row._id.name, tally);
+
+  function addToTally(name: string, internal: boolean, status: unknown, count: number): void {
+    const entry = tallyByTemplate.get(name) ?? { automatic: emptyTally(), agent: emptyTally() };
+    const bucket = bucketOf(status);
+    entry[internal ? 'automatic' : 'agent'][bucket] += count;
+    tallyByTemplate.set(name, entry);
+    lifetimeTally[bucket] += count;
   }
-  for (const doc of unnamedRows as unknown as { text?: string; status?: string }[]) {
-    const name = resolveTemplateName({ text: doc.text });
-    const tally = tallyByTemplate.get(name) ?? emptyTally();
-    const bucket = bucketOf(doc.status);
-    tally[bucket] += 1;
-    lifetimeTally[bucket] += 1;
-    tallyByTemplate.set(name, tally);
+
+  for (const row of namedRaw) {
+    addToTally(row._id.name, row._id.internal, row._id.status, row.count);
+  }
+  for (const doc of unnamedRows as unknown as { text?: string; status?: string; internal?: boolean }[]) {
+    addToTally(resolveTemplateName({ text: doc.text }), Boolean(doc.internal), doc.status, 1);
   }
 
   const reasonsByTemplate = new Map<string, Map<string, number>>();
@@ -298,12 +316,22 @@ export async function getTemplateStats(
   }
 
   const byTemplate: TemplateStatsRow[] = Array.from(tallyByTemplate.entries())
-    .map(([templateName, tally]) => {
+    .map(([templateName, { automatic, agent }]) => {
       const topFailureReasons = Array.from((reasonsByTemplate.get(templateName) ?? new Map()).entries())
         .map(([reason, count]) => ({ reason, count }))
         .sort((a, b) => b.count - a.count)
         .slice(0, 5);
-      return { templateName, ...toMessageTally(tally), topFailureReasons };
+      const automaticTally = toMessageTally(automatic);
+      const agentTally = toMessageTally(agent);
+      return {
+        templateName,
+        total: automaticTally.total + agentTally.total,
+        delivered: automaticTally.delivered + agentTally.delivered,
+        failed: automaticTally.failed + agentTally.failed,
+        automatic: automaticTally,
+        agent: agentTally,
+        topFailureReasons,
+      };
     })
     .sort((a, b) => b.total - a.total);
 
