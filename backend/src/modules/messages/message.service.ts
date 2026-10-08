@@ -104,8 +104,27 @@ export interface SendOutboundMessageInput {
    * Sent by the system, and kept out of the workspace's own view of the
    * thread. Only the automatic private-chat invitation sets it — see
    * message.model.ts for why it is hidden rather than not stored.
+   *
+   * No longer exempts a send from the nudge allowance or its content
+   * rules by itself — see the comment above the quota check in
+   * sendOutboundMessage. Use `exemptFromNudgeWording` for the one thing
+   * that invitation specifically still needs exempted.
    */
   internal?: boolean;
+  /**
+   * Allows THIS send's own text past the exact-wording check that applies
+   * while nudge enforcement is on — never past the count.
+   *
+   * Set only by the automatic private-chat invitation's text and
+   * fallback-text sends. Its wording is an admin setting of its own
+   * (Automatic replies, not WhatsApp Nudges) and carries the actual link
+   * — the substitution the wording check performs ("the stored [nudge]
+   * wording wins over whatever arrived") would silently replace that
+   * link with unrelated nudge text, which is a worse failure than simply
+   * not delivering. The budget itself is never bypassed: the count check
+   * above throws before this is ever reached.
+   */
+  exemptFromNudgeWording?: boolean;
   /**
    * The client's own id for this send, stable across its retries.
    *
@@ -453,11 +472,20 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * Counted after the 24-hour check, deliberately: a closed window is the
    * more specific problem and has its own fix (a template), and reporting
    * the allowance first would send someone to the wrong one.
+   *
+   * Applies to `internal` sends too — the automatic private-chat
+   * invitation (guestAutoReply.service.ts) is the one caller that sets
+   * it, and `internal` here means only "hide this bubble from the
+   * agent's thread" (see message.model.ts), not "exempt from the
+   * allowance". An admin's configured nudge limit is a message BUDGET
+   * for the whole pre-window conversation; a workspace that turned on a
+   * one-message nudge allowance and then watched the automatic
+   * invitation template re-send past it on its own clock was not
+   * getting the budget it set.
    */
   if (
     countsAgainstNudgeQuota({
       messageType: input.type,
-      internal: input.internal,
       isDemoContact,
       withinCustomerServiceWindow,
     })
@@ -500,7 +528,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
      * the suggested wording", naming something that could not legally go
      * out in its place.
      */
-    if (policy.enforced && input.type !== 'template') {
+    if (policy.enforced && input.type !== 'template' && !input.exemptFromNudgeWording) {
       const expected = nudgeAt(policy.nudges, used);
       if (!expected) {
         throw new ApiError(422, 'WHATSAPP_NUDGE_LIMIT_REACHED', nudgeQuotaMessage(policy.limit));

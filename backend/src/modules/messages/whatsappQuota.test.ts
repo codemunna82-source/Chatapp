@@ -37,14 +37,6 @@ describe('countsAgainstNudgeQuota', () => {
     }
   });
 
-  it('never counts the private-chat invitation', () => {
-    // It is the way OUT of the cap. Counting it would let a customer who
-    // has not opened their link become unreachable, with no way left to
-    // send them one.
-    expect(countsAgainstNudgeQuota({ ...ordinary, internal: true })).toBe(false);
-    expect(countsAgainstNudgeQuota({ ...ordinary, messageType: 'template', internal: true })).toBe(false);
-  });
-
   it('never counts a demo contact', () => {
     // Not a real WhatsApp number — those chats run on the mock gateway,
     // and a limit on an imaginary cost is just a broken sandbox.

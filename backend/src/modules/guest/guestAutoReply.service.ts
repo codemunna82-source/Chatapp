@@ -252,9 +252,13 @@ async function deliverGuestLinkInvitation(
       // Kept out of the agent's thread. It is addressed to the customer
       // and carries their own link; an agent gained nothing from a bubble
       // full of a URL they cannot use, sitting between the customer's
-      // message and their reply. It still went out on WhatsApp and is
-      // still in the record.
+      // message and their reply. It still went out on WhatsApp, still
+      // counts against the nudge budget, and is still in the record.
       internal: true,
+      // This wording is the admin's own (Automatic replies), carries the
+      // actual link, and must not be swapped for a configured nudge's
+      // text — see the field's doc comment in message.service.ts.
+      exemptFromNudgeWording: true,
     });
   } else {
     // Resolved before building so the builder itself stays pure and
@@ -275,6 +279,7 @@ async function deliverGuestLinkInvitation(
         languageCode: config?.templateLanguage ?? undefined,
         templateComponents: components,
         internal: true,
+        exemptFromNudgeWording: true,
       });
     } catch (templateErr) {
       // A template belongs to a WhatsApp Business Account, not to this
@@ -314,6 +319,7 @@ async function deliverGuestLinkInvitation(
         type: 'text',
         text: renderAutoGuestLinkText(config?.message ?? undefined, url),
         internal: true,
+        exemptFromNudgeWording: true,
       });
       sentVia = 'text-after-template-failed';
     }

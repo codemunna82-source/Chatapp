@@ -47,7 +47,7 @@ export function nudgeWindowStart(
 /**
  * Whether this particular send is one the allowance governs.
  *
- * Four things are outside it, and each for its own reason:
+ * Three things are outside it, and each for its own reason:
  *
  * - A customer who wrote to us within the last 24 hours. This is the big
  *   one, and leaving it out was the bug: the allowance is for customers
@@ -57,23 +57,25 @@ export function nudgeWindowStart(
  *   were an unsolicited nudge, on every number and every business
  *   account. Inside that window Meta itself allows a free-form reply, and
  *   so do we.
- * - The private-chat INVITATION. It is the way out of the cap; capping it
- *   would trap a customer who has not opened their link with no way left
- *   to be sent one. It is `internal` and never appears in the agent's
- *   thread either.
  * - A demo contact. The number is not on WhatsApp at all — those chats
  *   run against the mock gateway, and a limit on an imaginary cost is
  *   just a broken sandbox.
  * - A reaction. It is not a message, it does not open a conversation with
  *   Meta, and a thumbs-up should not spend the reply someone needs.
  *
- * An approved template is NOT outside it. Template spam to customers who
- * never engaged is the thing Meta's reviewers act on hardest, so the
- * count is the one brake left once the window has closed.
+ * An approved template is NOT outside it, and neither — since this was
+ * changed — is the automatic private-chat invitation. Both are a real
+ * send to a customer who has not engaged, which is the exact thing the
+ * allowance exists to budget; `internal` only ever meant "hide this
+ * bubble from the agent's thread" (message.model.ts), never "free of
+ * charge". The invitation IS allowed to skip the exact-wording check
+ * that applies to an ordinary nudge while enforcement is on — see
+ * `exemptFromNudgeWording` in message.service.ts — because its own text
+ * carries the link and is an admin setting of its own; what it cannot
+ * skip is the count.
  */
 export function countsAgainstNudgeQuota(input: {
   messageType: string;
-  internal?: boolean;
   isDemoContact: boolean;
   /**
    * Whether Meta's 24-hour customer-service window is open — which is
@@ -87,7 +89,6 @@ export function countsAgainstNudgeQuota(input: {
   withinCustomerServiceWindow: boolean;
 }): boolean {
   if (input.withinCustomerServiceWindow) return false;
-  if (input.internal) return false;
   if (input.isDemoContact) return false;
   if (input.messageType === 'reaction') return false;
   return true;

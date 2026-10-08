@@ -364,11 +364,16 @@ export async function hideMessageForGuest(
  *    allowance, and starting every existing conversation already over
  *    its limit would lock workspaces out of chats they were mid-way
  *    through.
- *  - `internal` — the private-chat invitation, which is the way OUT of
- *    the cap. See countsAgainstNudgeQuota.
  *  - reactions, which are not messages.
  *  - FAILED, because the customer never received it. A send Meta refused
  *    should not spend the reply that was meant to reach them.
+ *
+ * `internal` is deliberately absent from this filter. It means only
+ * "hide this bubble from the agent's thread" (message.model.ts) — the
+ * automatic private-chat invitation is the one message that sets it,
+ * and it is a real WhatsApp send like any other nudge, counted the same
+ * way. See countsAgainstNudgeQuota for the matching check before a send
+ * is even attempted.
  */
 export async function countWhatsAppNudges(
   tenantId: string,
@@ -380,7 +385,6 @@ export async function countWhatsAppNudges(
     conversationId,
     direction: 'OUT',
     channel: 'whatsapp',
-    internal: { $ne: true },
     type: { $ne: 'reaction' },
     status: { $ne: 'FAILED' },
     ...(since ? { createdAt: { $gt: since } } : {}),
