@@ -19,6 +19,7 @@ import { contactRouter } from './modules/contacts/contact.routes';
 import { conversationRouter } from './modules/conversations/conversation.routes';
 import { mediaRouter } from './modules/media/media.routes';
 import { messageTemplateRouter } from './modules/templates/messageTemplate.routes';
+import { templateStatsRouter } from './modules/reports/templateStats.routes';
 import { walletRouter } from './modules/wallet/wallet.routes';
 import { notificationRouter } from './modules/notifications/notification.routes';
 import { subscriptionRouter } from './modules/subscriptions/subscription.routes';
@@ -91,6 +92,7 @@ export function createApp(): Express {
   app.use('/api/conversations', conversationRouter);
   app.use('/api/media', mediaRouter);
   app.use('/api/templates', messageTemplateRouter);
+  app.use('/api/templates/stats', templateStatsRouter);
   app.use('/api/wallet', walletRouter);
   app.use('/api/notifications', notificationRouter);
   app.use('/api/subscription', subscriptionRouter);

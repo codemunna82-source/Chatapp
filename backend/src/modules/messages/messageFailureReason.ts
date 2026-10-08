@@ -64,8 +64,13 @@ export function messageFailureReason(errors: unknown): string | undefined {
  * This comes from a webhook body, so the shape is whatever Meta sent —
  * an array, a bare object, or something else entirely after a schema
  * change nobody told us about.
+ *
+ * Exported for templateStats.service.ts, which groups failed template
+ * sends by Meta's raw title rather than the full sentence above — a
+ * report column reads better as "Rate limit hit" than as "WhatsApp did
+ * not deliver this: Rate limit hit." repeated down every row.
  */
-function firstError(errors: unknown): { code?: number; title?: string } | null {
+export function firstError(errors: unknown): { code?: number; title?: string } | null {
   const entry = Array.isArray(errors) ? errors[0] : errors;
   if (!entry || typeof entry !== 'object') return null;
   const row = entry as Record<string, unknown>;

@@ -31,6 +31,8 @@ export interface CreateMessageInput {
   /** Which wire it went out on — see the model. Set at send time because
    *  the rule that decides it answers differently later. */
   channel?: MessageChannel;
+  /** Only for `type: 'template'` — see the schema for why this is a real field and not parsed out of `text`. */
+  templateName?: string;
 }
 
 /**

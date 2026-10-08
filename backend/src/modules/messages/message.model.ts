@@ -50,6 +50,16 @@ const messageSchema = new Schema(
     direction: { type: String, enum: MESSAGE_DIRECTIONS, required: true },
     type: { type: String, enum: MESSAGE_TYPES, required: true },
     text: { type: String },
+    /**
+     * Which approved template this is, for `type: 'template'` only.
+     *
+     * `text` already carries "Template: <name>" for the agent app to
+     * render, but that is a display string, not a field a report can
+     * group by — the admin template-stats screen (templateStats.service.ts)
+     * needs to count sends per template name without parsing one back out
+     * of a sentence meant for a human.
+     */
+    templateName: { type: String },
     mediaId: { type: Schema.Types.ObjectId, ref: 'Media' },
     metaMessageId: { type: String }, // Meta's wamid — used to correlate status webhooks
     replyToMessageId: { type: Schema.Types.ObjectId, ref: 'Message' },
@@ -212,6 +222,11 @@ messageSchema.index(
 // in O(1) and must be scoped correctly (sparse: most rows get one eventually,
 // but IN messages/failed sends may briefly lack it).
 messageSchema.index({ metaMessageId: 1 }, { unique: true, sparse: true });
+// The admin template-stats report (templateStats.service.ts) scans every
+// OUTBOUND template a tenant has ever sent — without this it fell back to
+// the (tenantId, createdAt) index above and filtered `type: 'template'` out
+// of every other message the workspace has, most of which are not one.
+messageSchema.index({ tenantId: 1, type: 1, direction: 1, createdAt: -1 });
 
 /**
  * One send, one message — however many times the client retries it.

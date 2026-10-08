@@ -618,6 +618,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     status: 'QUEUED',
     internal: input.internal,
     clientMessageId: input.clientMessageId,
+    templateName: input.type === 'template' ? input.templateName : undefined,
   });
 
   // Declared outside the try so the catch can name the connection that
@@ -773,6 +774,7 @@ async function deliverToWebChat(
     status: 'SENT',
     internal: input.internal,
     clientMessageId: input.clientMessageId,
+    templateName: input.type === 'template' ? input.templateName : undefined,
   });
 
   /**
