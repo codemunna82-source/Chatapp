@@ -16,6 +16,7 @@ import {
   softDeleteMessage,
   revokeMessage,
   countWhatsAppNudges,
+  countTemplatesSinceCustomerMessage,
   setMessageStarred,
 } from './message.repository';
 import { findMediaByIdAndTenant } from '../media/media.repository';
@@ -452,6 +453,40 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
       'MESSAGE_TEMPLATE_REQUIRED',
       'An approved WhatsApp template is required.',
     );
+  }
+
+  /**
+   * At most one agent-picked template per stretch of the customer not
+   * writing back.
+   *
+   * Meta accepts a template send up front and only refuses it minutes
+   * later, over the status webhook — a rate limit, a quality cap, a
+   * payment issue. None of that is visible at send time, so an agent who
+   * tapped "Use a template" and saw it go out as normal had no reason not
+   * to try again, and each retry landed inside the same cooldown Meta was
+   * enforcing and failed the same way — the exact burst this exists to
+   * stop. Scoped to since the customer's own last message, not forever:
+   * the moment they write back the slate is clean and a fresh template is
+   * a legitimate thing to send, if the 24-hour window has since closed
+   * again.
+   *
+   * Exempt: a demo contact (not a real Meta send) and `internal` sends —
+   * the automatic private-chat invitation has its own configurable cap
+   * (guestAutoReply.service.ts's maxSends) and this must not narrow it.
+   */
+  if (!isDemoContact && input.type === 'template' && !input.internal) {
+    const alreadySentTemplates = await countTemplatesSinceCustomerMessage(
+      input.tenantId,
+      input.conversationId,
+      conversation.lastCustomerMessageAt ?? null,
+    );
+    if (alreadySentTemplates > 0) {
+      throw new ApiError(
+        422,
+        'TEMPLATE_ALREADY_SENT',
+        'A template has already been sent to this customer since their last reply. Wait for them to write back before sending another.',
+      );
+    }
   }
 
   /**

@@ -391,6 +391,33 @@ export async function countWhatsAppNudges(
   });
 }
 
+/**
+ * How many templates have already gone out to this contact since they
+ * last wrote to us — see TEMPLATE_ALREADY_SENT in message.service.ts.
+ *
+ * Unlike countWhatsAppNudges, a FAILED send still counts. The thing this
+ * guards against is exactly a failed attempt followed immediately by
+ * another one: Meta accepts a template and only refuses it minutes later,
+ * so by the time the failure is known the agent has often already sent
+ * two or three more — each landing inside the same cooldown Meta is
+ * enforcing and failing the same way. Excluding FAILED rows would let
+ * every one of those through.
+ */
+export async function countTemplatesSinceCustomerMessage(
+  tenantId: string,
+  conversationId: string,
+  since: Date | null,
+): Promise<number> {
+  return Message.countDocuments({
+    tenantId,
+    conversationId,
+    direction: 'OUT',
+    channel: 'whatsapp',
+    type: 'template',
+    ...(since ? { createdAt: { $gt: since } } : {}),
+  });
+}
+
 /** Hard-deletes every message in a conversation — used when the chat itself is deleted. */
 export async function deleteMessagesByConversation(tenantId: string, conversationId: string): Promise<void> {
   await Message.deleteMany({ tenantId, conversationId });
