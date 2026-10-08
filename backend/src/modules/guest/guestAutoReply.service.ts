@@ -379,6 +379,68 @@ export async function maybeSendGuestLinkAutoReply(input: {
 }
 
 /**
+ * Recovers an invitation Meta accepted and then refused, by sending the
+ * same link as plain text.
+ *
+ * `deliverGuestLinkInvitation`'s own template-mode fallback only catches a
+ * SYNCHRONOUS rejection — Meta saying no on the request itself, which is
+ * what a missing or unapproved template looks like. A rate limit or a
+ * quality cap is not that: Meta answers the send with a 200 and a message
+ * id, and only refuses minutes later over the status webhook, by which
+ * point `deliverGuestLinkInvitation` has already returned and counted the
+ * send as done. This is that second fallback, called from the webhook
+ * handler once such a refusal is known.
+ *
+ * Re-sent on the SAME session's link, the same way a manual re-invite
+ * reuses it — a fresh token would turn the copy Meta just refused into a
+ * dead link sitting in the thread next to a live one.
+ *
+ * Never throws: this already runs inside a webhook handler that must not
+ * fail the delivery it is reacting to. `false` covers every way there was
+ * nothing left to recover with — no guest-link address configured, no
+ * session (the original attempt never got far enough to mint one), the
+ * session already activated — and the caller decides what a failed
+ * recovery means for the invite count.
+ */
+export async function sendInvitationTextFallback(input: {
+  tenantId: string;
+  conversationId: string;
+  whatsappPhoneNumberId: string;
+}): Promise<boolean> {
+  try {
+    const linkBaseUrl = await guestLinkBaseUrlFor(input.tenantId);
+    if (!linkBaseUrl) return false;
+
+    const existing = await findActiveSessionForConversation(input.conversationId, input.tenantId);
+    // No session, or the customer has since activated it themselves —
+    // either way there is nothing this should be re-sending.
+    if (!existing || existing.activatedAt) return false;
+
+    const token = await reissueGuestSessionToken(String(existing._id), input.tenantId);
+    if (!token) return false;
+
+    const config = await resolveAutoGuestLinkConfig(input.tenantId, input.whatsappPhoneNumberId);
+    const url = guestChatUrl(linkBaseUrl, token);
+
+    await sendOutboundMessage({
+      tenantId: input.tenantId,
+      conversationId: input.conversationId,
+      type: 'text',
+      text: renderAutoGuestLinkText(config?.message ?? undefined, url),
+      internal: true,
+      exemptFromNudgeWording: true,
+    });
+    return true;
+  } catch (err) {
+    logger.warn(
+      { err, tenantId: input.tenantId, conversationId: input.conversationId },
+      'Could not recover a refused template invitation by sending it as text either',
+    );
+    return false;
+  }
+}
+
+/**
  * The same invitation, sent because an agent asked for it.
  *
  * The automatic reply is the normal path and it fails in ways nobody in

@@ -1,4 +1,4 @@
-import { maybeSendGuestLinkAutoReply } from '../guest/guestAutoReply.service';
+import { maybeSendGuestLinkAutoReply, sendInvitationTextFallback } from '../guest/guestAutoReply.service';
 import { logger } from '../../lib/logger';
 import { logSendBlockDiagnostics } from '../whatsapp/sendBlockDiagnostics';
 import type { NormalizedCallItem, NormalizedWebhookItem } from '../../integrations/meta/webhookPayload';
@@ -19,7 +19,6 @@ import {
   updateMessageStatusByMetaId,
   findMessageByMetaIdAndTenant,
   findMessageByIdAndTenant,
-  revealInternalMessage,
 } from '../messages/message.repository';
 import { pushIncomingMessage, pushReaction } from '../notifications/push.service';
 import { handleInboundCallEvent } from '../calls/call.service';
@@ -249,72 +248,71 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
 
   // Keeps the chat list's tick in step. Scoped to lastMessageId inside the
   // repository, so a late status for an older message cannot rewrite a row
-  // that has since moved on.
+  // that has since moved on. A no-op for an internal send — it never became
+  // lastMessageId in the first place (message.service.ts skips that for
+  // `internal`), which is what keeps this from ever leaking one into the
+  // chat list's own tick.
   await updateLastMessageStatus(tenantId, String(message._id), ourStatus);
-
-  /**
-   * A failed invitation stops hiding.
-   *
-   * The private-chat invitation is written `internal`, which keeps it out
-   * of the agent's thread — it is addressed to the customer and carries a
-   * link the agent cannot use, and a bubble full of that between the
-   * customer's message and the reply helped nobody.
-   *
-   * That is right while it works. When it does NOT, hiding it is how an
-   * agent ends up believing a customer was given the link when they were
-   * never given anything: Meta accepts the send with a 200, the app says
-   * "Invitation sent", and the refusal arrives seconds later in a webhook
-   * nobody watches. It happened for a whole morning.
-   *
-   * So a failure un-hides the message. It appears in the thread as a red
-   * bubble carrying Meta's reason, which is exactly where somebody will
-   * see it, and the reply beneath it is the next thing they were going to
-   * write anyway.
-   */
-  const surfaced = ourStatus === 'FAILED' && message.internal === true;
-  if (surfaced) {
-    await revealInternalMessage(String(message._id), tenantId);
-    message.internal = false;
-
-    // And the invitation goes back on the shelf.
-    //
-    // The cap counts how many times this customer has been ASKED to move
-    // to the private chat, and one that never reached their phone asked
-    // them nothing. Counting it anyway is how a workspace spent its single
-    // allowed invitation on a message the customer never saw — and then
-    // sent nothing on their next message either, because the counter said
-    // the job was done. Which is exactly what happened here for a whole
-    // morning while Meta refused every one of them over billing.
-    //
-    // So the next inbound message tries again, and keeps trying until one
-    // actually lands. Once one does, the count stands and the customer is
-    // not asked again.
-    await refundInviteSent(String(message.conversationId), tenantId);
-  }
 
   const realtime = getRealtimeEmitter();
   // Loaded before the emit rather than after: the status event now has to
-  // be addressed to the conversation's number, so it needs the row anyway.
+  // be addressed to the conversation's number, and the invitation recovery
+  // below needs its whatsappPhoneNumberId either way.
   const conversation = await findConversationByIdAndTenant(String(message.conversationId), tenantId);
-  if (conversation) {
-    if (surfaced) {
-      // message:status would not do here: the app never received this
-      // message in the first place, so there is no bubble for a status to
-      // land on. It has to arrive as a new one.
-      realtime.emitMessageNew(
-        tenantId,
-        toRealtimeMessage(message),
-        String(conversation.whatsappPhoneNumberId),
-      );
-    } else {
-      realtime.emitMessageStatus(
-        tenantId,
-        String(message.conversationId),
-        String(message._id),
-        ourStatus,
-        String(conversation.whatsappPhoneNumberId),
-      );
+
+  /**
+   * A refused invitation recovers quietly rather than surfacing.
+   *
+   * The private-chat invitation is written `internal` and stays that way
+   * even on a refusal — never revealed in the agent's thread, whatever
+   * happens to it. Two things still have to happen, both invisible:
+   *
+   * - A refused TEMPLATE gets one immediate recovery attempt as plain
+   *   text, on the same link. `deliverGuestLinkInvitation`'s own
+   *   try/catch only ever catches a SYNCHRONOUS rejection — an unapproved
+   *   template, the wrong language. A rate limit or a quality cap is not
+   *   that: Meta answers the original send with a 200 and refuses it
+   *   minutes later, over this exact webhook, by which point that
+   *   synchronous fallback has long since returned and counted the send
+   *   as done.
+   * - Whatever genuinely did not reach the customer — the text recovery
+   *   itself failing, or a plain-text invitation with no template left to
+   *   fall back to — puts the invite count back. It counts how many times
+   *   this customer has been ASKED to move to the private chat, and one
+   *   that never reached their phone asked them nothing; refunding it is
+   *   what lets the next inbound message try again instead of the cap
+   *   reading as spent on a message nobody ever saw.
+   */
+  if (ourStatus === 'FAILED' && message.internal === true) {
+    const recoveredViaText =
+      message.type === 'template' && conversation
+        ? await sendInvitationTextFallback({
+            tenantId,
+            conversationId: String(message.conversationId),
+            whatsappPhoneNumberId: String(conversation.whatsappPhoneNumberId),
+          })
+        : false;
+
+    if (!recoveredViaText) {
+      await refundInviteSent(String(message.conversationId), tenantId);
     }
+
+    logger.warn(
+      { tenantId, messageId: String(message._id), conversationId: String(message.conversationId), recoveredViaText },
+      recoveredViaText
+        ? 'Meta refused a private-chat invitation template it had accepted — recovered by sending it as plain text'
+        : 'Meta refused a private-chat invitation it had accepted, with no recovery — the customer got nothing; retried on their next message',
+    );
+  }
+
+  if (conversation) {
+    realtime.emitMessageStatus(
+      tenantId,
+      String(message.conversationId),
+      String(message._id),
+      ourStatus,
+      String(conversation.whatsappPhoneNumberId),
+    );
     // The row's tick lives on the conversation, so the list needs its own
     // event — message:status alone only updates an open chat's bubbles.
     realtime.emitConversationUpdated(tenantId, toRealtimeConversation(conversation));
