@@ -182,6 +182,22 @@ function MessageBubbleImpl({
   const textColor = isOut ? colors.bubbleSentText : colors.bubbleReceivedText;
   const isFailed = message.status === 'FAILED';
   /**
+   * A failed template never shows as failed.
+   *
+   * Meta accepts a template send up front — this device gets a plain
+   * success back — and only refuses delivery minutes later over the
+   * webhook, almost always for an account-level reason (a rate limit, a
+   * quality cap, a payment issue) that this exact send did not cause and
+   * that tapping retry cannot fix: the next attempt lands in the same
+   * window and fails the same way. A red "Not sent" on a message the
+   * agent watched go out as normal only taught them to keep retrying into
+   * the wall. So this renders exactly like an ordinary sent message —
+   * status still reads as sent below — and whoever manages the number
+   * deals with the underlying limit, not the agent mid-conversation.
+   */
+  const showFailure = isFailed && message.type !== 'template';
+  const displayStatus = isFailed && message.type === 'template' ? 'SENT' : message.status;
+  /**
    * Why it did not arrive, when there is something useful to say.
    *
    * The server's own sentence wins: it is there when Meta ACCEPTED the
@@ -222,8 +238,8 @@ function MessageBubbleImpl({
       onSelectTap?.(message);
       return;
     }
-    if (isFailed) onRetry(message);
-  }, [selectable, onSelectTap, message, isFailed, onRetry]);
+    if (showFailure) onRetry(message);
+  }, [selectable, onSelectTap, message, showFailure, onRetry]);
 
   const activeReactions = reactions ? [reactions.IN, reactions.OUT].filter((e): e is string => Boolean(e)) : [];
 
@@ -347,7 +363,7 @@ function MessageBubbleImpl({
         <Animated.View style={[styles.bubbleShift, bubbleStyle, isOut ? styles.shiftOut : styles.shiftIn]}>
       <Pressable
         onLongPress={handleLongPress}
-        onPress={selectable || isFailed ? handlePress : undefined}
+        onPress={selectable || showFailure ? handlePress : undefined}
         accessibilityState={selectable ? { selected } : undefined}
         style={[
           styles.bubble,
@@ -374,7 +390,7 @@ function MessageBubbleImpl({
              * seconds. Two pixels of the accent colour reads as a
              * spotlight and nothing else.
              */
-            borderColor: highlighted ? colors.primary : isFailed ? colors.danger : colors.border,
+            borderColor: highlighted ? colors.primary : showFailure ? colors.danger : colors.border,
           },
           highlighted ? styles.highlighted : null,
         ]}
@@ -462,7 +478,7 @@ function MessageBubbleImpl({
           {message.starredAt ? (
             <Ionicons name="star" size={11} color={textColor} style={styles.starMark} />
           ) : null}
-          {isFailed ? (
+          {showFailure ? (
             <Text style={[typography.caption, { color: colors.danger, marginRight: 4 }]}>
               {failureNote ? 'Not sent' : 'Failed · tap to retry'}
             </Text>
@@ -472,14 +488,14 @@ function MessageBubbleImpl({
           </Text>
           {isOut ? (
             <View style={{ marginLeft: 4 }}>
-              <MessageStatusIcon status={message.status} />
+              <MessageStatusIcon status={displayStatus} />
             </View>
           ) : null}
         </View>
 
         {/* Under the footer rather than in it: this is a sentence, and the
             footer is a single line the timestamp and ticks have to stay on. */}
-        {isFailed && failureNote ? (
+        {showFailure && failureNote ? (
           <View style={[styles.failureNote, insetWhenBleeding]}>
             <Ionicons name="information-circle-outline" size={13} color={colors.danger} style={styles.failureIcon} />
             <Text style={[typography.caption, { color: colors.danger, flex: 1 }]}>{failureNote}</Text>
