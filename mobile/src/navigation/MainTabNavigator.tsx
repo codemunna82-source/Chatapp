@@ -2,6 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MainTabParamList } from './types';
 import { ChatsStackNavigator } from './ChatsStackNavigator';
 import { SettingsStackNavigator } from './SettingsStackNavigator';
@@ -10,6 +11,11 @@ import { CallsScreen } from '../screens/calls/CallsScreen';
 import { useTheme } from '../theme/ThemeProvider';
 import { useTabBadges } from '../queries/useTabBadges';
 import { useCallsSeenStore } from '../store/callsSeenStore';
+
+/** The bar's own content height, excluding whatever the device's gesture
+ *  bar below it needs — insets.bottom is added on top of this, not instead
+ *  of it. */
+const TAB_BAR_CONTENT_HEIGHT = 56;
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
@@ -52,11 +58,27 @@ function focusedChatsScreen(route: Parameters<typeof getFocusedRouteNameFromRout
 
 export function MainTabNavigator() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   // Named once so the Chats tab can restore it: a screen's own
   // `tabBarStyle` REPLACES the navigator's rather than merging with it,
   // so returning undefined there would drop the bar's colours instead of
   // leaving them alone.
-  const tabBarBase = { backgroundColor: colors.surface, borderTopColor: colors.border };
+  //
+  // height/paddingBottom are explicit rather than left to the library's
+  // own default inset handling, which — on at least one real device, with
+  // edge-to-edge on and a gesture nav bar — rendered with insets.bottom
+  // reading as 0: the tab bar sat flush against the very bottom of the
+  // screen, under the system back/home/recents row, where every other
+  // app (WhatsApp included) leaves clear space above it. Reading
+  // insets.bottom here and adding it ourselves does not depend on that
+  // library-internal behaviour working on every device.
+  const tabBarBase = {
+    backgroundColor: colors.surface,
+    borderTopColor: colors.border,
+    height: TAB_BAR_CONTENT_HEIGHT + insets.bottom,
+    paddingBottom: insets.bottom,
+    paddingTop: 6,
+  };
   const { unreadChats, missedCalls } = useTabBadges();
   const markCallsSeen = useCallsSeenStore((s) => s.markSeen);
 
