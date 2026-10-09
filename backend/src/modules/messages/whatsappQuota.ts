@@ -47,48 +47,40 @@ export function nudgeWindowStart(
 /**
  * Whether this particular send is one the allowance governs.
  *
- * Three things are outside it, and each for its own reason:
+ * Two things are outside it, and each for its own reason:
  *
- * - A customer who wrote to us within the last 24 hours. This is the big
- *   one, and leaving it out was the bug: the allowance is for customers
- *   who have NOT engaged, but the only sends that ever reached this check
- *   were the ones Meta's 24-hour window had already let through — so a
- *   plain reply to a customer who had just messaged was refused as if it
- *   were an unsolicited nudge, on every number and every business
- *   account. Inside that window Meta itself allows a free-form reply, and
- *   so do we.
  * - A demo contact. The number is not on WhatsApp at all — those chats
  *   run against the mock gateway, and a limit on an imaginary cost is
  *   just a broken sandbox.
  * - A reaction. It is not a message, it does not open a conversation with
  *   Meta, and a thumbs-up should not spend the reply someone needs.
  *
- * An approved template is NOT outside it, and neither — since this was
- * changed — is the automatic private-chat invitation. Both are a real
- * send to a customer who has not engaged, which is the exact thing the
- * allowance exists to budget; `internal` only ever meant "hide this
- * bubble from the agent's thread" (message.model.ts), never "free of
- * charge". The invitation IS allowed to skip the exact-wording check
- * that applies to an ordinary nudge while enforcement is on — see
- * `exemptFromNudgeWording` in message.service.ts — because its own text
- * carries the link and is an admin setting of its own; what it cannot
- * skip is the count.
+ * A customer who wrote to us within the last 24 hours is deliberately
+ * NOT outside it, even though Meta itself would allow a free-form reply
+ * in that window. An earlier version of this exempted that case — reasoning
+ * that refusing a plain reply to someone who had just messaged read as a
+ * bug — and it was: the exemption fixed that, but it also meant every
+ * inbound message reopened unlimited free-form WhatsApp replies for as
+ * long as the customer kept writing, which is exactly the volume this
+ * allowance exists to cap. A workspace with many new conversations a day
+ * (the common case this guards) could run a normal back-and-forth with
+ * every one of them on WhatsApp itself and never be pushed toward the
+ * private link at all — and Meta's own throughput throttle (130429) does
+ * not care that the content was legitimate, only that a lot of it went
+ * out fast. The fix for "an agent cannot answer a customer who just
+ * wrote in" is the private chat link, not an unlimited WhatsApp channel.
+ *
+ * An approved template and the automatic private-chat invitation are
+ * also NOT outside it. Both are a real send to a customer who has not
+ * engaged, which is the exact thing the allowance exists to budget;
+ * `internal` only ever meant "hide this bubble from the agent's thread"
+ * (message.model.ts), never "free of charge". The invitation IS allowed
+ * to skip the exact-wording check that applies to an ordinary nudge
+ * while enforcement is on — see `exemptFromNudgeWording` in
+ * message.service.ts — because its own text carries the link and is an
+ * admin setting of its own; what it cannot skip is the count.
  */
-export function countsAgainstNudgeQuota(input: {
-  messageType: string;
-  isDemoContact: boolean;
-  /**
-   * Whether Meta's 24-hour customer-service window is open — which is
-   * only ever true because the customer messaged us inside it, since that
-   * is the single thing that opens it (conversation.repository.ts).
-   *
-   * Required rather than optional: a caller that forgets it would get the
-   * old behaviour back, and the old behaviour was an inbox that could not
-   * reply.
-   */
-  withinCustomerServiceWindow: boolean;
-}): boolean {
-  if (input.withinCustomerServiceWindow) return false;
+export function countsAgainstNudgeQuota(input: { messageType: string; isDemoContact: boolean }): boolean {
   if (input.isDemoContact) return false;
   if (input.messageType === 'reaction') return false;
   return true;

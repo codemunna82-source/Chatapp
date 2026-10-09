@@ -13,8 +13,7 @@ import {
  */
 
 describe('countsAgainstNudgeQuota', () => {
-  // Shut, which is the only state in which the allowance applies at all.
-  const ordinary = { messageType: 'text', isDemoContact: false, withinCustomerServiceWindow: false };
+  const ordinary = { messageType: 'text', isDemoContact: false };
 
   it('counts an ordinary reply to a customer who has not written in 24 hours', () => {
     expect(countsAgainstNudgeQuota(ordinary)).toBe(true);
@@ -24,16 +23,13 @@ describe('countsAgainstNudgeQuota', () => {
     expect(countsAgainstNudgeQuota({ ...ordinary, messageType: 'template' })).toBe(true);
   });
 
-  it('never counts a reply made inside the 24-hour window', () => {
-    // The regression this is here for: every ordinary reply used to be
-    // counted and then refused for its wording, because the only sends
-    // reaching the check were the ones the window had let through. An
-    // inbox that cannot answer a customer who just wrote is not an inbox.
-    expect(countsAgainstNudgeQuota({ ...ordinary, withinCustomerServiceWindow: true })).toBe(false);
+  it('counts a reply made inside the 24-hour window too', () => {
+    // Deliberately not exempt — see the doc comment on
+    // countsAgainstNudgeQuota for why an open window used to skip this
+    // check and no longer does: the private chat link is the one way
+    // through, whether or not the customer happened to write in recently.
     for (const messageType of ['text', 'image', 'video', 'audio', 'document', 'location', 'template']) {
-      expect(countsAgainstNudgeQuota({ ...ordinary, messageType, withinCustomerServiceWindow: true })).toBe(
-        false,
-      );
+      expect(countsAgainstNudgeQuota({ ...ordinary, messageType })).toBe(true);
     }
   });
 

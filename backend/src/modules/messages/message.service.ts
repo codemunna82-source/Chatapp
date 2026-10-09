@@ -497,7 +497,10 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * Everything reaching here is going out through Meta, which means the
    * customer has not opened their private window — so this is one of the
    * few nudges the workspace gets before the only way through is that
-   * link. See whatsappQuota.ts for what is counted and why.
+   * link. See whatsappQuota.ts for what is counted and why — including
+   * why a customer who wrote to us within the last 24 hours is counted
+   * too, not exempted: the private chat link is the one way through,
+   * on purpose, whether or not Meta's own window happens to be open.
    *
    * Refused rather than stored as FAILED: nothing was sent and nothing
    * was attempted, so a row claiming otherwise would put a failed bubble
@@ -520,13 +523,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * invitation template re-send past it on its own clock was not
    * getting the budget it set.
    */
-  if (
-    countsAgainstNudgeQuota({
-      messageType: input.type,
-      isDemoContact,
-      withinCustomerServiceWindow,
-    })
-  ) {
+  if (countsAgainstNudgeQuota({ messageType: input.type, isDemoContact })) {
     const [used, policy] = await Promise.all([
       countWhatsAppNudges(input.tenantId, input.conversationId, nudgeWindowStart(session)),
       nudgePolicyFor(input.tenantId),
