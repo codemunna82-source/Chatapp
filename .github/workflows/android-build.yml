@@ -304,7 +304,16 @@ jobs:
       # with no asset attached, "succeeded" because an unmatched pattern
       # isn't fatal by default. Fixed by actually renaming the file on disk
       # before the publish step, so `files:` can just point at a real path.
+      #
+      # working-directory: . overrides this job's own default (`mobile`,
+      # set below `jobs.build.defaults.run`) — without it this step's `cp`
+      # resolved `mobile/android/...` against that default too, looked for
+      # mobile/mobile/android/..., found nothing, and failed the build.
+      # publish's `files:` is a `uses:` step, which defaults.run never
+      # applies to, so it reads repo-root-relative regardless — the two
+      # steps have to agree on that root explicitly.
       - name: Rename the APK for the release asset
+        working-directory: .
         run: cp mobile/android/app/build/outputs/apk/release/app-release.apk voxo.apk
 
       # The artifact above is a zip, and GitHub only serves it to someone
