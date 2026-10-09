@@ -169,14 +169,17 @@ export interface TemplateStats {
    */
   messagesByDay: MessageVolumeByDay[];
   /**
-   * Minutes from Meta accepting the send (sentAt) to the customer's
+   * Seconds from Meta accepting the send (sentAt) to the customer's
    * device confirming it (deliveredAt), across delivered templates in
-   * the window. Median alongside mean for the same reason the main
-   * dashboard's first-response time is: one slow outlier should not be
-   * the number an admin acts on.
+   * the window. Seconds, not minutes: a healthy number delivers in well
+   * under a minute, and rounding that to whole minutes always landed on
+   * "0m" — true, but reads as broken or empty rather than as the good
+   * news it actually is. Median alongside mean for the same reason the
+   * main dashboard's first-response time is: one slow outlier should not
+   * be the number an admin acts on.
    */
-  medianDeliveryMinutes: number | null;
-  averageDeliveryMinutes: number | null;
+  medianDeliverySeconds: number | null;
+  averageDeliverySeconds: number | null;
 }
 
 /**
@@ -294,7 +297,7 @@ export async function getTemplateStats(
       { $sort: { '_id.day': 1 } },
     ]),
 
-    Message.aggregate<{ minutes: number }>([
+    Message.aggregate<{ seconds: number }>([
       {
         $match: {
           ...templateMatch,
@@ -303,7 +306,7 @@ export async function getTemplateStats(
           deliveredAt: { $exists: true },
         },
       },
-      { $project: { minutes: { $divide: [{ $subtract: ['$deliveredAt', '$sentAt'] }, 60000] } } },
+      { $project: { seconds: { $divide: [{ $subtract: ['$deliveredAt', '$sentAt'] }, 1000] } } },
     ]),
 
     // The reason breakdown reads `error` — an untyped Mixed field holding
@@ -469,17 +472,17 @@ export async function getTemplateStats(
   // dashboard's first-response time uses: keeps working on MongoDB
   // versions that predate it, and the sample here is one row per
   // delivered template in the window — not worth a server-side sort.
-  const minutes = latencyRaw.map((r) => r.minutes).sort((a, b) => a - b);
-  const medianDeliveryMinutes =
-    minutes.length === 0
+  const seconds = latencyRaw.map((r) => r.seconds).sort((a, b) => a - b);
+  const medianDeliverySeconds =
+    seconds.length === 0
       ? null
       : Math.round(
-          minutes.length % 2 === 1
-            ? minutes[(minutes.length - 1) / 2]!
-            : (minutes[minutes.length / 2 - 1]! + minutes[minutes.length / 2]!) / 2,
+          seconds.length % 2 === 1
+            ? seconds[(seconds.length - 1) / 2]!
+            : (seconds[seconds.length / 2 - 1]! + seconds[seconds.length / 2]!) / 2,
         );
-  const averageDeliveryMinutes =
-    minutes.length === 0 ? null : Math.round(minutes.reduce((sum, m) => sum + m, 0) / minutes.length);
+  const averageDeliverySeconds =
+    seconds.length === 0 ? null : Math.round(seconds.reduce((sum, s) => sum + s, 0) / seconds.length);
 
   // Same split as byTemplate, and for the same reason: the automatic
   // invitation sent in "plain message" mode (guestAutoReply.service.ts)
@@ -540,8 +543,8 @@ export async function getTemplateStats(
     byNumber,
     byDay,
     messagesByDay,
-    medianDeliveryMinutes,
-    averageDeliveryMinutes,
+    medianDeliverySeconds,
+    averageDeliverySeconds,
   };
   statsCache.set(cacheKey, stats);
   return stats;
