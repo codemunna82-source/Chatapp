@@ -296,6 +296,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # softprops/action-gh-release's `files:` is a plain glob list — there
+      # is no `path#rename` syntax, despite this workflow having shipped
+      # with one for over a month. The whole string including `#voxo.apk`
+      # was matched literally against real files, matched nothing, and the
+      # action logged "does not match any files" and moved on — a release
+      # with no asset attached, "succeeded" because an unmatched pattern
+      # isn't fatal by default. Fixed by actually renaming the file on disk
+      # before the publish step, so `files:` can just point at a real path.
+      - name: Rename the APK for the release asset
+        run: cp mobile/android/app/build/outputs/apk/release/app-release.apk voxo.apk
+
       # The artifact above is a zip, and GitHub only serves it to someone
       # signed in to an account with access to this repository. On a phone
       # that is a sign-in, a zip, an unzip and a file manager before
@@ -319,7 +330,8 @@ jobs:
             Commit: ${{ github.sha }}
             Branch: ${{ github.ref_name }}
             Built: ${{ github.run_started_at }}
-          files: mobile/android/app/build/outputs/apk/release/app-release.apk#voxo.apk
+          files: voxo.apk
+          fail_on_unmatched_files: true
           make_latest: true
           # Replaced rather than appended, so the link always points at
           # this run's build and never at a stale one beside it.
