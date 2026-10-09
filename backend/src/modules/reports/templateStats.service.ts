@@ -41,6 +41,20 @@ const LEGACY_TEXT_PREFIX = 'Template: ';
 const STATS_TTL_MS = 30_000;
 const statsCache = createTtlCache<TemplateStats>({ ttlMs: STATS_TTL_MS, maxEntries: 500 });
 
+/** How far back `recentHealth` looks — long enough to smooth out a quiet
+ *  minute or two, short enough that the page still reads as "right now"
+ *  rather than yesterday's weather. */
+const RECENT_HEALTH_WINDOW_MINUTES = 30;
+/** Below this many sends in the window, a failure or two is noise, not a
+ *  throttle — flagging it would cry wolf on a quiet number. */
+const MIN_SAMPLE_FOR_RATE_LIMIT_FLAG = 3;
+/** Share of the window's sends that must be rate-limited before this
+ *  reads as an active throttle rather than an ordinary blip. */
+const RATE_LIMIT_FLAG_RATIO = 0.3;
+/** Meta's own code for "too many messages sent from this phone number in
+ *  a short period of time" — see integrations/meta/errors.ts. */
+const META_RATE_LIMIT_CODE = 130429;
+
 export interface TemplateFailureReason {
   reason: string;
   count: number;
@@ -91,6 +105,37 @@ export interface MessageTally {
   failed: number;
 }
 
+/** `plainTotals`, broken out the same way `byTemplate` rows are — see
+ *  TemplateStatsRow.automatic/.agent for why the two are never one number. */
+export interface PlainTextStats extends MessageTally {
+  automatic: MessageTally;
+  agent: MessageTally;
+}
+
+export interface RecentDeliveryHealth {
+  /** How far back this window looks. */
+  windowMinutes: number;
+  /** Every outbound WhatsApp send (template, text, media, everything) in the window. */
+  sent: number;
+  /** Of those, how many Meta refused for any reason. */
+  failed: number;
+  /** Of the failures, how many were specifically Meta's throughput
+   *  throttle (130429) — the one that health_status never shows, since
+   *  it is a pacing penalty, not an account/number restriction. */
+  rateLimited: number;
+  /**
+   * True when enough of this window's sends have been rate-limited that
+   * it reads as an active throttle rather than ordinary noise — the
+   * admin page's own early-warning, since Meta's health_status reports
+   * this number AVAILABLE the entire time a throughput penalty runs.
+   *
+   * Requires a minimum sample (see MIN_SAMPLE_FOR_RATE_LIMIT_FLAG) so a
+   * quiet number with one failed send out of one sent doesn't read as a
+   * storm.
+   */
+  isLikelyRateLimited: boolean;
+}
+
 export interface TemplateStats {
   windowDays: number;
   /** The number this report is scoped to, or undefined for the whole workspace. */
@@ -101,7 +146,12 @@ export interface TemplateStats {
   totals: MessageTally;
   /** The same lifetime shape for plain (non-template) outbound WhatsApp
    *  text — the other half of "what did this number actually send". */
-  plainTotals: MessageTally;
+  plainTotals: PlainTextStats;
+  /** Live, not windowed by windowDays — see RecentDeliveryHealth. Only
+   *  meaningful scoped to one number (whatsappPhoneNumberId set); left
+   *  at zeros for the whole-workspace view, where "sent in the last 30
+   *  minutes" mixes numbers with nothing in common. */
+  recentHealth: RecentDeliveryHealth;
   byTemplate: TemplateStatsRow[];
   /** Only computed for the whole-workspace view — scoped to one number
    *  this is necessarily that number's own single row, which the caller
@@ -191,8 +241,19 @@ export async function getTemplateStats(
   // same scope. The other half of what a number actually sent.
   const plainMatch = { tenantId: tenantObjectId, type: 'text', direction: 'OUT', channel: 'whatsapp', ...conversationScope };
 
-  const [namedRaw, unnamedRows, byNumberRaw, byDayRaw, latencyRaw, recentFailures, plainRaw, volumeByDayRaw] =
-    await Promise.all([
+  const recentHealthSince = new Date(Date.now() - RECENT_HEALTH_WINDOW_MINUTES * 60 * 1000);
+
+  const [
+    namedRaw,
+    unnamedRows,
+    byNumberRaw,
+    byDayRaw,
+    latencyRaw,
+    recentFailures,
+    plainRaw,
+    volumeByDayRaw,
+    recentHealthRaw,
+  ] = await Promise.all([
     Message.aggregate<{ _id: { name: string; status: string; internal: boolean }; count: number }>([
       { $match: namedMatch },
       {
@@ -255,9 +316,9 @@ export async function getTemplateStats(
       .limit(MAX_FAILURES_READ)
       .lean(),
 
-    Message.aggregate<{ _id: string; count: number }>([
+    Message.aggregate<{ _id: { status: string; internal: boolean }; count: number }>([
       { $match: plainMatch },
-      { $group: { _id: '$status', count: { $sum: 1 } } },
+      { $group: { _id: { status: '$status', internal: { $ifNull: ['$internal', false] } }, count: { $sum: 1 } } },
     ]),
 
     // Every message, both directions — the whole WhatsApp conversation on
@@ -280,6 +341,45 @@ export async function getTemplateStats(
         },
       },
     ]),
+
+    // Only meaningful scoped to one number — see RecentDeliveryHealth's
+    // doc comment. Skipped entirely for the whole-workspace view rather
+    // than run and discarded: no point scanning recent sends across every
+    // number this tenant has just to throw the count away.
+    whatsappPhoneNumberId
+      ? Message.aggregate<{ sent: number; failed: number; rateLimited: number }>([
+          {
+            $match: {
+              tenantId: tenantObjectId,
+              channel: 'whatsapp',
+              direction: 'OUT',
+              createdAt: { $gte: recentHealthSince },
+              ...conversationScope,
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              sent: { $sum: 1 },
+              failed: { $sum: { $cond: [{ $eq: ['$status', 'FAILED'] }, 1, 0] } },
+              rateLimited: {
+                $sum: {
+                  $cond: [
+                    {
+                      $in: [
+                        META_RATE_LIMIT_CODE,
+                        { $map: { input: { $ifNull: ['$error', []] }, as: 'e', in: '$$e.code' } },
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+        ])
+      : Promise.resolve([]),
   ]);
 
   // Per template, two tallies rather than one: `internal` (set only by
@@ -381,10 +481,38 @@ export async function getTemplateStats(
   const averageDeliveryMinutes =
     minutes.length === 0 ? null : Math.round(minutes.reduce((sum, m) => sum + m, 0) / minutes.length);
 
-  const plainTally = emptyTally();
+  // Same split as byTemplate, and for the same reason: the automatic
+  // invitation sent in "plain message" mode (guestAutoReply.service.ts)
+  // is still a plain WhatsApp text, not a template — with no templateName
+  // to group it into a byTemplate row at all, this lifetime tally is the
+  // ONLY place it is counted, so lumping it in with agents' own replies
+  // would make a workspace running that mode unable to see it anywhere.
+  const plainAutomatic = emptyTally();
+  const plainAgent = emptyTally();
   for (const row of plainRaw) {
-    plainTally[bucketOf(row._id)] += row.count;
+    const bucket = bucketOf(row._id.status);
+    (row._id.internal ? plainAutomatic : plainAgent)[bucket] += row.count;
   }
+  const plainAutomaticTally = toMessageTally(plainAutomatic);
+  const plainAgentTally = toMessageTally(plainAgent);
+  const plainTotals: PlainTextStats = {
+    total: plainAutomaticTally.total + plainAgentTally.total,
+    delivered: plainAutomaticTally.delivered + plainAgentTally.delivered,
+    failed: plainAutomaticTally.failed + plainAgentTally.failed,
+    automatic: plainAutomaticTally,
+    agent: plainAgentTally,
+  };
+
+  const health = recentHealthRaw[0];
+  const recentHealth: RecentDeliveryHealth = {
+    windowMinutes: RECENT_HEALTH_WINDOW_MINUTES,
+    sent: health?.sent ?? 0,
+    failed: health?.failed ?? 0,
+    rateLimited: health?.rateLimited ?? 0,
+    isLikelyRateLimited:
+      (health?.sent ?? 0) >= MIN_SAMPLE_FOR_RATE_LIMIT_FLAG &&
+      (health?.rateLimited ?? 0) / (health?.sent || 1) >= RATE_LIMIT_FLAG_RATIO,
+  };
 
   const volumeByDayMap = new Map<string, { in: number; out: number }>();
   for (let i = 0; i < windowDays; i += 1) {
@@ -406,7 +534,8 @@ export async function getTemplateStats(
     windowDays,
     whatsappPhoneNumberId,
     totals: toMessageTally(lifetimeTally),
-    plainTotals: toMessageTally(plainTally),
+    plainTotals,
+    recentHealth,
     byTemplate,
     byNumber,
     byDay,
