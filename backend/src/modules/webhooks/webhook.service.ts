@@ -1,4 +1,5 @@
 import { maybeSendGuestLinkAutoReply, sendInvitationTextFallback } from '../guest/guestAutoReply.service';
+import { scheduleRateLimitRetry } from '../../queues/messageRetry.queue';
 import { logger } from '../../lib/logger';
 import { logSendBlockDiagnostics } from '../whatsapp/sendBlockDiagnostics';
 import type { NormalizedCallItem, NormalizedWebhookItem } from '../../integrations/meta/webhookPayload';
@@ -219,9 +220,10 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
   // messages are internal, so not even the agent saw a red tick. "Meta
   // accepted it" and "the customer got it" are different claims, and this
   // is the line that tells them apart.
+  const reasons = item.status === 'failed' ? failureReasons(item.errors) : [];
   if (item.status === 'failed') {
     logger.warn(
-      { tenantId, messageId: item.messageId, reasons: failureReasons(item.errors) },
+      { tenantId, messageId: item.messageId, reasons },
       'Meta refused to deliver a message it had already accepted — the customer did not receive it',
     );
     // Ask Meta why, in its own words — throttled, and deliberately not
@@ -229,6 +231,7 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
     // waiting on; a diagnostic Graph call must not sit in front of it.
     void logSendBlockDiagnostics(item.phoneNumberId);
   }
+  const isRateLimited = reasons.some((r) => r.code === 130429);
 
   // item.timestamp is Meta's own — see the model's note on why the webhook's
   // time is used rather than the moment this handler ran.
@@ -302,6 +305,25 @@ async function handleStatusUpdate(tenantId: string, item: NormalizedStatusItem):
       recoveredViaText
         ? 'Meta refused a private-chat invitation template it had accepted — recovered by sending it as plain text'
         : 'Meta refused a private-chat invitation it had accepted, with no recovery — the customer got nothing; retried on their next message',
+    );
+  }
+
+  /**
+   * An ordinary reply, rate-limited rather than refused outright, gets one
+   * chance to recover on its own — see messageRetry.queue.ts for the full
+   * reasoning and its limits (text only, capped retries, a delay before
+   * trying again).
+   *
+   * Deliberately separate from the `internal` block above: an agent's own
+   * message has no cap or refund to reconcile, just a resend.
+   */
+  if (ourStatus === 'FAILED' && message.internal !== true && message.type === 'text' && isRateLimited) {
+    const scheduled = await scheduleRateLimitRetry({ tenantId, messageId: String(message._id) });
+    logger.info(
+      { tenantId, messageId: String(message._id), scheduled },
+      scheduled
+        ? 'Meta rate-limited a reply — an automatic retry is scheduled'
+        : 'Meta rate-limited a reply — no automatic retry left (or none configured); it stays failed for the agent to retry',
     );
   }
 

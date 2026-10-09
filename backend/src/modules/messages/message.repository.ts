@@ -33,6 +33,8 @@ export interface CreateMessageInput {
   channel?: MessageChannel;
   /** Only for `type: 'template'` — see the schema for why this is a real field and not parsed out of `text`. */
   templateName?: string;
+  /** Set only on a message created by messageRetry.queue.ts — see the schema. */
+  rateLimitRetryAttempt?: number;
 }
 
 /**

@@ -188,6 +188,18 @@ const messageSchema = new Schema(
      * `revokedAt` acts on both.
      */
     hiddenForGuestAt: { type: Date },
+    /**
+     * How many times this exact text has already been auto-resent after a
+     * Meta rate-limit refusal (130429) — see messageRetry.queue.ts.
+     *
+     * Absent on an ordinary message. Carried forward onto the NEW row a
+     * retry creates (the resend is its own message, not an edit of the
+     * failed one) so the retry chain has a stopping point: without it, a
+     * number stuck in a long Meta penalty would have this app retry the
+     * same reply forever, which is itself a way to keep a throttle from
+     * ever clearing.
+     */
+    rateLimitRetryAttempt: { type: Number },
   },
   { timestamps: true },
 );

@@ -112,6 +112,8 @@ export interface SendOutboundMessageInput {
    * that invitation specifically still needs exempted.
    */
   internal?: boolean;
+  /** Set only by messageRetry.queue.ts when resending after a Meta rate-limit refusal — see the schema. */
+  rateLimitRetryAttempt?: number;
   /**
    * Allows THIS send's own text past the exact-wording check that applies
    * while nudge enforcement is on — never past the count.
@@ -619,6 +621,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     internal: input.internal,
     clientMessageId: input.clientMessageId,
     templateName: input.type === 'template' ? input.templateName : undefined,
+    rateLimitRetryAttempt: input.rateLimitRetryAttempt,
   });
 
   // Declared outside the try so the catch can name the connection that

@@ -16,6 +16,7 @@ import {
   stopSubscriptionExpiryWorker,
   scheduleSubscriptionExpirySweep,
 } from './queues/subscriptionExpiry.queue';
+import { startMessageRetryWorker, stopMessageRetryWorker } from './queues/messageRetry.queue';
 import { startSocketServer, stopSocketServer } from './sockets/socketServer';
 import { migrateWabaIndexAtBoot } from './modules/whatsapp/wabaIndexMigration';
 import { migrateConversationNumberIndexAtBoot } from './modules/conversations/conversationNumberIndexMigration';
@@ -105,7 +106,13 @@ async function main(): Promise<void> {
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'Shutting down');
     httpServer.close(() => {
-      Promise.all([stopSocketServer(), stopWebhookWorker(), stopSubscriptionExpiryWorker(), closeRedisConnection()])
+      Promise.all([
+        stopSocketServer(),
+        stopWebhookWorker(),
+        stopSubscriptionExpiryWorker(),
+        stopMessageRetryWorker(),
+        closeRedisConnection(),
+      ])
         .catch((err) => logger.error({ err }, 'Error during shutdown'))
         .finally(() => process.exit(0));
     });
@@ -150,12 +157,15 @@ function startBackgroundQueues(): void {
     logger.warn(
       'REDIS_URL not configured — subscription expiry sweep will not run (auth middleware stays authoritative regardless)',
     );
+    logger.warn('REDIS_URL not configured — a rate-limited reply will not be auto-retried; an agent must tap retry');
     return;
   }
 
   startWebhookWorker();
   logger.info('Webhook processing worker started (BullMQ + Redis)');
   startSubscriptionExpiryWorker();
+  startMessageRetryWorker();
+  logger.info('Message rate-limit retry worker started (BullMQ + Redis)');
 
   // The .catch is for a genuine rejection (a malformed REDIS_URL, say).
   // An unreachable Redis does not reject — it stays pending until the
