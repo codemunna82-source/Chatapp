@@ -198,8 +198,6 @@ const keyExtractor = (item: RenderItem) => item.id;
 /** Far enough up that the user is clearly reading history, not just
  *  overscrolling past the newest bubble. */
 const SCROLLED_UP_THRESHOLD = 220;
-/** See isShortThread below for what this threshold is for. */
-const SHORT_THREAD_MESSAGE_COUNT = 6;
 
 // Lets FlashList recycle separators and bubbles into separate pools instead
 // of reusing one cell type for both.
@@ -400,29 +398,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // toast, a keystroke). Key off the query data itself, whose identity
   // react-query only changes when the messages actually change.
   const messages = useMemo(() => flattenMessages(messagesQuery.data), [messagesQuery.data]);
-  /**
-   * A short enough thread that the card has to be pinned, not trusted to
-   * the list.
-   *
-   * The thread-start card normally rides the inverted FlashList's own
-   * footer (ListFooterComponent), which is correct once there is enough
-   * real history to fill the viewport and anchor it against. The original
-   * version of this gated on zero messages only, reasoning that any real
-   * history was "enough" — wrong: a thread with just one or two short
-   * messages is still far shorter than the screen, and an inverted list is
-   * free to centre or sink a lone footer toward the bottom of the viewport
-   * instead of leaving it just under the header, exactly as it did at
-   * zero. Widened to a small-count threshold so a thread still gets this
-   * treatment for its first few messages, not only its very first.
-   *
-   * Not raised further than that: once a thread is long enough to
-   * plausibly fill the screen, this pinned block would sit fixed over
-   * whatever real messages happen to be scrolled underneath it, which is
-   * the ListFooterComponent path's job precisely because it scrolls with
-   * the content instead of floating over it.
-   */
-  const isShortThread =
-    messages.length <= SHORT_THREAD_MESSAGE_COUNT && !messagesQuery.isLoading && !messagesQuery.hasNextPage;
+  /** Whether the full thread has loaded back to its start — the point at
+   *  which ListFooterComponent should show the thread-start card. */
+  const atThreadStart = !messagesQuery.isLoading && !messagesQuery.hasNextPage;
 
   // --- in-chat search / starred ------------------------------------------
   const [infoTarget, setInfoTarget] = useState<Message | null>(null);
@@ -1195,12 +1173,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
                 The header subtitle already says "Private chat open · reply
                 anytime", in the one place someone looks to see who they
                 are talking to. */}
-            {isShortThread ? (
-              <View style={styles.pinnedThreadCard} pointerEvents="box-none">
-                <PrivacyBanner name={contactDisplayName(conversationQuery.data?.contact)} />
-                <ContactSummaryCard conversationId={conversationId} />
-              </View>
-            ) : null}
             <FlashList
               ref={listRef}
               data={renderItems}
@@ -1227,12 +1199,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               // screen — where the start of the thread is. Gated on
               // hasNextPage being false so this only appears once older
               // history has genuinely run out, not on every scroll-up
-              // before it has finished loading — and skipped entirely
-              // while isShortThread's own top-pinned block is already
-              // showing the same card, so a short thread never gets two
-              // copies of it.
+              // before it has finished loading.
               ListFooterComponent={
-                !isShortThread && !messagesQuery.hasNextPage && !messagesQuery.isLoading ? (
+                atThreadStart ? (
                   <View style={styles.threadStartCard}>
                     <PrivacyBanner name={contactDisplayName(conversationQuery.data?.contact)} />
                     <ContactSummaryCard conversationId={conversationId} />
@@ -1507,9 +1476,13 @@ const styles = StyleSheet.create({
   headerAction: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   toastWrap: { position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center' },
   toast: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth },
-  listContent: { paddingVertical: 8 },
+  // flexGrow + justifyContent: 'flex-end' is what keeps a short thread's
+  // content (and the thread-start card riding its footer) pinned to the
+  // list's natural edge instead of drifting toward its centre or its
+  // other end — the standard fix for an inverted list whose content
+  // doesn't fill the viewport. A list long enough to fill the screen on
+  // its own ignores both: flexGrow has nothing to grow into once content
+  // already exceeds the container, so this is a no-op there.
+  listContent: { paddingVertical: 8, flexGrow: 1, justifyContent: 'flex-end' },
   threadStartCard: { padding: 16 },
-  // Pinned under the header rather than flowing with the FlashList —
-  // see isShortThread's comment for why.
-  pinnedThreadCard: { position: 'absolute', top: 0, left: 0, right: 0, padding: 16, zIndex: 1 },
 });
