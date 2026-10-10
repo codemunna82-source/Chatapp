@@ -213,9 +213,27 @@ export function RealtimeSync({
       // Merge rather than replace — the socket payload doesn't carry the
       // populated `contact` field the REST response does, and a naive
       // overwrite would make it flicker away until the next refetch.
+      const hadCachedEntry = Boolean(queryClient.getQueryData(queryKeys.conversation(conversation.id)));
       queryClient.setQueryData<Conversation>(queryKeys.conversation(conversation.id), (old) =>
         old ? { ...old, ...conversation, contact: old.contact } : conversation,
       );
+      // The merge above only has a real `contact` to preserve when there
+      // was already a cache entry. The FIRST event for a brand-new
+      // conversation (no prior entry — a fresh inbound message, same day
+      // this app ever heard of this customer) has nothing to merge into,
+      // so it seeds the cache with the bare, contact-less payload — and
+      // setQueryData marks that as fresh data just fetched, not stale.
+      // Left alone, a screen reading this conversation inside the
+      // 30-second staleTime window skips its own fetch and renders this
+      // permanently incomplete object: the header's name falls back to
+      // "Conversation" with no avatar, because contactDisplayName has
+      // nothing else to show. Invalidating it right after marks it stale
+      // again, so the very next read (or this one, if it's already
+      // mounted) fetches the real, fully-populated conversation instead —
+      // a one-time cost only a brand-new conversation ever pays.
+      if (!hadCachedEntry) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.conversation(conversation.id) });
+      }
       invalidateConversations();
     },
     [queryClient, invalidateConversations],
