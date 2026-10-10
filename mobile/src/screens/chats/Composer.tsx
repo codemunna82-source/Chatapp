@@ -897,15 +897,24 @@ export function Composer({
         </Pressable>
 
         <View style={[styles.pill, { backgroundColor: colors.surfaceAlt, borderRadius: radius.xl, borderColor: colors.border }]}>
+          <TextInput
+            value={text}
+            onChangeText={handleChangeText}
+            onContentSizeChange={handleContentSizeChange}
+            placeholder="Type a message..."
+            placeholderTextColor={colors.textTertiary}
+            multiline
+            style={[styles.input, typography.body, { color: colors.textPrimary, height: inputHeight }]}
+          />
           {/* Inside the pill rather than as a fifth button in the row: at
               four icons the row is already at the width where touch targets
-              start being squeezed on a small phone.
-
-              Leading, not trailing — the messenger's own layout, and
-              where a thumb already resting near the keyboard's emoji key
-              expects it. Saved replies live on a long press here instead
-              of their own button, which is where a second, rarer action
-              belongs when the first one is reached constantly. */}
+              start being squeezed on a small phone. Trailing edge of the
+              input — the private-chat web composer's own layout (see
+              waprivate.dev), matched exactly rather than the native
+              WhatsApp app's leading placement. Saved replies live on a
+              long press here instead of their own button, which is where
+              a second, rarer action belongs when the first one is
+              reached constantly. */}
           <Pressable
             onPress={() => setEmojiOpen(true)}
             onLongPress={() => setQuickReplyOpen(true)}
@@ -918,15 +927,6 @@ export function Composer({
               <Ionicons name="happy-outline" size={20} color={colors.textTertiary} style={{ opacity: pressed ? 0.5 : 1 }} />
             )}
           </Pressable>
-          <TextInput
-            value={text}
-            onChangeText={handleChangeText}
-            onContentSizeChange={handleContentSizeChange}
-            placeholder="Type a message..."
-            placeholderTextColor={colors.textTertiary}
-            multiline
-            style={[styles.input, typography.body, { color: colors.textPrimary, height: inputHeight }]}
-          />
         </View>
 
         <Pressable

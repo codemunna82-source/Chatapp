@@ -20,6 +20,7 @@ import { ChatWallpaper } from './ChatWallpaper';
 import { ConnectionBanner } from '../../components/ConnectionBanner';
 import { DateSeparator } from './DateSeparator';
 import { TypingIndicator } from './TypingIndicator';
+import { PrivacyBanner, ContactSummaryCard } from './ContactCard';
 import { Composer } from './Composer';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { MessageActionSheet } from './MessageActionSheet';
@@ -1211,6 +1212,19 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               // is what makes a fast scroll look continuous.
               drawDistance={600}
               ListHeaderComponent={isTyping ? <TypingIndicator /> : null}
+              // Inverted, so the footer renders at the visual TOP of the
+              // screen — where the start of the thread is. Gated on
+              // hasNextPage being false so this only appears once older
+              // history has genuinely run out, not on every scroll-up
+              // before it has finished loading.
+              ListFooterComponent={
+                !messagesQuery.hasNextPage && !messagesQuery.isLoading ? (
+                  <View style={styles.threadStartCard}>
+                    <PrivacyBanner />
+                    <ContactSummaryCard conversationId={conversationId} />
+                  </View>
+                ) : null
+              }
               contentContainerStyle={styles.listContent}
             />
 
@@ -1481,4 +1495,5 @@ const styles = StyleSheet.create({
   toastWrap: { position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center' },
   toast: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth },
   listContent: { paddingVertical: 8 },
+  threadStartCard: { padding: 16 },
 });
