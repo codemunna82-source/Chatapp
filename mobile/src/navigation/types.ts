@@ -11,6 +11,11 @@ export type ChatsStackParamList = {
   // authorization is still enforced server-side by whichever API call that
   // screen ends up making, never assumed from the fact the link was opened.
   ConversationDetail: { conversationId: string };
+  // Pushed from the chat header's name/subtitle, like the messenger's own
+  // contact screen. conversationId rather than contactId: the block/report
+  // note and the window-aware caption it shows are reached by an agent
+  // already inside a specific thread.
+  ContactInfo: { conversationId: string };
 };
 
 export type SettingsStackParamList = {

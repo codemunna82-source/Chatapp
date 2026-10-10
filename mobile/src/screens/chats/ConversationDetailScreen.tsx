@@ -961,6 +961,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           contactId={contactId}
           avatarUpdatedAt={conversationQuery.data?.contact?.avatarUpdatedAt}
           onPressAvatar={pickContactPhoto}
+          onPressInfo={() => navigation.navigate('ContactInfo', { conversationId })}
           windowExpiresAt={conversationQuery.data?.conversationWindowExpiresAt}
           withinWindow={conversationQuery.data?.withinCustomerServiceWindow ?? true}
           isDemo={conversationQuery.data?.isDemo ?? false}
@@ -1043,6 +1044,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     });
   }, [
     navigation,
+    conversationId,
     conversationQuery.data,
     contactId,
     callPending,

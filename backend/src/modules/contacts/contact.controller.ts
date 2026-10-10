@@ -40,6 +40,24 @@ export const updateContactHandler = asyncHandler(async (req: Request, res: Respo
   res.status(200).json({ success: true, data: contact });
 });
 
+export const setContactBlockedHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const contact = await contactService.setContactBlockedForTenant(
+    auth.tenantId,
+    auth.userId,
+    req.params.id as string,
+    Boolean(req.body?.blocked),
+  );
+  res.status(200).json({ success: true, data: contact });
+});
+
+export const reportContactHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 2000) : undefined;
+  await contactService.reportContactForTenant(auth.tenantId, auth.userId, req.params.id as string, reason);
+  res.status(200).json({ success: true, data: { id: req.params.id } });
+});
+
 export const updateContactAvatarHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const file = req.file;

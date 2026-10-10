@@ -101,6 +101,33 @@ export function useDeleteContact() {
 }
 
 /**
+ * Flags or clears the agent-facing "blocked" note — see Contact['blocked'].
+ *
+ * Invalidates the single-conversation queries by prefix, the same reason
+ * useDeleteContact does: the header reads this contact off that query, not
+ * off the contact list.
+ */
+export function useSetContactBlocked() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, blocked }: { id: string; blocked: boolean }) =>
+      contactsApi.setContactBlocked(id, blocked),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+      void queryClient.invalidateQueries({ queryKey: ['conversation'] });
+    },
+  });
+}
+
+/** Logs that something about this contact isn't right. No cache to update — it changes nothing on the contact itself. */
+export function useReportContact() {
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => contactsApi.reportContact(id, reason),
+  });
+}
+
+/**
  * Uploads a photo for a contact.
  *
  * Invalidates the contact lists so every row's Avatar re-reads

@@ -62,6 +62,11 @@ export interface Contact {
    *  for its image URL. Absent when no photo has been set. */
   avatarUpdatedAt?: string;
   isDemo: boolean;
+  /** An agent flagged this contact — a note for every agent, not a real
+   *  block. See the backend's contact.model.ts. */
+  blocked: boolean;
+  /** When `blocked` was last set true. Absent when never flagged. */
+  blockedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

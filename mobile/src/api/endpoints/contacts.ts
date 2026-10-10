@@ -39,6 +39,17 @@ export async function deleteContact(id: string): Promise<void> {
   await apiClient.delete(`/contacts/${id}`);
 }
 
+/** Flags or clears the agent-facing "blocked" note on a contact — see Contact['blocked']. */
+export async function setContactBlocked(id: string, blocked: boolean): Promise<Contact> {
+  const res = await apiClient.post<ApiSuccess<Contact>>(`/contacts/${id}/blocked`, { blocked });
+  return res.data.data;
+}
+
+/** Logs that something about this contact isn't right — no destination of its own, just the audit trail. */
+export async function reportContact(id: string, reason?: string): Promise<void> {
+  await apiClient.post(`/contacts/${id}/report`, reason ? { reason } : {});
+}
+
 /**
  * The authenticated proxy URL for a contact's photo — same shape as
  * userAvatarUrl, and read the same way (Avatar attaches the bearer token).
