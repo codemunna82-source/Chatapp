@@ -1031,7 +1031,11 @@ const styles = StyleSheet.create({
   // Every control is a real 48dp touch square regardless of its icon size —
   // see touchTarget in theme/spacing.ts.
   iconButton: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
-  pillAction: { paddingHorizontal: 4, alignSelf: 'flex-end', paddingBottom: 6 },
+  // No alignSelf override: the pill's own alignItems: 'center' already
+  // centers this against the input vertically, which 'flex-end' here used
+  // to fight — correct for a single line, but it left the emoji sitting
+  // noticeably below centre at the composer's normal resting height.
+  pillAction: { paddingHorizontal: 4 },
   pill: {
     flex: 1,
     flexDirection: 'row',
