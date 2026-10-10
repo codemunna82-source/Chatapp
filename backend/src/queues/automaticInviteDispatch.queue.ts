@@ -1,0 +1,151 @@
+import { Queue, Worker, type Job } from 'bullmq';
+import { createBlockingRedisConnection, getRedisConnection, isRedisConfigured } from './connection';
+import { logger } from '../lib/logger';
+import { captureBackgroundError } from '../lib/sentry';
+import { attemptAutomaticGuestLinkInvitation } from '../modules/guest/guestAutoReply.service';
+
+export const AUTOMATIC_INVITE_DISPATCH_QUEUE_NAME = 'automatic-invite-dispatch';
+
+/**
+ * What outboundPacing.ts's 15-per-minute cap on the automatic private-chat
+ * invitation does with the customers it turns away: holds them here and
+ * retries once the number's window has room again, instead of dropping
+ * them on the spot. Before this queue existed, a burst past the cap — a
+ * hundred people writing in inside the same minute, say — got the first
+ * fifteen invited and left the other eighty-five with nothing, silently,
+ * unless they happened to write in again later and trigger a fresh
+ * attempt. Now they wait their turn instead of losing it.
+ *
+ * Deliberately separate from outboundDispatch.queue.ts (the general send
+ * pacing queue): that one defers a message that has already been created
+ * and committed to sending. This sits a layer earlier, before
+ * deliverGuestLinkInvitation has created anything (no session, no
+ * message row) — retrying here means re-running the whole attempt,
+ * gates included, not resuming a specific send.
+ */
+const RECHECK_DELAY_MS = 5_000;
+
+/** ~5 minutes of rechecking at the delay above — several of
+ *  outboundPacing's own 60-second windows, generous for even a sustained
+ *  burst, short enough that a customer is not left silently "pending"
+ *  forever if the number stays saturated with real traffic. */
+const MAX_DEFER_ATTEMPTS = 60;
+
+export interface AutomaticInviteDispatchJobData {
+  tenantId: string;
+  conversationId: string;
+  contactId: string;
+  whatsappPhoneNumberId: string;
+  /** How many times this exact invitation attempt has already been
+   *  deferred. Absent on the first enqueue, which reads as 0. */
+  attempt?: number;
+}
+
+let queue: Queue<AutomaticInviteDispatchJobData> | null = null;
+
+function getAutomaticInviteDispatchQueue(): Queue<AutomaticInviteDispatchJobData> {
+  if (!queue) {
+    queue = new Queue<AutomaticInviteDispatchJobData>(AUTOMATIC_INVITE_DISPATCH_QUEUE_NAME, {
+      connection: getRedisConnection(),
+    });
+  }
+  return queue;
+}
+
+/**
+ * Schedules a retry of the automatic invitation. Called from
+ * guestAutoReply.service.ts only when outboundPacing.ts has already said
+ * this number is over its automatic-send budget for the current minute —
+ * never on its own initiative.
+ */
+export async function enqueueAutomaticInviteDispatch(
+  data: AutomaticInviteDispatchJobData,
+  delayMs: number = RECHECK_DELAY_MS,
+): Promise<void> {
+  if (!isRedisConfigured()) {
+    // Unreachable in practice — outboundPacing.ts fails open with no
+    // Redis, so nothing ever calls this without it — but a safety net
+    // costs nothing and a silently dropped invitation is the one outcome
+    // worse than any pacing decision.
+    logger.error(
+      { conversationId: data.conversationId },
+      'enqueueAutomaticInviteDispatch called with no Redis configured — this should not happen',
+    );
+    return;
+  }
+
+  await getAutomaticInviteDispatchQueue().add('dispatch', data, {
+    delay: delayMs,
+    // Stable per conversation+attempt: a second inbound message from the
+    // same customer while a retry is already pending must not queue a
+    // second one racing it.
+    jobId: `${data.conversationId}:${data.attempt ?? 0}`,
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 2000 },
+  });
+}
+
+async function processDispatchJob(job: Job<AutomaticInviteDispatchJobData>): Promise<void> {
+  const { tenantId, conversationId, contactId, whatsappPhoneNumberId } = job.data;
+
+  // The exact same gates as the first attempt, re-run fresh — so a
+  // customer who has since opened the private chat some other way, or
+  // whose invite count has since changed, is read correctly rather than
+  // acted on stale state.
+  const outcome = await attemptAutomaticGuestLinkInvitation({
+    tenantId,
+    conversationId,
+    contactId,
+    whatsappPhoneNumberId,
+  });
+  if (outcome !== 'rate-limited') return; // Sent, or skipped for a reason a retry cannot fix — nothing left to do.
+
+  const attempt = (job.data.attempt ?? 0) + 1;
+  if (attempt > MAX_DEFER_ATTEMPTS) {
+    logger.warn(
+      { tenantId, conversationId, whatsappPhoneNumberId, attempt },
+      'Gave up retrying a deferred automatic invitation — this number stayed over its automatic-send budget too long',
+    );
+    return;
+  }
+  await enqueueAutomaticInviteDispatch({ ...job.data, attempt }, RECHECK_DELAY_MS);
+}
+
+let worker: Worker<AutomaticInviteDispatchJobData> | null = null;
+
+/** Called once at process startup (server.ts) when Redis is configured. */
+export function startAutomaticInviteDispatchWorker(): Worker<AutomaticInviteDispatchJobData> {
+  if (worker) return worker;
+  worker = new Worker<AutomaticInviteDispatchJobData>(
+    AUTOMATIC_INVITE_DISPATCH_QUEUE_NAME,
+    processDispatchJob,
+    // Its own connection, for the same reason as every other worker in
+    // this codebase: a Worker blocks on Redis, and a blocked connection
+    // serves nothing else.
+    { connection: createBlockingRedisConnection(), concurrency: 10 },
+  );
+  worker.on('error', (err) =>
+    logger.error({ err, queue: AUTOMATIC_INVITE_DISPATCH_QUEUE_NAME }, 'Automatic invite dispatch worker error'),
+  );
+  worker.on('failed', (job, err) => {
+    // Reached only if processDispatchJob itself threw, which it is
+    // written not to — attemptAutomaticGuestLinkInvitation never throws
+    // (deliverGuestLinkInvitation's own contract) and every other branch
+    // here returns normally. A thrown error is a bug in the processor,
+    // not a declined invitation.
+    logger.error({ jobId: job?.id, err }, 'Automatic invite dispatch job threw — this is a bug, not a declined invitation');
+    captureBackgroundError(err, { source: 'automaticInviteDispatch.worker', jobId: job?.id });
+  });
+  return worker;
+}
+
+export async function stopAutomaticInviteDispatchWorker(): Promise<void> {
+  if (worker) {
+    await worker.close();
+    worker = null;
+  }
+  if (queue) {
+    await queue.close();
+    queue = null;
+  }
+}

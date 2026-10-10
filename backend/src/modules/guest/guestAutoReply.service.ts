@@ -20,6 +20,7 @@ import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
 import { WhatsAppAccount } from '../whatsapp/whatsappAccount.model';
 import { tryReserveAutomaticSendSlot } from '../whatsapp/outboundPacing';
+import { enqueueAutomaticInviteDispatch } from '../../queues/automaticInviteDispatch.queue';
 
 /** The invitation config's own shape, independent of which slot it came from. */
 interface AutoGuestLinkConfig {
@@ -139,7 +140,7 @@ interface InvitationTarget {
  */
 async function deliverGuestLinkInvitation(
   input: InvitationTarget,
-  opts: { trigger: 'auto' | 'manual' },
+  opts: { trigger: 'auto' | 'manual'; onRateLimited?: () => void },
 ): Promise<InvitationResult | null> {
   const auto = opts.trigger === 'auto';
 
@@ -212,13 +213,16 @@ async function deliverGuestLinkInvitation(
 
   // Paced, not gated by config — see outboundPacing.ts for why this one
   // send is what absorbs a throughput spike instead of every send on the
-  // number. A customer skipped here is not left with nothing: an agent can
-  // still send the link by hand, and their next message gets a fresh try.
+  // number. A customer turned away here is not lost: onRateLimited tells
+  // the caller to hold them in automaticInviteDispatch.queue.ts and try
+  // again once the window has room, rather than giving up on this attempt
+  // for good.
   if (auto && !(await tryReserveAutomaticSendSlot(input.whatsappPhoneNumberId))) {
     logger.info(
       { tenantId: input.tenantId, conversationId: input.conversationId, whatsappPhoneNumberId: input.whatsappPhoneNumberId },
-      'Skipped the automatic private-chat invitation — too many automatic sends on this number in the last minute',
+      'Deferring the automatic private-chat invitation — too many automatic sends on this number in the last minute',
     );
+    opts.onRateLimited?.();
     return null;
   }
 
@@ -366,6 +370,28 @@ async function deliverGuestLinkInvitation(
   return { sentVia, attempt };
 }
 
+/**
+ * One attempt at the automatic invitation, pacing gate included.
+ *
+ * 'rate-limited' means outboundPacing.ts's cap was the ONLY reason
+ * nothing went out — the one outcome worth retrying. 'done' covers
+ * everything else: sent, or skipped for a reason a retry cannot fix
+ * (the automatic reply is off, the customer is already in the private
+ * chat, this customer is already at its own invite cap, no template is
+ * configured). Exported so automaticInviteDispatch.queue.ts can re-run
+ * the exact same attempt later rather than a second copy of these gates.
+ */
+export async function attemptAutomaticGuestLinkInvitation(input: InvitationTarget): Promise<'rate-limited' | 'done'> {
+  let rateLimited = false;
+  await deliverGuestLinkInvitation(input, {
+    trigger: 'auto',
+    onRateLimited: () => {
+      rateLimited = true;
+    },
+  });
+  return rateLimited ? 'rate-limited' : 'done';
+}
+
 export async function maybeSendGuestLinkAutoReply(input: {
   tenantId: string;
   conversationId: string;
@@ -378,7 +404,16 @@ export async function maybeSendGuestLinkAutoReply(input: {
     // conversation, and answering it with an invitation reads as a machine
     // that is not listening.
     if (input.inboundMessageType === 'reaction') return;
-    await deliverGuestLinkInvitation(input, { trigger: 'auto' });
+
+    const outcome = await attemptAutomaticGuestLinkInvitation(input);
+    if (outcome === 'rate-limited') {
+      await enqueueAutomaticInviteDispatch({
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        whatsappPhoneNumberId: input.whatsappPhoneNumberId,
+      });
+    }
   } catch (err) {
     // Never throw. This runs inside the webhook handler; an exception here
     // would fail the delivery, Meta would retry it, and the customer's
