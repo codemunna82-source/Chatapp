@@ -97,13 +97,15 @@ export async function enqueueAutomaticInviteDispatch(
   delayMs: number = RECHECK_DELAY_MS,
 ): Promise<void> {
   if (!isRedisConfigured()) {
-    // Unreachable in practice — outboundPacing.ts fails open with no
-    // Redis, so nothing ever calls this without it — but a safety net
-    // costs nothing and a silently dropped invitation is the one outcome
-    // worse than any pacing decision.
+    // No longer unreachable: every first automatic send now comes through
+    // here (see maybeSendGuestLinkAutoReply), not only the rate-limited
+    // overflow case. With no Redis configured there is nowhere to hold a
+    // delayed job, so the invitation cannot go out jittered — only
+    // un-jittered, which defeats the point. Logged loudly because this
+    // now means no automatic invitations at all, not a rare edge case.
     logger.error(
       { conversationId: data.conversationId },
-      'enqueueAutomaticInviteDispatch called with no Redis configured — this should not happen',
+      'enqueueAutomaticInviteDispatch called with no Redis configured — automatic invitations cannot be sent at all without it',
     );
     return;
   }
@@ -112,8 +114,10 @@ export async function enqueueAutomaticInviteDispatch(
     delay: delayMs,
     // Stable per conversation+attempt: a second inbound message from the
     // same customer while a retry is already pending must not queue a
-    // second one racing it.
-    jobId: `${data.conversationId}:${data.attempt ?? 0}`,
+    // second one racing it. BullMQ rejects a custom job id containing
+    // ':' (it uses that character itself as a Redis-key delimiter), so
+    // this uses '-' instead.
+    jobId: `${data.conversationId}-${data.attempt ?? 0}`,
     removeOnComplete: { count: 1000 },
     removeOnFail: { count: 2000 },
   });
