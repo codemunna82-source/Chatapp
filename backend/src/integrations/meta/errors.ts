@@ -23,14 +23,22 @@ export class MetaApiError extends Error {
   readonly metaCode?: number;
   readonly metaSubcode?: number;
   readonly retryable: boolean;
+  /** Meta's own trace id for this exact call, when it sent one — the
+   *  reference to quote back if a block ever needs a Meta support
+   *  ticket to clear. */
+  readonly fbtraceId?: string;
 
-  constructor(message: string, opts: { code: string; metaCode?: number; metaSubcode?: number; retryable?: boolean }) {
+  constructor(
+    message: string,
+    opts: { code: string; metaCode?: number; metaSubcode?: number; retryable?: boolean; fbtraceId?: string },
+  ) {
     super(message);
     this.name = 'MetaApiError';
     this.code = opts.code;
     this.metaCode = opts.metaCode;
     this.metaSubcode = opts.metaSubcode;
     this.retryable = opts.retryable ?? false;
+    this.fbtraceId = opts.fbtraceId;
   }
 }
 
@@ -56,7 +64,13 @@ export function mapMetaError(status: number, body: MetaErrorResponseBody | undef
     code = 'META_INVALID_REQUEST';
   }
 
-  return new MetaApiError(message, { code, metaCode, metaSubcode: body?.error?.error_subcode, retryable });
+  return new MetaApiError(message, {
+    code,
+    metaCode,
+    metaSubcode: body?.error?.error_subcode,
+    retryable,
+    fbtraceId: body?.error?.fbtrace_id,
+  });
 }
 
 /** Turns a MetaApiError (or anything else) into our standard API error contract. */

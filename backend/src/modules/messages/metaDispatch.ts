@@ -1,4 +1,5 @@
 import { ApiError } from '../../lib/ApiError';
+import { logger } from '../../lib/logger';
 import { findMediaByIdAndTenant } from '../media/media.repository';
 import { resolveMetaCredentialsForPhoneNumber, type ResolvedMetaCredentials } from '../whatsapp/whatsapp.service';
 import { markConnectionExpired } from '../whatsapp/embeddedSignup.service';
@@ -214,6 +215,33 @@ export async function dispatchAndFinalize(
   } catch (err) {
     const serialized = err instanceof Error ? { name: err.name, message: err.message } : err;
     await markMessageFailed(String(localMessage._id), input.tenantId, serialized);
+
+    // The one line that says WHICH number/account the refusal was on and
+    // WHY, in Meta's own code — the thing the dashboard's "Rate limit
+    // hit" row never does (it names the WABA, not the number, and not a
+    // reason). Without this, a synchronous refusal (as opposed to the
+    // delayed 130429 on the status webhook, which handleStatusUpdate
+    // already logs with its own detail) left only `markMessageFailed`'s
+    // name+message on a row nobody tails in real time.
+    logger.warn(
+      {
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
+        messageId: String(localMessage._id),
+        phoneNumberId: String(conversation.whatsappPhoneNumberId),
+        messageType: input.type,
+        ...(err instanceof MetaApiError
+          ? {
+              code: err.code,
+              metaCode: err.metaCode,
+              metaSubcode: err.metaSubcode,
+              retryable: err.retryable,
+              fbtraceId: err.fbtraceId,
+            }
+          : { errorName: err instanceof Error ? err.name : typeof err }),
+      },
+      'Meta refused a WhatsApp send',
+    );
 
     // Meta rejected the credentials — an expired or revoked token. Recorded
     // on the connection so the app can say "reconnect your WhatsApp"
