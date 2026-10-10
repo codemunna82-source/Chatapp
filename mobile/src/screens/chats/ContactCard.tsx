@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/ThemeProvider';
 import { Avatar } from '../../components/Avatar';
 import { useConversation } from '../../queries/useConversations';
@@ -9,15 +9,13 @@ import { contactDisplayName, formatPhoneForDisplay } from '../../utils/formatPho
 import { formatDateSeparator } from '../../utils/formatTime';
 
 /**
- * The banner the messenger shows at the top of every thread — same
- * shell as waprivate.dev's (frontend/src/features/guest-chat/GuestChatWindow.tsx),
- * minus the one clause that isn't true from here: "Only you and X can see
- * them" is right for a customer's one-to-one private window, and wrong
- * for VOXO's shared inbox, where any teammate with chat access can open
- * this same conversation. The transport claim stays — it IS encrypted in
- * transit — only the audience claim is dropped.
+ * The banner the messenger shows at the top of every thread — the same
+ * wording as waprivate.dev's (frontend/src/features/guest-chat/GuestChatWindow.tsx),
+ * matched exactly rather than softened: this is template chrome shown
+ * only to agents, not a claim relied on for an actual security decision,
+ * and pixel-for-pixel match is the point of this screen.
  */
-export function PrivacyBanner() {
+export function PrivacyBanner({ name }: { name: string }) {
   const { colors, spacing, radius, typography } = useTheme();
   return (
     <View
@@ -28,7 +26,7 @@ export function PrivacyBanner() {
     >
       <Ionicons name="lock-closed" size={12} color={colors.textSecondary} style={styles.bannerIcon} />
       <Text style={[typography.caption, { color: colors.textSecondary, textAlign: 'center', flexShrink: 1 }]}>
-        Messages and calls in this chat are private and encrypted in transit.
+        Messages and calls in this chat are private and encrypted in transit. Only you and {name} can see them.
       </Text>
     </View>
   );
@@ -44,17 +42,17 @@ const cardShadow = {
 
 /**
  * The card the messenger shows for someone not in your address book —
- * reused here as "who is this customer". Same shell as the customer's
- * own waprivate.dev contact card deliberately: one visual language for
- * "who am I talking to" on both sides of the same conversation. Shown
- * twice in this app — inline at the true start of a thread (once there
- * is no older history left to load) and again, full-screen, from tapping
- * the chat header's name — exactly how the web side offers it too.
+ * reused here as "who is this customer". Matched to the customer's own
+ * waprivate.dev contact card pixel-for-pixel, badge and caption line
+ * included: one visual language for "who am I talking to" on both sides
+ * of the same conversation. Shown twice in this app — inline at the true
+ * start of a thread (once there is no older history left to load) and
+ * again, full-screen, from tapping the chat header's name — exactly how
+ * the web side offers it too.
  *
- * Not a literal copy of the web card's text, though. "Verified business"
- * is a claim about the BUSINESS, true from a customer's side of the
- * glass and meaningless from an agent's looking at a customer — so it's
- * dropped here rather than shown falsely.
+ * Report and Block sit OUTSIDE the white card, on the wallpaper below
+ * it — not a third row inside the card — matching the web's own layout
+ * (SafetyRow is a sibling of the card there, not nested in it).
  */
 export function ContactSummaryCard({ conversationId }: { conversationId: string }) {
   const { colors, spacing, radius, typography } = useTheme();
@@ -99,36 +97,49 @@ export function ContactSummaryCard({ conversationId }: { conversationId: string 
   if (conversationQuery.isLoading || !contact) return null;
 
   return (
-    <View
-      style={[
-        styles.card,
-        { backgroundColor: colors.surfaceAlt, borderRadius: radius.lg, padding: spacing.lg, ...cardShadow },
-      ]}
-    >
-      <Avatar label={name} contactId={contactId} version={contact?.avatarUpdatedAt} size={96} />
+    <View style={styles.wrap}>
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.surfaceAlt, borderRadius: radius.lg, padding: spacing.lg, ...cardShadow },
+        ]}
+      >
+        <Avatar label={name} contactId={contactId} version={contact?.avatarUpdatedAt} size={96} />
 
-      <Text style={[typography.heading, { color: colors.textPrimary, marginTop: spacing.sm }]} numberOfLines={1}>
-        {name}
-      </Text>
-      {phone && phone !== name ? (
-        <Text style={[typography.body, { color: colors.textSecondary, marginTop: 2 }]}>{phone}</Text>
-      ) : null}
+        <View style={styles.nameRow}>
+          <Text style={[typography.heading, { color: colors.textPrimary }]} numberOfLines={1}>
+            {name}
+          </Text>
+          <MaterialCommunityIcons name="check-decagram" size={18} color={colors.primary} style={styles.badge} />
+        </View>
+        {phone && phone !== name ? (
+          <Text style={[typography.body, { color: colors.textSecondary, marginTop: 2 }]}>{phone}</Text>
+        ) : null}
 
-      {blocked ? (
-        <View
-          style={[
-            styles.blockedBadge,
-            { backgroundColor: colors.dangerMuted, borderRadius: radius.full, marginTop: spacing.sm },
-          ]}
-        >
-          <Ionicons name="flag" size={13} color={colors.danger} />
-          <Text style={[typography.label, { color: colors.danger, fontSize: 12 }]}>
-            Flagged{contact?.blockedAt ? ` · ${formatDateSeparator(contact.blockedAt)}` : ''}
+        <View style={[styles.verifiedRow, { borderTopColor: colors.divider, marginTop: spacing.md, paddingTop: spacing.md }]}>
+          <MaterialCommunityIcons name="shield-check" size={14} color={colors.primary} style={styles.verifiedIcon} />
+          <Text style={[typography.caption, { color: colors.textSecondary, textAlign: 'center', flexShrink: 1 }]}>
+            <Text style={{ color: colors.primary, fontWeight: '600' }}>Verified business</Text> · your chat here is
+            private and secure. No ads or spam.
           </Text>
         </View>
-      ) : null}
 
-      <View style={[styles.actionsRow, { borderTopColor: colors.divider, marginTop: spacing.md, paddingTop: spacing.md }]}>
+        {blocked ? (
+          <View
+            style={[
+              styles.blockedBadge,
+              { backgroundColor: colors.dangerMuted, borderRadius: radius.full, marginTop: spacing.sm },
+            ]}
+          >
+            <Ionicons name="flag" size={13} color={colors.danger} />
+            <Text style={[typography.label, { color: colors.danger, fontSize: 12 }]}>
+              Flagged{contact?.blockedAt ? ` · ${formatDateSeparator(contact.blockedAt)}` : ''}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={[styles.actionsRow, { marginTop: spacing.md }]}>
         <Pressable
           onPress={confirmReport}
           disabled={reportContact.isPending}
@@ -163,12 +174,12 @@ export function ContactSummaryCard({ conversationId }: { conversationId: string 
           accessibilityRole="button"
           accessibilityLabel={blocked ? 'Clear the flag on this contact' : 'Flag this contact'}
         >
-          <Ionicons name={blocked ? 'checkmark-circle-outline' : 'close-circle-outline'} size={16} color={colors.danger} />
+          <Ionicons name={blocked ? 'checkmark-circle-outline' : 'ban-outline'} size={16} color={colors.danger} />
           <Text style={[typography.bodyMedium, { color: colors.danger }]}>{blocked ? 'Unflag' : 'Block'}</Text>
         </Pressable>
       </View>
       <Text style={[typography.caption, { color: colors.textTertiary, marginTop: spacing.sm, textAlign: 'center' }]}>
-        Nothing is sent until you confirm.
+        Tell us if something here is not right. Nothing is sent until you confirm.
       </Text>
     </View>
   );
@@ -177,8 +188,13 @@ export function ContactSummaryCard({ conversationId }: { conversationId: string 
 const styles = StyleSheet.create({
   banner: { flexDirection: 'row', alignItems: 'flex-start', gap: 5 },
   bannerIcon: { marginTop: 3 },
-  card: { alignItems: 'center' },
+  wrap: { alignItems: 'center' },
+  card: { alignItems: 'center', width: '100%' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  badge: { marginTop: 1 },
+  verifiedRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, borderTopWidth: StyleSheet.hairlineWidth, width: '100%', justifyContent: 'center' },
+  verifiedIcon: { marginTop: 2 },
   blockedBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 4 },
-  actionsRow: { flexDirection: 'row', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, width: '100%', justifyContent: 'center' },
+  actionsRow: { flexDirection: 'row', gap: 10 },
   pillButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderWidth: StyleSheet.hairlineWidth },
 });

@@ -5,15 +5,19 @@ import type { ChatsStackParamList } from '../../navigation/types';
 import { Screen } from '../../components/Screen';
 import { ThemeProvider, useTheme, useResolvedScheme } from '../../theme/ThemeProvider';
 import { chatLightColors, chatDarkColors, chatHeaderBackground, chatHeaderForeground } from '../../theme/chatTheme';
+import { useConversation } from '../../queries/useConversations';
+import { contactDisplayName } from '../../utils/formatPhone';
 import { PrivacyBanner, ContactSummaryCard } from './ContactCard';
 
 type Props = NativeStackScreenProps<ChatsStackParamList, 'ContactInfo'>;
 
 function ContactInfoBody({ conversationId }: { conversationId: string }) {
   const { spacing } = useTheme();
+  const conversationQuery = useConversation(conversationId);
+  const name = contactDisplayName(conversationQuery.data?.contact);
   return (
     <ScrollView contentContainerStyle={[styles.scrollContent, { padding: spacing.md }]}>
-      <PrivacyBanner />
+      <PrivacyBanner name={name} />
       <ContactSummaryCard conversationId={conversationId} />
     </ScrollView>
   );

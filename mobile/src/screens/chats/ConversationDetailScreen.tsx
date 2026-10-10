@@ -1220,7 +1220,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               ListFooterComponent={
                 !messagesQuery.hasNextPage && !messagesQuery.isLoading ? (
                   <View style={styles.threadStartCard}>
-                    <PrivacyBanner />
+                    <PrivacyBanner name={contactDisplayName(conversationQuery.data?.contact)} />
                     <ContactSummaryCard conversationId={conversationId} />
                   </View>
                 ) : null
