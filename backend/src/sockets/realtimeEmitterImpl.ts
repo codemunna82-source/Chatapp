@@ -67,5 +67,8 @@ export function createSocketRealtimeEmitter(io: AppServer): RealtimeEmitter {
       // Notifications are per-user, not broadcast tenant-wide.
       io.to(userRoom(userId)).emit('notification:new', notification);
     },
+    emitInvitationSent(tenantId, conversationId, whatsappPhoneNumberId) {
+      chatRooms(tenantId, conversationId, whatsappPhoneNumberId).emit('invitation:sent', { conversationId });
+    },
   };
 }

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming, SlideInDown, SlideOutUp } from 'react-native-reanimated';
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
@@ -41,6 +41,7 @@ import { MediaSourceSheet } from './MediaSourceSheet';
 import { QuickReplySheet } from './QuickReplySheet';
 import { EmojiSheet } from './EmojiSheet';
 import { recordQuickReplyUse } from '../../queries/useQuickReplies';
+import { useInvitationSentStore } from '../../store/invitationSentStore';
 
 interface ComposerProps {
   conversationId: string;
@@ -78,6 +79,7 @@ interface ComposerProps {
 const TYPING_STOP_DELAY_MS = 2500;
 const RECORDER_POLL_MS = 100;
 const MAX_IMAGES_PER_SEND = 10;
+const INVITATION_BANNER_MS = 4500;
 const INPUT_MIN_HEIGHT = 22;
 const INPUT_MAX_HEIGHT = 120;
 /**
@@ -582,6 +584,24 @@ export function Composer({
     }
   };
 
+  // The private-chat invitation is `internal` and never appears as a
+  // message bubble (guestAutoReply.service.ts), so this socket-driven
+  // flag (invitationSentStore.ts) is the only live sign an agent gets
+  // that one just went out — shown here, in the composer's own place,
+  // for a few seconds before the composer reverts to whatever state
+  // actually applies (idle, the nudge card, or the window-closed notice).
+  const invitationSentAt = useInvitationSentStore((s) => s.sentAt[conversationId]);
+  // Which sent-event the banner has already been shown and timed out for —
+  // not a plain boolean, so showing it needs no setState of its own: the
+  // comparison below is already true the instant invitationSentAt changes.
+  const [dismissedSentAt, setDismissedSentAt] = useState<number | undefined>(undefined);
+  const showInvitationBanner = Boolean(invitationSentAt) && invitationSentAt !== dismissedSentAt;
+  useEffect(() => {
+    if (!invitationSentAt) return;
+    const timer = setTimeout(() => setDismissedSentAt(invitationSentAt), INVITATION_BANNER_MS);
+    return () => clearTimeout(timer);
+  }, [invitationSentAt]);
+
   // ------------------------------------------------------------ rendering
   const shellStyle = [
     styles.shell,
@@ -593,6 +613,21 @@ export function Composer({
       paddingBottom: bottomPad,
     },
   ];
+
+  if (showInvitationBanner) {
+    return (
+      <Animated.View
+        entering={SlideInDown.duration(220)}
+        exiting={SlideOutUp.duration(220)}
+        style={[shellStyle, styles.invitationBanner, { backgroundColor: colors.successMuted }]}
+      >
+        <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+        <Text style={[typography.bodyMedium, { color: colors.textPrimary, flexShrink: 1 }]}>
+          Invitation sent — you can send more once they open the link
+        </Text>
+      </Animated.View>
+    );
+  }
 
   // Every WhatsApp send — a template included, since picking one is
   // still spending a nudge (whatsappQuota.ts) — is refused once the
@@ -862,22 +897,14 @@ export function Composer({
         </Pressable>
 
         <View style={[styles.pill, { backgroundColor: colors.surfaceAlt, borderRadius: radius.xl, borderColor: colors.border }]}>
-          <TextInput
-            value={text}
-            onChangeText={handleChangeText}
-            onContentSizeChange={handleContentSizeChange}
-            placeholder="Type a message..."
-            placeholderTextColor={colors.textTertiary}
-            multiline
-            style={[styles.input, typography.body, { color: colors.textPrimary, height: inputHeight }]}
-          />
           {/* Inside the pill rather than as a fifth button in the row: at
               four icons the row is already at the width where touch targets
               start being squeezed on a small phone.
 
-              Emoji, where the saved-replies bolt used to be. Saved
-              replies did not go anywhere — they moved to a long press on
-              this same spot, which is where a second, rarer action
+              Leading, not trailing — the messenger's own layout, and
+              where a thumb already resting near the keyboard's emoji key
+              expects it. Saved replies live on a long press here instead
+              of their own button, which is where a second, rarer action
               belongs when the first one is reached constantly. */}
           <Pressable
             onPress={() => setEmojiOpen(true)}
@@ -891,6 +918,15 @@ export function Composer({
               <Ionicons name="happy-outline" size={20} color={colors.textTertiary} style={{ opacity: pressed ? 0.5 : 1 }} />
             )}
           </Pressable>
+          <TextInput
+            value={text}
+            onChangeText={handleChangeText}
+            onContentSizeChange={handleContentSizeChange}
+            placeholder="Type a message..."
+            placeholderTextColor={colors.textTertiary}
+            multiline
+            style={[styles.input, typography.body, { color: colors.textPrimary, height: inputHeight }]}
+          />
         </View>
 
         <Pressable
@@ -990,6 +1026,7 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   shell: { borderTopWidth: StyleSheet.hairlineWidth },
+  invitationBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: touchTarget.min, borderRadius: 10 },
   row: { flexDirection: 'row', alignItems: 'flex-end' },
   // Every control is a real 48dp touch square regardless of its icon size —
   // see touchTarget in theme/spacing.ts.

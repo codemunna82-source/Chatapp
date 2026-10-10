@@ -23,8 +23,8 @@ const DOODLE_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
   'videocam-outline',
 ];
 
-const CELL = 46;
-const ICON_SIZE = 17;
+const CELL = 68;
+const ICON_SIZE = 25;
 const DEFAULT_ICON: (typeof DOODLE_ICONS)[number] = 'chatbubble-outline';
 
 /** Dots sit on a tighter lattice than doodles — at 46dp they read as sparse

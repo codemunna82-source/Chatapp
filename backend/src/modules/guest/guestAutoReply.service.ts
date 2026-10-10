@@ -21,6 +21,7 @@ import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
 import { WhatsAppAccount } from '../whatsapp/whatsappAccount.model';
 import { tryReserveAutomaticSendSlot } from '../whatsapp/outboundPacing';
 import { enqueueAutomaticInviteDispatch } from '../../queues/automaticInviteDispatch.queue';
+import { getRealtimeEmitter } from '../../realtime/events';
 
 /** The invitation config's own shape, independent of which slot it came from. */
 interface AutoGuestLinkConfig {
@@ -344,6 +345,11 @@ async function deliverGuestLinkInvitation(
 
   const attempt = (existing?.invitesSent ?? 0) + 1;
   await recordInviteSent(input.conversationId, input.tenantId);
+
+  // The invitation is `internal`, so it never reaches the agent as a
+  // message bubble — this is the one live signal that it happened at
+  // all, for the composer's brief "invitation sent" banner.
+  getRealtimeEmitter().emitInvitationSent(input.tenantId, input.conversationId, input.whatsappPhoneNumberId);
 
   // Held from here, not from the customer's first message: the hold only
   // makes sense once they have actually been given somewhere else to go.

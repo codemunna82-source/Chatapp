@@ -26,11 +26,8 @@ export function ChatHeaderMenu({
   visible,
   onClose,
   onSearch,
-  onGuestLink,
-  /** Sends the invitation to the customer on WhatsApp, from the server. */
-  onSendInvitation,
-  /** A live private-chat link changes what the link row offers. */
-  guestActive,
+  /** Mints the private-chat link and opens it in the phone's own SMS app. */
+  onSendInvitationSms,
   /** Absent when this conversation has no contact to look at. */
   onContactPhoto,
   contactPhotoLabel,
@@ -38,9 +35,7 @@ export function ChatHeaderMenu({
   visible: boolean;
   onClose: () => void;
   onSearch: () => void;
-  onGuestLink: () => void;
-  onSendInvitation: () => void;
-  guestActive: boolean;
+  onSendInvitationSms: () => void;
   onContactPhoto?: () => void;
   contactPhotoLabel?: string;
 }) {
@@ -53,27 +48,18 @@ export function ChatHeaderMenu({
     onPress: () => void;
   }[] = [
     { key: 'search', label: 'Search in this chat', icon: 'search', onPress: onSearch },
+    // SMS rather than another WhatsApp send, deliberately: this exists
+    // for the moment WhatsApp itself is the problem — the automatic
+    // invitation refused, rate-limited, or its cap already spent — and a
+    // second WhatsApp attempt would just be the same failure again. SMS
+    // is a different wire, so it still reaches the customer when
+    // WhatsApp currently cannot. Opens the phone's own SMS app,
+    // pre-filled; nothing is sent until the agent does from there.
     {
-      key: 'link',
-      label: guestActive ? 'Replace private chat link' : 'Send a private chat link',
-      icon: guestActive ? 'link' : 'link-outline',
-      onPress: onGuestLink,
-    },
-    // Separate from the row above, and the difference matters. That one
-    // mints a link and hands it to the phone's share sheet for the agent
-    // to send from somewhere else. This one asks the SERVER to send the
-    // workspace's approved invitation to this customer on WhatsApp, on
-    // the business number, with the link already in it.
-    //
-    // It exists because the automatic invitation fails in ways an agent
-    // can see but not fix: Meta accepts a template and declines to
-    // deliver it minutes later, or the cap was spent on one that never
-    // arrived. Without this, the answer was to wait and hope.
-    {
-      key: 'invite',
-      label: 'Send the invitation on WhatsApp',
-      icon: 'paper-plane-outline',
-      onPress: onSendInvitation,
+      key: 'invite-sms',
+      label: 'Send invitation via SMS',
+      icon: 'chatbox-ellipses-outline',
+      onPress: onSendInvitationSms,
     },
   ];
   if (onContactPhoto) {

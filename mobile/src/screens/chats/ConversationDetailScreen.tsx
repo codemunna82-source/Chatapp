@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Keyboard, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Keyboard, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   KeyboardState,
   useAnimatedKeyboard,
@@ -41,12 +41,7 @@ import { clearMessageNotification } from '../../notifications/messageNotificatio
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
-import {
-  useGuestLinkStatus,
-  useIssueGuestLink,
-  useSendGuestLinkInvitation,
-  useRevokeGuestLink,
-} from '../../queries/useGuestChat';
+import { useGuestLinkStatus, useIssueGuestLink, useRevokeGuestLink } from '../../queries/useGuestChat';
 import {
   useMessages,
   flattenMessages,
@@ -604,7 +599,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const guestLinkQuery = useGuestLinkStatus(conversationId);
   const uploadContactAvatar = useUploadContactAvatar();
   const issueGuestLink = useIssueGuestLink(conversationId);
-  const sendInvitation = useSendGuestLinkInvitation(conversationId);
   const revokeGuestLink = useRevokeGuestLink(conversationId);
 
   const guestActive = guestLinkQuery.data?.active ?? false;
@@ -630,12 +624,27 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const withinWhatsAppWindow =
     (conversationQuery.data?.isDemo ?? false) ||
     (conversationQuery.data?.withinCustomerServiceWindow ?? false);
-  const shareGuestLink = useCallback(
-    async (url: string) => {
+  /**
+   * Opens the phone's own SMS app, pre-addressed to the customer with the
+   * private-chat link already in the body — sent from the agent's own SIM
+   * when they tap send there, not through any gateway VOXO operates.
+   *
+   * Deliberately not a WhatsApp send: this exists for exactly the moment
+   * WhatsApp itself is the problem (the automatic invitation refused,
+   * rate-limited, or the cap already spent) — routing the recovery
+   * through the same channel that just failed would not recover anything.
+   * SMS is a different wire entirely, so it still reaches the customer
+   * when WhatsApp currently cannot.
+   */
+  const smsGuestLink = useCallback(
+    (url: string) => {
+      const phone = conversationQuery.data?.contact?.phone;
+      if (!phone) return;
       const name = conversationQuery.data?.contact?.name || 'there';
-      await Share.share({
-        message: `Hi ${name}, continue our conversation privately here: ${url}`,
-      });
+      const body = `Hi ${name}, continue our conversation privately here: ${url}`;
+      // iOS and Android disagree on how an sms: URL takes a prefilled body.
+      const separator = Platform.OS === 'ios' ? '&' : '?';
+      void Linking.openURL(`sms:${phone}${separator}body=${encodeURIComponent(body)}`);
     },
     [conversationQuery.data],
   );
@@ -703,14 +712,16 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     );
   }, [contactId, uploadContactAvatar]);
 
-  const handleGuestLink = useCallback(() => {
+  /**
+   * Mints (or replaces) the private-chat link and opens it in the phone's
+   * SMS app — see smsGuestLink above for why SMS specifically.
+   */
+  const handleSendInvitationSms = useCallback(() => {
     if (issueGuestLink.isPending || revokeGuestLink.isPending) return;
 
     const create = () => {
       issueGuestLink.mutate(undefined, {
-        onSuccess: (link) => {
-          void shareGuestLink(link.url);
-        },
+        onSuccess: (link) => smsGuestLink(link.url),
         onError: (err) => Alert.alert('Could not create link', getApiErrorMessage(err)),
       });
     };
@@ -739,50 +750,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         },
       ],
     );
-  }, [guestActive, issueGuestLink, revokeGuestLink, shareGuestLink]);
-
-  /**
-   * Asks the server to send this customer the workspace's invitation on
-   * WhatsApp, now.
-   *
-   * Different from the link row above it, which mints a link and opens the
-   * share sheet for the agent to send from somewhere else. This one goes
-   * out on the business number, as the approved template, with the link
-   * already in it — the same message the automatic reply sends.
-   *
-   * Confirmed first, because it is a message to a customer and the agent
-   * cannot see it afterwards: the invitation is internal, so it never
-   * appears as a bubble in this thread.
-   *
-   * The result says what actually went out. A template that Meta would not
-   * take falls back to plain text server-side, and an agent who is not
-   * told that will believe the customer got a tappable button.
-   */
-  const handleSendInvitation = useCallback(() => {
-    if (sendInvitation.isPending) return;
-    Alert.alert(
-      'Send the invitation?',
-      'This sends the private-chat invitation to the customer on WhatsApp, with their link in it.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send',
-          onPress: () =>
-            sendInvitation.mutate(undefined, {
-              onSuccess: (result) => {
-                showToast(
-                  result.sentVia === 'template'
-                    ? 'Invitation sent.'
-                    : 'Invitation sent as plain text — the approved template could not be used.',
-                );
-              },
-              onError: (err) => Alert.alert('Not sent', getApiErrorMessage(err)),
-            }),
-        },
-      ],
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- showToast is a stable useCallback defined above
-  }, [sendInvitation]);
+  }, [guestActive, issueGuestLink, revokeGuestLink, smsGuestLink]);
 
   const handleSendText = useCallback(
     (text: string, nudgeIndex?: number) => {
@@ -1059,7 +1027,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     // setOptions only re-runs when this array changes, so the customer
     // could arrive and the subtitle would never say so.
     guestOnline,
-    handleGuestLink,
     handleCall,
     // Without this the header keeps the first callback it was built with,
     // which closes over a stale contactId — so tapping the photo on a
@@ -1319,9 +1286,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           visible={headerMenuOpen}
           onClose={() => setHeaderMenuOpen(false)}
           onSearch={() => setSearchOpen(true)}
-          onGuestLink={handleGuestLink}
-          onSendInvitation={handleSendInvitation}
-          guestActive={guestActive}
+          onSendInvitationSms={handleSendInvitationSms}
           // The photo moved in here too: tapping the avatar still sets
           // one, but that was never discoverable — nothing about a
           // picture says "tap me to replace this".

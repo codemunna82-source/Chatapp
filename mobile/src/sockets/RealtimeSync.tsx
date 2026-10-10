@@ -8,6 +8,7 @@ import { useMessageAlert } from './useMessageAlert';
 import { useActiveConversationStore } from '../store/activeConversationStore';
 import { clearMessageNotification } from '../notifications/messageNotification';
 import { useGuestPresenceStore } from '../store/guestPresenceStore';
+import { useInvitationSentStore } from '../store/invitationSentStore';
 import {
   useCallStore,
   type IncomingCallPayload,
@@ -237,6 +238,14 @@ export function RealtimeSync({
       invalidateConversations();
     },
     [queryClient, invalidateConversations],
+  );
+
+  useSocketEvent<{ conversationId: string }>(
+    'invitation:sent',
+    (payload) => {
+      useInvitationSentStore.getState().markInvitationSent(payload.conversationId);
+    },
+    [],
   );
 
   useSocketEvent<{ conversationId: string; byUserId: string }>(
