@@ -42,6 +42,18 @@ describe('countsAgainstNudgeQuota', () => {
   it('never counts a reaction', () => {
     expect(countsAgainstNudgeQuota({ ...ordinary, messageType: 'reaction' })).toBe(false);
   });
+
+  it('never counts the automatic private-chat invitation', () => {
+    // internal: true only ever means the automatic invitation
+    // (guestAutoReply.service.ts) — its own maxSends caps it separately,
+    // so it must not also spend one of the agent's own nudges.
+    expect(countsAgainstNudgeQuota({ ...ordinary, internal: true })).toBe(false);
+    expect(countsAgainstNudgeQuota({ ...ordinary, messageType: 'template', internal: true })).toBe(false);
+  });
+
+  it('still counts an agent-picked template, internal unset', () => {
+    expect(countsAgainstNudgeQuota({ ...ordinary, messageType: 'template', internal: false })).toBe(true);
+  });
 });
 
 describe('nudgeWindowStart', () => {

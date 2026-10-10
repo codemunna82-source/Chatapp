@@ -47,13 +47,23 @@ export function nudgeWindowStart(
 /**
  * Whether this particular send is one the allowance governs.
  *
- * Two things are outside it, and each for its own reason:
+ * Three things are outside it, and each for its own reason:
  *
  * - A demo contact. The number is not on WhatsApp at all — those chats
  *   run against the mock gateway, and a limit on an imaginary cost is
  *   just a broken sandbox.
  * - A reaction. It is not a message, it does not open a conversation with
  *   Meta, and a thumbs-up should not spend the reply someone needs.
+ * - The automatic private-chat invitation (`internal: true` —
+ *   guestAutoReply.service.ts is the only caller that ever sets it). It
+ *   has its own separate cap (maxSends, configured on the Automatic
+ *   Replies page) and its own reasoning for existing — it is the thing
+ *   that EARNS the 2 nudges a meaning by putting the link in front of
+ *   the customer in the first place. Spending one of the agent's own 2
+ *   nudges on a message no agent chose to send left a workspace that had
+ *   just turned the invitation on with a budget of effectively 1,
+ *   despite setting 2 — the invitation and the agent's own allowance are
+ *   two different budgets, not one shared between them.
  *
  * A customer who wrote to us within the last 24 hours is deliberately
  * NOT outside it, even though Meta itself would allow a free-form reply
@@ -70,19 +80,19 @@ export function nudgeWindowStart(
  * out fast. The fix for "an agent cannot answer a customer who just
  * wrote in" is the private chat link, not an unlimited WhatsApp channel.
  *
- * An approved template and the automatic private-chat invitation are
- * also NOT outside it. Both are a real send to a customer who has not
- * engaged, which is the exact thing the allowance exists to budget;
- * `internal` only ever meant "hide this bubble from the agent's thread"
- * (message.model.ts), never "free of charge". The invitation IS allowed
- * to skip the exact-wording check that applies to an ordinary nudge
- * while enforcement is on — see `exemptFromNudgeWording` in
- * message.service.ts — because its own text carries the link and is an
- * admin setting of its own; what it cannot skip is the count.
+ * An agent-picked approved template is NOT outside it — an agent choosing
+ * to send one is spending the allowance the same as picking a nudge, and
+ * exempting it would be the largest hole: a template is the one send
+ * Meta will deliver outside the 24-hour window too.
  */
-export function countsAgainstNudgeQuota(input: { messageType: string; isDemoContact: boolean }): boolean {
+export function countsAgainstNudgeQuota(input: {
+  messageType: string;
+  isDemoContact: boolean;
+  internal?: boolean;
+}): boolean {
   if (input.isDemoContact) return false;
   if (input.messageType === 'reaction') return false;
+  if (input.internal) return false;
   return true;
 }
 

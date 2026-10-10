@@ -509,17 +509,15 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * more specific problem and has its own fix (a template), and reporting
    * the allowance first would send someone to the wrong one.
    *
-   * Applies to `internal` sends too — the automatic private-chat
-   * invitation (guestAutoReply.service.ts) is the one caller that sets
-   * it, and `internal` here means only "hide this bubble from the
-   * agent's thread" (see message.model.ts), not "exempt from the
-   * allowance". An admin's configured nudge limit is a message BUDGET
-   * for the whole pre-window conversation; a workspace that turned on a
-   * one-message nudge allowance and then watched the automatic
-   * invitation template re-send past it on its own clock was not
-   * getting the budget it set.
+   * Exempts `internal` sends — the automatic private-chat invitation
+   * (guestAutoReply.service.ts) is the one caller that sets it. Its own
+   * `maxSends` already caps how many times it fires; spending one of the
+   * agent's own `WHATSAPP_NUDGE_LIMIT` slots on a send no agent chose to
+   * make left a workspace that set "2 nudges" with an actual agent
+   * budget of 1 the moment the invitation fired first. See
+   * whatsappQuota.ts for the rest of what counts and why.
    */
-  if (countsAgainstNudgeQuota({ messageType: input.type, isDemoContact })) {
+  if (countsAgainstNudgeQuota({ messageType: input.type, isDemoContact, internal: input.internal })) {
     const [used, policy] = await Promise.all([
       countWhatsAppNudges(input.tenantId, input.conversationId, nudgeWindowStart(session)),
       nudgePolicyFor(input.tenantId),
