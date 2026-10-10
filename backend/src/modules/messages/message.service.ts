@@ -11,25 +11,21 @@ import {
   createMessage,
   findMessageByIdAndTenant,
   findMessageByClientId,
-  attachMetaMessageId,
-  markMessageFailed,
   softDeleteMessage,
   revokeMessage,
   countWhatsAppNudges,
   countTemplatesSinceCustomerMessage,
   setMessageStarred,
 } from './message.repository';
-import { findMediaByIdAndTenant } from '../media/media.repository';
-import { resolveMetaCredentialsForPhoneNumber, type ResolvedMetaCredentials } from '../whatsapp/whatsapp.service';
-import { markConnectionExpired } from '../whatsapp/embeddedSignup.service';
-import { getMetaGateway, toMetaApiError, MetaApiError, type SendableMediaType } from '../../integrations/meta';
-import { mockMetaGateway } from '../../integrations/meta/mock/mockMetaGateway';
+import { type SendableMediaType } from '../../integrations/meta';
 import { getRealtimeEmitter } from '../../realtime/events';
 import { trace, type PerfTrace } from '../../lib/perfTrace';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
 import type { MessageDoc, MessageLean } from './message.model';
 import { refusalToRevoke, REVOKE_REFUSAL_MESSAGE } from './messageRevoke';
-import { toWhatsAppId } from '../../lib/phone';
+import { dispatchAndFinalize } from './metaDispatch';
+import { trySlotForDispatch } from '../whatsapp/sendPacing';
+import { enqueueOutboundDispatch } from '../../queues/outboundDispatch.queue';
 import { findActiveSessionForConversation } from '../guest/guestSession.repository';
 import { resolveReplyChannel } from '../guest/webChatRouting';
 import {
@@ -621,98 +617,54 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     rateLimitRetryAttempt: input.rateLimitRetryAttempt,
   });
 
-  // Declared outside the try so the catch can name the connection that
-  // failed; it is still undefined if resolution itself threw.
-  let credentialsUsed: ResolvedMetaCredentials | undefined;
-
-  try {
-    const credentials = await resolveMetaCredentialsForPhoneNumber(
-      input.tenantId,
-      String(conversation.whatsappPhoneNumberId),
-    );
-    credentialsUsed = credentials;
-    // Demo sends never leave this server, whatever META_MOCK_MODE is set to.
-    const gateway = isDemoContact ? mockMetaGateway : getMetaGateway();
-
-    // Digits without the plus — the form Meta's own webhook uses for this
-    // customer. Contacts are stored canonically (+E.164), so sending the
-    // stored string verbatim would put a `+` on the wire for every contact
-    // once the duplicate merge has canonicalised them.
-    const metaMessageId = await dispatch(
-      gateway,
-      credentials,
-      toWhatsAppId(contact.phone),
-      input,
+  /**
+   * The global throughput gate, shared by every number's every send —
+   * agent-typed, templated, the automatic invitation, all of it. A slot
+   * taken here is a real send about to happen; see sendPacing.ts for what
+   * it is counted against and why it exists at all (the incident this
+   * whole mechanism is for: a number's real Meta throughput is nothing
+   * like "as fast as this app can fire requests").
+   *
+   * A demo contact skips it outright — those never reach Meta, so pacing
+   * them guards nothing and would just make the sandbox feel broken.
+   *
+   * No slot free does NOT mean refused. The row above already exists as
+   * QUEUED — exactly the state a message sits in for the normal few
+   * hundred milliseconds before Meta answers today — so handing it to the
+   * paced dispatch queue instead of calling Meta inline is invisible to
+   * the caller: same return shape, same eventual SENT/FAILED over the
+   * socket, just a longer stretch of "still queued" while its turn comes.
+   */
+  const whatsappPhoneNumberId = String(conversation.whatsappPhoneNumberId);
+  if (!isDemoContact && !(await trySlotForDispatch(whatsappPhoneNumberId, input.tenantId))) {
+    await enqueueOutboundDispatch({
+      tenantId: input.tenantId,
+      messageId: String(localMessage._id),
+      conversationId: input.conversationId,
+      whatsappPhoneNumberId,
+      isDemoContact,
       replyToMetaMessageId,
-    );
-    // The Meta round trip, which is why the WhatsApp path can never be as
-    // quick as the web one: this is a call to someone else's servers, and
-    // the message does not exist for them until it returns.
-    perf.mark('meta_dispatch');
-
-    const sentMessage = await attachMetaMessageId(String(localMessage._id), input.tenantId, metaMessageId);
-
-    const realtime = getRealtimeEmitter();
-    /**
-     * The chat row and the socket both skip a system message.
-     *
-     * Hiding the bubble but leaving the invitation as the row's "last
-     * message" — and pushing it live into an open thread — would show the
-     * agent the very thing the bubble was hidden to spare them, in two
-     * more places. The conversation's own timestamps are unaffected
-     * either way; what is skipped is the preview text and the push.
-     */
-    if (!input.internal) {
-      // Before the conversation row is touched, not after. Nobody is
-      // waiting on a preview string; the people on this thread are
-      // waiting on the message, and putting a write in front of the emit
-      // held it back by a full round trip for no one's benefit.
-      realtime.emitMessageNew(
-        input.tenantId,
-        toRealtimeMessage(sentMessage ?? localMessage),
-        String(conversation.whatsappPhoneNumberId),
-      );
-      // SOCKET_EMIT_RECEIVER. The receiver's device has the message from
-      // here; everything below is bookkeeping, and the trace ends now so
-      // the total is the number that matters.
-      perf.mark('emit');
-      perf.end({ messageId: String(localMessage._id), channel: 'whatsapp' });
-
-      const updatedConversation = await recordOutboundActivity(
-        input.conversationId,
-        input.tenantId,
-        input.text ?? input.caption ?? `[${input.type}]`,
-        new Date(),
-        // SENT, matching the message row attachMetaMessageId just wrote
-        // — a status webhook advances both from here.
-        'SENT',
-        String(localMessage._id),
-      );
-      if (updatedConversation) {
-        realtime.emitConversationUpdated(input.tenantId, toRealtimeConversation(updatedConversation));
-      }
-    }
-
-    return sentMessage ?? localMessage;
-  } catch (err) {
-    const serialized = err instanceof Error ? { name: err.name, message: err.message } : err;
-    await markMessageFailed(String(localMessage._id), input.tenantId, serialized);
-
-    // Meta rejected the credentials — an expired or revoked token. Recorded
-    // on the connection so the app can say "reconnect your WhatsApp"
-    // instead of showing a failed message with no explanation, on this
-    // send and every one after it.
-    if (err instanceof MetaApiError && err.code === 'META_AUTH_ERROR' && credentialsUsed) {
-      await markConnectionExpired(credentialsUsed.whatsappAccountId);
-      throw ApiError.badRequest(
-        'WHATSAPP_RECONNECT_REQUIRED',
-        'Your WhatsApp connection has expired. Open Settings → Connect WhatsApp and connect again.',
-      );
-    }
-
-    if (err instanceof ApiError) throw err;
-    throw toMetaApiError(err);
+      dispatchInput: {
+        type: input.type,
+        text: input.text,
+        mediaId: input.mediaId,
+        mediaLink: input.mediaLink,
+        caption: input.caption,
+        filename: input.filename,
+        templateName: input.templateName,
+        languageCode: input.languageCode,
+        templateComponents: input.templateComponents,
+        location: input.location,
+        reactToMessageId: input.reactToMessageId,
+        emoji: input.emoji,
+        internal: input.internal,
+      },
+    });
+    perf.end({ messageId: String(localMessage._id), channel: 'whatsapp', deferred: true });
+    return localMessage;
   }
+
+  return dispatchAndFinalize(localMessage, input, conversation, contact, isDemoContact, replyToMetaMessageId, perf);
 }
 
 /**
@@ -842,92 +794,4 @@ async function deliverToWebChat(
   });
 
   return message;
-}
-
-async function dispatch(
-  gateway: ReturnType<typeof getMetaGateway>,
-  credentials: Awaited<ReturnType<typeof resolveMetaCredentialsForPhoneNumber>>,
-  toPhone: string,
-  input: SendOutboundMessageInput,
-  replyToMetaMessageId: string | undefined,
-): Promise<string> {
-  switch (input.type) {
-    case 'text': {
-      if (!input.text) throw ApiError.badRequest('TEXT_REQUIRED', 'text is required for a text message');
-      const result = await gateway.sendText(credentials, { to: toPhone, text: input.text, replyToMetaMessageId });
-      return result.metaMessageId;
-    }
-    case 'template': {
-      if (!input.templateName || !input.languageCode) {
-        throw ApiError.badRequest('TEMPLATE_REQUIRED', 'templateName and languageCode are required');
-      }
-      const result = await gateway.sendTemplate(credentials, {
-        to: toPhone,
-        templateName: input.templateName,
-        languageCode: input.languageCode,
-        components: input.templateComponents as never,
-      });
-      return result.metaMessageId;
-    }
-    case 'image':
-    case 'video':
-    case 'audio':
-    case 'document': {
-      if (!input.mediaId && !input.mediaLink) {
-        throw ApiError.badRequest('MEDIA_REQUIRED', 'mediaId or mediaLink is required');
-      }
-      let metaMediaId: string | undefined;
-      if (input.mediaId) {
-        const mediaDoc = await findMediaByIdAndTenant(input.mediaId, input.tenantId);
-        if (!mediaDoc?.metaMediaId) {
-          throw ApiError.badRequest('MEDIA_NOT_UPLOADED', 'This media has not finished uploading to Meta yet');
-        }
-        metaMediaId = mediaDoc.metaMediaId;
-      }
-      const result = await gateway.sendMedia(credentials, {
-        to: toPhone,
-        mediaType: input.type,
-        mediaId: metaMediaId,
-        link: input.mediaLink,
-        caption: input.caption,
-        filename: input.filename,
-        replyToMetaMessageId,
-      });
-      return result.metaMessageId;
-    }
-    case 'location': {
-      if (!input.location) {
-        throw ApiError.badRequest('LOCATION_REQUIRED', 'latitude and longitude are required');
-      }
-      const result = await gateway.sendLocation(credentials, {
-        to: toPhone,
-        latitude: input.location.latitude,
-        longitude: input.location.longitude,
-        name: input.location.name,
-        address: input.location.address,
-        replyToMetaMessageId,
-      });
-      return result.metaMessageId;
-    }
-    case 'reaction': {
-      if (!input.reactToMessageId || input.emoji === undefined) {
-        throw ApiError.badRequest('REACTION_REQUIRED', 'reactToMessageId and emoji are required');
-      }
-      const target = await findMessageByIdAndTenant(input.reactToMessageId, input.tenantId);
-      if (!target?.metaMessageId) {
-        throw ApiError.badRequest(
-          'REACTION_TARGET_NOT_SENT',
-          'Cannot react to a message that has not been delivered by Meta yet',
-        );
-      }
-      const result = await gateway.sendReaction(credentials, {
-        to: toPhone,
-        reactToMetaMessageId: target.metaMessageId,
-        emoji: input.emoji,
-      });
-      return result.metaMessageId;
-    }
-    default:
-      throw ApiError.badRequest('UNSUPPORTED_MESSAGE_TYPE', `Cannot send message type "${input.type as string}"`);
-  }
 }
