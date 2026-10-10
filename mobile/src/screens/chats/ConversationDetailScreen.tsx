@@ -14,7 +14,6 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { Screen } from '../../components/Screen';
 import { MessageListSkeleton } from '../../components/Skeleton';
-import { InlineBanner } from '../../components/InlineBanner';
 import { MessageBubble } from './MessageBubble';
 import { ChatWallpaper } from './ChatWallpaper';
 import { ConnectionBanner } from '../../components/ConnectionBanner';
@@ -59,7 +58,6 @@ import { useSocketConnection } from '../../sockets/useSocketConnected';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { MessageSearchPanel } from './MessageSearchPanel';
 import { useActiveConversationStore } from '../../store/activeConversationStore';
-import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage, isOfflineError } from '../../api/client';
 import * as Clipboard from 'expo-clipboard';
 import { ThemeProvider, useResolvedScheme } from '../../theme/ThemeProvider';
@@ -261,8 +259,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const [isTyping, setIsTyping] = useState(false);
   const typingClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { placeCall, isPending: callPending, apiError: callApiError, linkError: callLinkError } = usePlaceCall();
-  const callError = callApiError ? getApiErrorMessage(callApiError, 'Could not start that call.') : callLinkError;
   const contactId = conversationQuery.data?.contactId;
 
   // Fixed navy+gold look for this screen, in a light and a dark variant —
@@ -664,9 +660,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   /**
    * A live web window means a call that actually connects inside the app.
-   * The WhatsApp path cannot do that — outbound WhatsApp calling is a
-   * hand-off to wa.me, which leaves VOXO entirely — so when both are
-   * possible the web one is plainly better for the agent.
+   * Without one, there is no device on the other end to ring inside
+   * VOXO at all — the old fallback handed off to wa.me, which does not
+   * even place a call, only opens WhatsApp's own chat with the customer
+   * for the agent to find the call button in themselves. A real phone
+   * call, placed on the agent's own SIM, actually rings the customer
+   * right now — which is what tapping this icon is supposed to do.
    */
   const handleCall = useCallback(
     (media: 'audio' | 'video' = 'audio') => {
@@ -681,12 +680,13 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         void useCallStore.getState().placeWebCall(conversationId, name, guestOnline, media);
         return;
       }
-      // Never video: this hands off to wa.me, and Meta's calling API has
-      // no video at all. The video button is not drawn without a live web
-      // window, so this is only ever reached for an audio call.
-      if (contactId) placeCall(contactId);
+      // Never video here: a normal phone call has no video leg. The video
+      // button is not drawn without a live web window, so this is only
+      // ever reached for an audio call.
+      const phone = conversationQuery.data?.contact?.phone;
+      if (phone) void Linking.openURL(`tel:${phone}`);
     },
-    [guestActive, guestOnline, conversationId, contactId, placeCall, conversationQuery.data],
+    [guestActive, guestOnline, conversationId, conversationQuery.data],
   );
 
   /**
@@ -970,38 +970,24 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           {guestActive ? (
             <Pressable
               onPress={() => handleCall('video')}
-              disabled={callPending}
               style={styles.headerAction}
               accessibilityRole="button"
-              accessibilityState={{ disabled: callPending }}
               accessibilityLabel="Video call this customer in the private chat"
             >
               {({ pressed }) => (
-                <Ionicons
-                  name="videocam"
-                  size={22}
-                  color={callPending ? `${headerFg}80` : headerFg}
-                  style={{ opacity: pressed ? 0.5 : 1 }}
-                />
+                <Ionicons name="videocam" size={22} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />
               )}
             </Pressable>
           ) : null}
           {contactId ? (
             <Pressable
               onPress={() => handleCall('audio')}
-              disabled={callPending}
               style={styles.headerAction}
               accessibilityRole="button"
-              accessibilityState={{ disabled: callPending }}
               accessibilityLabel="Call this customer"
             >
               {({ pressed }) => (
-                <Ionicons
-                  name="call"
-                  size={22}
-                  color={callPending ? `${headerFg}80` : headerFg}
-                  style={{ opacity: pressed ? 0.5 : 1 }}
-                />
+                <Ionicons name="call" size={22} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />
               )}
             </Pressable>
           ) : null}
@@ -1028,7 +1014,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     conversationId,
     conversationQuery.data,
     contactId,
-    callPending,
     selectionMode,
     selectedIds.length,
     clearSelection,
@@ -1190,11 +1175,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           <View style={styles.flex}>
             <ChatWallpaper />
             <ConnectionBanner />
-            {callError ? (
-              <View style={styles.callErrorWrap}>
-                <InlineBanner message={callError} />
-              </View>
-            ) : null}
             {/* No banner for this. It sat across the top of every
                 conversation with an open private window — which is now the
                 normal state, not an exceptional one — and a coloured strip
@@ -1508,7 +1488,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  callErrorWrap: { paddingHorizontal: 16, paddingTop: 8 },
   // Real 48dp target for the header action — hitSlop was being clipped by
   // the navigator's own tight headerRight container.
   headerActions: { flexDirection: 'row', alignItems: 'center' },
