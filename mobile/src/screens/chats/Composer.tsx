@@ -57,6 +57,16 @@ interface ComposerProps {
    * refuse is worse than no field at all.
    */
   nextNudge?: { index: number; position: number; total: number; text: string } | null;
+  /**
+   * How many WhatsApp nudges the agent still has before the customer
+   * opens their private chat. `null`/`undefined` means the allowance
+   * doesn't apply here (demo contact, or the customer already moved to
+   * the private chat) — only `0` means "spent".
+   *
+   * Read only to decide whether typing should even be offered — the
+   * server is still the one that enforces it.
+   */
+  whatsappRepliesLeft?: number | null;
   onAttach: () => void;
   onUseTemplate: () => void;
   sending: boolean;
@@ -173,6 +183,7 @@ export function Composer({
   replyToMessageId,
   onSent,
   nextNudge,
+  whatsappRepliesLeft,
 }: ComposerProps) {
   const { colors, spacing, radius, typography } = useTheme();
   // The bottom inset is owned by the screen's keyboard-tracking wrapper
@@ -582,6 +593,24 @@ export function Composer({
       paddingBottom: bottomPad,
     },
   ];
+
+  // Every WhatsApp send — a template included, since picking one is
+  // still spending a nudge (whatsappQuota.ts) — is refused once the
+  // allowance hits zero. Checked ahead of the window/template branch
+  // below too, so a workspace that ran out can't be offered a template
+  // button that's just as guaranteed to be rejected.
+  const nudgesExhausted = whatsappRepliesLeft === 0;
+
+  if (nudgesExhausted) {
+    return (
+      <View style={[shellStyle, { paddingBottom: bottomPad + spacing.sm }]}>
+        <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: spacing.sm }]}>
+          You&apos;ve used up the WhatsApp replies allowed until this contact opens their private chat.
+          Send them the private chat link — once they open it you can message them without any limit.
+        </Text>
+      </View>
+    );
+  }
 
   // Spec §18: outside the 24h window, only an approved template may be
   // sent — enforced server-side regardless, but the composer shouldn't

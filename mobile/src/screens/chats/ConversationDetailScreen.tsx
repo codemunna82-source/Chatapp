@@ -1299,6 +1299,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
                * depend on an event arriving.
                */
               nextNudge={guestOpened ? null : conversationQuery.data?.nextNudge}
+              // Same staleness guard as nextNudge above: once the customer
+              // has opened the private chat the allowance no longer
+              // applies, whatever this screen's cached conversation still
+              // says.
+              whatsappRepliesLeft={guestOpened ? null : conversationQuery.data?.whatsappRepliesLeft}
             />
 
             {/* See keyboardGapStyle. */}

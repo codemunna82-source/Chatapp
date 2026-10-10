@@ -15,6 +15,7 @@ import { toPublicContact, type PublicContact } from '../contacts/contact.service
 import type { ConversationLean, ConversationStatus } from './conversation.model';
 import type { ContactLean } from '../contacts/contact.model';
 import { nudgePolicyFor } from '../messages/nudgePolicy';
+import { nudgeAt } from '../messages/nudgeTemplates';
 
 export interface PublicConversation {
   id: string;
@@ -39,7 +40,10 @@ export interface PublicConversation {
   isDemo: boolean;
   /**
    * WhatsApp replies left before the private chat link is the only way
-   * through — see messages/whatsappQuota.ts.
+   * through — see messages/whatsappQuota.ts. Governs the whole pre-
+   * private-chat conversation now, whether or not Meta's own 24-hour
+   * window happens to be open — see that file's doc comment on why an
+   * open window is no longer an exemption.
    *
    * Only on the single-conversation read, never on the list: it costs a
    * count per conversation, and a chat list of thirty would pay thirty
@@ -48,8 +52,8 @@ export interface PublicConversation {
    * Absent means "not counted here", which every client reads as "do not
    * show it" — not as zero. Null is the same answer said out loud for a
    * conversation the allowance does not govern at all: one on a demo
-   * contact, or one the customer is currently reading in their window,
-   * where there is no limit to report.
+   * contact, or one the customer has already moved to their private
+   * window, where there is no limit to report.
    */
   whatsappRepliesLeft?: number | null;
   /**
@@ -229,17 +233,21 @@ export async function getConversationForTenant(auth: AuthContext, id: string): P
  * discovering the limit by hitting it — with a message typed and a
  * customer waiting, which is the worst moment to learn a rule.
  *
- * Null rather than a number in the three cases where there is no limit: a
- * demo contact (not a real WhatsApp number at all), a customer who is
- * currently in their private window (replies go there, and there is no
- * cap on that), and a customer who wrote to us in the last 24 hours —
- * inside Meta's window the reply is free-form and uncapped, and the
- * composer must offer a text box rather than a fixed message.
+ * Null rather than a number in the two cases where there is genuinely no
+ * limit: a demo contact (not a real WhatsApp number at all), and a
+ * customer who has already moved to their private window (replies go
+ * there, and there is no cap on that). A customer who merely wrote to us
+ * in the last 24 hours is NOT one of these — message.service.ts enforces
+ * the allowance there too (see whatsappQuota.ts), so reporting "no limit"
+ * for that case would tell the composer to open a free-text box the next
+ * send could still be refused from.
  *
- * `nextNudge` is null whenever the window is shut as well, which leaves
- * it null in every case: the fixed wording is ordinary free-form text,
- * and outside the window Meta refuses to deliver that whatever it says.
- * A card offering to send it was a button that could only fail.
+ * `nextNudge` is additionally null whenever the window is shut, even
+ * with replies still left: the fixed wording is ordinary free-form text,
+ * which Meta will not deliver outside the window at all — a card
+ * offering to send it there would be a button that could only fail. The
+ * composer's own `withinWindow` branch is what covers that state,
+ * offering a template instead.
  */
 async function whatsappRepliesLeftFor(
   tenantId: string,
@@ -250,17 +258,19 @@ async function whatsappRepliesLeftFor(
 ): Promise<{ left: number | null; nextNudge: NextNudge | null }> {
   if (contact?.isDemo) return { left: null, nextNudge: null };
   if (hasMovedToWebChat(session)) return { left: null, nextNudge: null };
-  if (withinCustomerServiceWindow) return { left: null, nextNudge: null };
 
   const [used, policy] = await Promise.all([
     countWhatsAppNudges(tenantId, conversationId, nudgeWindowStart(session)),
     nudgePolicyFor(tenantId),
   ]);
+  const left = nudgesLeft(used, policy.limit);
 
-  // Only the count survives out here. What may be sent once the window is
-  // shut is an approved template, which the agent picks from the template
-  // sheet — not a wording this would hand them.
-  return { left: nudgesLeft(used, policy.limit), nextNudge: null };
+  const nextNudge: NextNudge | null =
+    withinCustomerServiceWindow && policy.enforced && left > 0
+      ? { index: used, position: used + 1, total: policy.limit, text: nudgeAt(policy.nudges, used) ?? '' }
+      : null;
+
+  return { left, nextNudge };
 }
 
 export interface UpdateConversationBody {
