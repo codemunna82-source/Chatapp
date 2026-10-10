@@ -46,18 +46,48 @@ interface PlainCell {
   y: number;
 }
 
+/**
+ * A fast, deterministic hash of a cell's own coordinates — not a PRNG with
+ * state, so the same cell always lands on the same icon/rotation/jitter
+ * across re-renders, but mixed enough (two multiply-xorshift rounds) that
+ * neighbouring cells don't trend together the way a linear formula like
+ * `(row + col) % 4` does. A linear formula repeats on a short, visible
+ * cycle — which is exactly what reads as "rows of doodles" instead of a
+ * scattered pattern; this doesn't repeat until the hash itself does.
+ */
+function hashCell(a: number, b: number): number {
+  let h = (a * 374761393 + b * 668265263) | 0;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  h = (h ^ (h >>> 16)) >>> 0;
+  return h;
+}
+
 function buildCells(width: number, height: number): DoodleCell[] {
   const cols = Math.ceil(width / CELL) + 1;
   const rows = Math.ceil(height / CELL) + 1;
   const cells: DoodleCell[] = [];
   for (let row = 0; row < rows; row++) {
-    // Stagger alternate rows like a brick pattern, so it reads as an
-    // organic tiled pattern rather than a rigid grid.
+    // Stagger alternate rows like a brick pattern, so the lattice itself
+    // reads as organic rather than a rigid grid.
     const offset = row % 2 === 0 ? 0 : CELL / 2;
     for (let col = 0; col < cols; col++) {
-      const icon = DOODLE_ICONS[(row * 7 + col * 3) % DOODLE_ICONS.length] ?? DEFAULT_ICON;
-      const rotate = ((row + col) % 4) * 17 - 25;
-      cells.push({ key: `${row}-${col}`, icon, x: col * CELL + offset, y: row * CELL, rotate });
+      const icon = DOODLE_ICONS[hashCell(row, col) % DOODLE_ICONS.length] ?? DEFAULT_ICON;
+      // Full circle, not a narrow band — WhatsApp's own wallpaper has
+      // doodles sitting at every angle, some flipped past upside-down,
+      // never lined up with their neighbours.
+      const rotate = (hashCell(col + 1, row + 1) % 360) - 180;
+      // A small jitter off the brick lattice, independent of rotation and
+      // icon so none of the three ever move together — otherwise the grid
+      // itself still reads as rows even with every icon spinning.
+      const jitterX = (hashCell(row * 2 + 1, col) % Math.round(CELL / 3)) - CELL / 6;
+      const jitterY = (hashCell(col * 2 + 1, row) % Math.round(CELL / 3)) - CELL / 6;
+      cells.push({
+        key: `${row}-${col}`,
+        icon,
+        x: col * CELL + offset + jitterX,
+        y: row * CELL + jitterY,
+        rotate,
+      });
     }
   }
   return cells;

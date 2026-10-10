@@ -31,6 +31,38 @@ const RECHECK_DELAY_MS = 5_000;
  *  forever if the number stays saturated with real traffic. */
 const MAX_DEFER_ATTEMPTS = 60;
 
+/**
+ * The window every FIRST automatic send is spread across, instead of
+ * leaving the instant its inbound message arrives.
+ *
+ * A burst of customers writing in within the same minute used to mean a
+ * burst of invitations leaving within the same few seconds — many sends
+ * on one number, clustered tightly enough in time that it reads as
+ * machine traffic rather than as the many independent, one-at-a-time
+ * replies it actually is. That clustering, not just the raw count, is
+ * part of what trips Meta's 130429 rate limiting.
+ *
+ * Spacing them at a FIXED interval (send #1 at +2s, #2 at +4s, ...) would
+ * just trade one detectable pattern for another. Giving each one an
+ * independent random delay in this window is what makes the traffic look
+ * like what it is — unrelated customers, each answered once, at whatever
+ * moment that lands.
+ */
+const JITTER_MIN_MS = 1_000;
+const JITTER_MAX_MS = 45_000;
+
+/**
+ * A random delay for a first dispatch attempt, uniform over
+ * [JITTER_MIN_MS, JITTER_MAX_MS). Called once per inbound message, so two
+ * numbers — or two customers on the same number — each land on their own
+ * independent draw rather than any shared schedule; at this window's
+ * resolution, two sends landing on the exact same instant is not a
+ * pattern worth engineering around.
+ */
+export function randomDispatchDelayMs(): number {
+  return JITTER_MIN_MS + Math.floor(Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS));
+}
+
 export interface AutomaticInviteDispatchJobData {
   tenantId: string;
   conversationId: string;
@@ -53,10 +85,12 @@ function getAutomaticInviteDispatchQueue(): Queue<AutomaticInviteDispatchJobData
 }
 
 /**
- * Schedules a retry of the automatic invitation. Called from
- * guestAutoReply.service.ts only when outboundPacing.ts has already said
- * this number is over its automatic-send budget for the current minute —
- * never on its own initiative.
+ * Schedules an attempt at the automatic invitation — the FIRST one, at a
+ * random delay from randomDispatchDelayMs(), or a retry at RECHECK_DELAY_MS
+ * once outboundPacing.ts has said this number is over its automatic-send
+ * budget for the current minute. Either way the attempt itself (including
+ * the pacing check) only runs when the delayed job fires, in
+ * processDispatchJob below.
  */
 export async function enqueueAutomaticInviteDispatch(
   data: AutomaticInviteDispatchJobData,

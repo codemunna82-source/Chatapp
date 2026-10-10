@@ -20,7 +20,7 @@ import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
 import { WhatsAppAccount } from '../whatsapp/whatsappAccount.model';
 import { tryReserveAutomaticSendSlot } from '../whatsapp/outboundPacing';
-import { enqueueAutomaticInviteDispatch } from '../../queues/automaticInviteDispatch.queue';
+import { enqueueAutomaticInviteDispatch, randomDispatchDelayMs } from '../../queues/automaticInviteDispatch.queue';
 import { getRealtimeEmitter } from '../../realtime/events';
 
 /** The invitation config's own shape, independent of which slot it came from. */
@@ -411,15 +411,23 @@ export async function maybeSendGuestLinkAutoReply(input: {
     // that is not listening.
     if (input.inboundMessageType === 'reaction') return;
 
-    const outcome = await attemptAutomaticGuestLinkInvitation(input);
-    if (outcome === 'rate-limited') {
-      await enqueueAutomaticInviteDispatch({
+    // Never attempted inline, even on a number nowhere near its cap. Every
+    // automatic send is scheduled at an independently randomized moment —
+    // see randomDispatchDelayMs — so a burst of inbound messages leaves as
+    // a scatter of sends over the next several seconds, the way one
+    // customer at a time actually would, rather than all at once in the
+    // instant the webhook fired. The pacing check itself still runs, just
+    // later, when the delayed job in automaticInviteDispatch.queue.ts
+    // fires and calls attemptAutomaticGuestLinkInvitation.
+    await enqueueAutomaticInviteDispatch(
+      {
         tenantId: input.tenantId,
         conversationId: input.conversationId,
         contactId: input.contactId,
         whatsappPhoneNumberId: input.whatsappPhoneNumberId,
-      });
-    }
+      },
+      randomDispatchDelayMs(),
+    );
   } catch (err) {
     // Never throw. This runs inside the webhook handler; an exception here
     // would fail the delivery, Meta would retry it, and the customer's
