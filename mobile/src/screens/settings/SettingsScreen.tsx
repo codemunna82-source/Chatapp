@@ -637,6 +637,11 @@ export function SettingsScreen({ navigation }: Props) {
         {Platform.OS === 'android' ? (
           <SettingsRow icon="chatbox-outline" label="SMS" onPress={() => navigation.navigate('SmsInbox')} />
         ) : null}
+        <SettingsRow
+          icon="shield-checkmark-outline"
+          label="Permissions"
+          onPress={() => navigation.navigate('Permissions')}
+        />
         {isMasterAdmin ? (
           <SettingsRow icon="wallet-outline" label="Wallet" onPress={() => navigation.navigate('Wallet')} />
         ) : null}

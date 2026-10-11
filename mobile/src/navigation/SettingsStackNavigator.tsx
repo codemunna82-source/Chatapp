@@ -9,6 +9,7 @@ import { ConnectWhatsAppScreen } from '../screens/settings/ConnectWhatsAppScreen
 import { BusinessProfileScreen } from '../screens/settings/BusinessProfileScreen';
 import { ManageContactsScreen } from '../screens/contacts/ManageContactsScreen';
 import { SmsInboxScreen } from '../screens/settings/SmsInboxScreen';
+import { PermissionsScreen } from '../screens/settings/PermissionsScreen';
 import { useTheme } from '../theme/ThemeProvider';
 
 const Stack = createNativeStackNavigator<SettingsStackParamList>();
@@ -31,6 +32,7 @@ export function SettingsStackNavigator() {
       <Stack.Screen name="ConnectWhatsApp" component={ConnectWhatsAppScreen} options={{ title: 'Connect WhatsApp' }} />
       <Stack.Screen name="ManageContacts" component={ManageContactsScreen} options={{ title: 'Contacts' }} />
       <Stack.Screen name="SmsInbox" component={SmsInboxScreen} options={{ title: 'SMS' }} />
+      <Stack.Screen name="Permissions" component={PermissionsScreen} options={{ title: 'Permissions' }} />
     </Stack.Navigator>
   );
 }

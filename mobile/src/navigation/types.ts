@@ -27,6 +27,7 @@ export type SettingsStackParamList = {
   ConnectWhatsApp: undefined;
   ManageContacts: undefined;
   SmsInbox: undefined;
+  Permissions: undefined;
 };
 
 export type MainTabParamList = {
