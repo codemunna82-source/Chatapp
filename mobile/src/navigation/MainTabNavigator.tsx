@@ -116,7 +116,10 @@ export function MainTabNavigator() {
         component={ChatsStackNavigator}
         options={({ route }) => ({
           title: 'Chats',
-          tabBarStyle: focusedChatsScreen(route) === 'ConversationDetail' ? { display: 'none' } : tabBarBase,
+          tabBarStyle:
+            focusedChatsScreen(route) === 'ConversationDetail' || focusedChatsScreen(route) === 'SmsThread'
+              ? { display: 'none' }
+              : tabBarBase,
           // 99+ rather than a four-digit number: past a point the exact
           // count stops being information and starts being a wide pill
           // that pushes the label out of the tab.

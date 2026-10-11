@@ -2,48 +2,18 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, PermissionsAndroid, Platform, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import SmsAndroid, { type RawSmsMessage } from 'react-native-get-sms-android';
 import { Screen } from '../../components/Screen';
 import { Button } from '../../components/Button';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatChatListTime } from '../../utils/formatTime';
-
-/**
- * The fixed list this screen filters for — never the whole SMS inbox. A
- * message has to contain at least one of these (case-insensitive) to show
- * up here at all; everything else a device's SMS app holds (OTPs, bank
- * alerts, personal messages) is read by the query below but never
- * rendered, stored, or sent anywhere off the device.
- */
-const MATCH_KEYWORDS = ['hii', 'saw', 'profile'];
-const MAX_SMS_SCANNED = 300;
+import { MATCH_KEYWORDS, matchesLeadKeywords } from '../../utils/smsLeadMatch';
+import { listInboxSms } from '../../utils/localSmsInbox';
 
 interface MatchedSms {
   id: number;
   address: string;
   body: string;
   date: number;
-}
-
-function matchesKeywords(body: string): boolean {
-  const lower = body.toLowerCase();
-  return MATCH_KEYWORDS.some((kw) => lower.includes(kw));
-}
-
-function listInboxSms(): Promise<RawSmsMessage[]> {
-  return new Promise((resolve, reject) => {
-    SmsAndroid.list(
-      JSON.stringify({ box: 'inbox', maxCount: MAX_SMS_SCANNED }),
-      (error) => reject(new Error(error)),
-      (_count, smsListJson) => {
-        try {
-          resolve(JSON.parse(smsListJson) as RawSmsMessage[]);
-        } catch {
-          reject(new Error('Could not read the SMS inbox.'));
-        }
-      },
-    );
-  });
 }
 
 type PermissionState = 'unknown' | 'granted' | 'denied';
@@ -71,7 +41,7 @@ export function SmsInboxScreen() {
     try {
       const raw = await listInboxSms();
       const matched = raw
-        .filter((sms) => matchesKeywords(sms.body))
+        .filter((sms) => matchesLeadKeywords(sms.body))
         .map((sms) => ({ id: sms._id, address: sms.address, body: sms.body, date: sms.date }))
         .sort((a, b) => b.date - a.date);
       setMessages(matched);

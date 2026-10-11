@@ -4,6 +4,7 @@ import type { ChatsStackParamList } from './types';
 import { ChatsListScreen } from '../screens/chats/ChatsListScreen';
 import { ConversationDetailScreen } from '../screens/chats/ConversationDetailScreen';
 import { ContactInfoScreen } from '../screens/chats/ContactInfoScreen';
+import { SmsThreadScreen } from '../screens/chats/SmsThreadScreen';
 import { useTheme } from '../theme/ThemeProvider';
 
 const Stack = createNativeStackNavigator<ChatsStackParamList>();
@@ -35,6 +36,7 @@ export function ChatsStackNavigator() {
           ContactInfoScreen.tsx — since it needs the chat palette, not the
           plain one this navigator's screenOptions sets above. */}
       <Stack.Screen name="ContactInfo" component={ContactInfoScreen} />
+      <Stack.Screen name="SmsThread" component={SmsThreadScreen} options={{ title: 'SMS' }} />
     </Stack.Navigator>
   );
 }
