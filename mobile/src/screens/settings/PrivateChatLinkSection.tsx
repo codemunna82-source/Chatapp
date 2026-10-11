@@ -18,9 +18,10 @@ import { touchTarget } from '../../theme/spacing';
 import { usePersonalLink, useUpdatePersonalLinkTemplate } from '../../queries/useAuthMutations';
 import { getApiErrorMessage } from '../../api/client';
 import { getSmsSentToday } from '../../storage/smsSendTracker';
-import { getSmsAutoReplyStatus, setSmsAutoReplyConfig } from '../../native/smsAutoReply';
+import { getSmsAutoReplyStatus, setSmsAutoReplyConfig, setSmsAutoReplyDailyLimit } from '../../native/smsAutoReply';
 
 const DEFAULT_TEMPLATE_PLACEHOLDER = 'Hi 👋, you can reach me directly here 🔗';
+const DAILY_LIMIT_PRESETS = [20, 50, 100, 200];
 
 /** What SmsAutoReplyReceiver actually sends — the template (or the same default shown as a placeholder) plus the link, each on its own line. */
 function buildAutoReplyText(messageTemplate: string | null | undefined, url: string): string {
@@ -53,13 +54,22 @@ export function PrivateChatLinkSection() {
   // of it, refreshed on focus the same way smsSentToday is.
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
   const [autoRepliedCount, setAutoRepliedCount] = useState(0);
+  const [dailyLimit, setDailyLimit] = useState(100);
+  const [sentToday, setSentToday] = useState(0);
   useEffect(() => {
     if (!isFocused || Platform.OS !== 'android') return;
     void getSmsAutoReplyStatus().then((status) => {
       setAutoReplyEnabled(status.enabled);
       setAutoRepliedCount(status.repliedCount);
+      setDailyLimit(status.dailyLimit);
+      setSentToday(status.sentToday);
     });
   }, [isFocused]);
+
+  const changeDailyLimit = useCallback((limit: number) => {
+    setDailyLimit(limit);
+    setSmsAutoReplyDailyLimit(limit);
+  }, []);
 
   const linkUrl = linkQuery.data?.url;
 
@@ -281,6 +291,61 @@ export function PrivateChatLinkSection() {
               accessibilityRole="switch"
               accessibilityLabel="Auto-reply to lead SMS"
             />
+          </View>
+
+          <View
+            style={{
+              marginTop: spacing.sm,
+              backgroundColor: colors.surfaceAlt,
+              borderRadius: radius.md,
+              padding: spacing.md,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={[typography.bodyMedium, { color: colors.textPrimary }]}>Daily limit</Text>
+              <Text style={[typography.caption, { color: colors.textSecondary }]}>
+                {sentToday} / {dailyLimit} today
+              </Text>
+            </View>
+            <Text style={[typography.caption, { color: colors.textSecondary, marginTop: 4, lineHeight: 17 }]}>
+              Stops scheduling new auto-replies once this many have gone out today — a safety net in case an
+              unusually busy day would otherwise mean dozens of replies with nothing slowing it down.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+              {DAILY_LIMIT_PRESETS.map((preset) => {
+                const active = dailyLimit === preset;
+                return (
+                  <Pressable
+                    key={preset}
+                    onPress={() => changeDailyLimit(preset)}
+                    style={({ pressed }) => [
+                      {
+                        flex: 1,
+                        alignItems: 'center',
+                        paddingVertical: 8,
+                        borderRadius: radius.full,
+                        backgroundColor: active ? colors.primary : colors.surfaceElevated,
+                        borderWidth: active ? 0 : 1,
+                        borderColor: colors.border,
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Daily limit ${preset}`}
+                  >
+                    <Text
+                      style={[
+                        typography.caption,
+                        { color: active ? colors.textOnPrimary : colors.textPrimary, fontWeight: '600' },
+                      ]}
+                    >
+                      {preset}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
 
           <View style={{ marginTop: spacing.sm, paddingHorizontal: spacing.xs }}>

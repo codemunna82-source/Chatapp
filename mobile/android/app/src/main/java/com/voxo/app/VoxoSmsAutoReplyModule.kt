@@ -1,12 +1,16 @@
 package com.voxo.app
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.telephony.SmsManager
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * JS's only way to reach SmsAutoReplyReceiver, which cannot take a prop
@@ -33,10 +37,17 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun setDailyLimit(limit: Int) {
+    prefs().edit().putInt(KEY_DAILY_LIMIT, limit).apply()
+  }
+
+  @ReactMethod
   fun getStatus(promise: Promise) {
     val map = com.facebook.react.bridge.Arguments.createMap()
     map.putBoolean("enabled", prefs().getBoolean(KEY_ENABLED, false))
     map.putInt("repliedCount", prefs().getInt(KEY_REPLIED_COUNT, 0))
+    map.putInt("dailyLimit", prefs().getInt(KEY_DAILY_LIMIT, DEFAULT_DAILY_LIMIT))
+    map.putInt("sentToday", readDailyCount(prefs()))
     promise.resolve(map)
   }
 
@@ -48,8 +59,41 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
     const val KEY_ENABLED = "enabled"
     const val KEY_REPLY_TEXT = "reply_text"
     const val KEY_REPLIED_COUNT = "replied_count"
+    const val KEY_DAILY_LIMIT = "daily_limit"
+    const val KEY_DAILY_COUNT = "daily_count"
+    const val KEY_DAILY_COUNT_DATE = "daily_count_date"
     const val EXTRA_SENDER = "sender"
     const val EXTRA_BODY = "body"
+
+    /**
+     * How many auto-replies the SIM will send in one calendar day before
+     * the receiver stops scheduling new ones — a second safety net beside
+     * the per-reply jitter. The keywords this matches are ordinary words,
+     * so a bad day (a viral ad, a run of unrelated texts that happen to
+     * say "profile") could otherwise mean dozens of replies with nothing
+     * slowing it down; a carrier's spam filtering and Android's own
+     * bulk-SMS warning both watch for exactly that, whatever the per-send
+     * delay already does to look less like a burst.
+     */
+    const val DEFAULT_DAILY_LIMIT = 100
+
+    private fun todayKey(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+    /** Resets to 0 the moment the stored date is no longer today — never carries a count past midnight. */
+    fun readDailyCount(prefs: SharedPreferences): Int {
+      if (prefs.getString(KEY_DAILY_COUNT_DATE, null) != todayKey()) return 0
+      return prefs.getInt(KEY_DAILY_COUNT, 0)
+    }
+
+    /** Returns the new count after incrementing — call only once a reply is actually being scheduled. */
+    fun incrementDailyCount(prefs: SharedPreferences): Int {
+      val next = readDailyCount(prefs) + 1
+      prefs.edit()
+        .putString(KEY_DAILY_COUNT_DATE, todayKey())
+        .putInt(KEY_DAILY_COUNT, next)
+        .apply()
+      return next
+    }
 
     /**
      * How long a reply waits before actually going out, picked at random
