@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -12,7 +13,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Screen } from '../../components/Screen';
-import { useTheme } from '../../theme/ThemeProvider';
+import { Avatar } from '../../components/Avatar';
+import { ThemeProvider, useTheme, useResolvedScheme } from '../../theme/ThemeProvider';
+import { chatLightColors, chatDarkColors, chatHeaderBackground, chatHeaderForeground } from '../../theme/chatTheme';
 import { formatMessageTime } from '../../utils/formatTime';
 import { formatPhoneForDisplay } from '../../utils/formatPhone';
 import { sendSmsAutomatically } from '../../utils/sendSms';
@@ -29,7 +32,10 @@ interface OutgoingDraft {
 
 /**
  * A lead SMS thread, shown the way a real conversation is — one bubble
- * per text, newest at the bottom, a box to reply from.
+ * per text, newest at the bottom, a box to reply from. Same chat palette
+ * (chatLightColors/chatDarkColors) and header shape as the real
+ * ConversationDetailScreen, so the two don't read as two different
+ * products.
  *
  * Not a real conversation: there is no backend conversation or message
  * behind this screen at all. Everything it shows comes straight from the
@@ -38,10 +44,30 @@ interface OutgoingDraft {
  * to make that read like a thread instead of a bare SMS app. See the
  * "device only" choice this was built for: no server history, nothing a
  * teammate on another phone would see.
+ *
+ * No video call icon, ever, on purpose — video calling needs the private
+ * chat's own live web session, which a pure SMS lead has never had. The
+ * voice call icon dials the number as an ordinary phone call instead of
+ * opening a web call, the same fallback ConversationDetailScreen itself
+ * uses whenever there is no private chat window to ring into. If this
+ * contact later moves to a real private chat, that promotes them to an
+ * actual conversation — this screen stops being where they are reached at
+ * all, and the real screen's full header (video icon included) applies.
  */
-export function SmsThreadScreen({ route, navigation }: Props) {
-  const { phone } = route.params;
+export function SmsThreadScreen(props: Props) {
+  const scheme = useResolvedScheme();
+  const chatColors = scheme === 'dark' ? chatDarkColors : chatLightColors;
+  return (
+    <ThemeProvider colors={chatColors}>
+      <SmsThreadScreenInner {...props} />
+    </ThemeProvider>
+  );
+}
+
+function SmsThreadScreenInner({ route, navigation }: Props) {
+  const scheme = useResolvedScheme();
   const { colors, spacing, radius, typography } = useTheme();
+  const { phone } = route.params;
   const { threads } = useLocalSmsThreads();
   const thread = threads.find((t) => t.phone === phone);
   const [text, setText] = useState('');
@@ -49,9 +75,42 @@ export function SmsThreadScreen({ route, navigation }: Props) {
   // (it's outbox), so a reply is held here until the next natural refresh.
   const [sentDrafts, setSentDrafts] = useState<OutgoingDraft[]>([]);
 
+  const headerBg = chatHeaderBackground[scheme];
+  const headerFg = chatHeaderForeground[scheme];
+  const displayName = formatPhoneForDisplay(phone) || phone;
+
   useEffect(() => {
-    navigation.setOptions({ title: formatPhoneForDisplay(phone) || phone });
-  }, [navigation, phone]);
+    navigation.setOptions({
+      headerStyle: { backgroundColor: headerBg },
+      headerTintColor: headerFg,
+      headerTitle: () => (
+        <View style={styles.headerTitle}>
+          <Avatar label={displayName} size={36} />
+          <View style={styles.headerNames}>
+            <Text style={[styles.headerName, { color: headerFg }]} numberOfLines={1}>
+              {displayName}
+            </Text>
+            <Text style={[styles.headerSubtitle, { color: `${headerFg}A6` }]} numberOfLines={1}>
+              SMS · not a WhatsApp chat
+            </Text>
+          </View>
+        </View>
+      ),
+      // Voice only — see the component doc above for why there is no
+      // video icon here at all.
+      headerRight: () => (
+        <Pressable
+          onPress={() => void Linking.openURL(`tel:${phone}`)}
+          hitSlop={8}
+          style={{ paddingHorizontal: 4 }}
+          accessibilityRole="button"
+          accessibilityLabel="Call this number"
+        >
+          {({ pressed }) => <Ionicons name="call" size={22} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />}
+        </Pressable>
+      ),
+    });
+  }, [navigation, headerBg, headerFg, displayName, phone]);
 
   const send = () => {
     const trimmed = text.trim();
@@ -99,20 +158,24 @@ export function SmsThreadScreen({ route, navigation }: Props) {
                 style={[
                   styles.bubble,
                   {
-                    backgroundColor: item.outgoing ? colors.primary : colors.surfaceAlt,
+                    backgroundColor: item.outgoing ? colors.bubbleSent : colors.bubbleReceived,
                     borderRadius: radius.lg,
                   },
                 ]}
               >
-                <Text style={[typography.body, { color: item.outgoing ? colors.textOnPrimary : colors.textPrimary }]}>
+                <Text
+                  style={[
+                    typography.body,
+                    { color: item.outgoing ? colors.bubbleSentText : colors.bubbleReceivedText },
+                  ]}
+                >
                   {item.body}
                 </Text>
                 <Text
                   style={[
                     typography.caption,
                     {
-                      color: item.outgoing ? colors.textOnPrimary : colors.textTertiary,
-                      opacity: 0.8,
+                      color: colors.textTertiary,
                       marginTop: 4,
                       alignSelf: 'flex-end',
                     },
@@ -171,4 +234,8 @@ const styles = StyleSheet.create({
   bubbleRow: { flexDirection: 'row', marginBottom: 8 },
   bubble: { maxWidth: '80%', paddingHorizontal: 12, paddingVertical: 8 },
   composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  headerTitle: { flexDirection: 'row', alignItems: 'center' },
+  headerNames: { marginLeft: 10, flexShrink: 1 },
+  headerName: { fontSize: 17, fontWeight: '600' },
+  headerSubtitle: { fontSize: 11, marginTop: 1 },
 });
