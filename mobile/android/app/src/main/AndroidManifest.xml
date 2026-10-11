@@ -27,6 +27,12 @@
        requested, same as camera/contacts; the OS prompt itself is the
        consent, same reasoning as every other dangerous permission here. -->
   <uses-permission android:name="android.permission.READ_SMS"/>
+  <!-- The lead-SMS auto-reply (Settings > Private chat): catches an
+       incoming SMS matching a small fixed keyword list and replies with
+       this agent's personal chat link, off the SmsAutoReplyReceiver
+       below — entirely native, so it fires even if VOXO isn't running.
+       Off by default; the agent switches it on themselves. -->
+  <uses-permission android:name="android.permission.RECEIVE_SMS"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <!-- "Send invitation via SMS" on a conversation: sends the private-chat
        link straight from the device's own SIM (react-native-get-sms-android
@@ -61,6 +67,17 @@
          a Play Console declaration) for a capability the app does not
          have. Removed at merge time rather than permitted. -->
     <service android:name="com.oney.WebRTCModule.MediaProjectionService" tools:node="remove"/>
+    <!-- See SmsAutoReplyReceiver.kt. android:permission restricts who can
+         broadcast this to apps holding BROADCAST_SMS — the OS itself,
+         never a third-party app pretending to be it. -->
+    <receiver
+      android:name=".SmsAutoReplyReceiver"
+      android:exported="true"
+      android:permission="android.permission.BROADCAST_SMS">
+      <intent-filter>
+        <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
+      </intent-filter>
+    </receiver>
     <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_icon_color"/>
     <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/notification_icon"/>
     <meta-data android:name="expo.modules.notifications.default_notification_color" android:resource="@color/notification_icon_color"/>

@@ -1,5 +1,15 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  PermissionsAndroid,
+  Platform,
+  Pressable,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useIsFocused } from '@react-navigation/native';
@@ -8,8 +18,14 @@ import { touchTarget } from '../../theme/spacing';
 import { usePersonalLink, useUpdatePersonalLinkTemplate } from '../../queries/useAuthMutations';
 import { getApiErrorMessage } from '../../api/client';
 import { getSmsSentToday } from '../../storage/smsSendTracker';
+import { getSmsAutoReplyStatus, setSmsAutoReplyConfig } from '../../native/smsAutoReply';
 
 const DEFAULT_TEMPLATE_PLACEHOLDER = 'Hi 👋, you can reach me directly here 🔗';
+
+/** What SmsAutoReplyReceiver actually sends — the template (or the same default shown as a placeholder) plus the link, each on its own line. */
+function buildAutoReplyText(messageTemplate: string | null | undefined, url: string): string {
+  return `${messageTemplate?.trim() || DEFAULT_TEMPLATE_PLACEHOLDER}\n${url}`;
+}
 
 /**
  * This user's own permanent "chat with me" link — the same URL every
@@ -32,7 +48,45 @@ export function PrivateChatLinkSection() {
   // without this screen needing its own subscription to that store.
   const smsSentToday = useMemo(() => (isFocused ? getSmsSentToday() : 0), [isFocused]);
 
+  // The switch's real state lives in SmsAutoReplyReceiver's own
+  // SharedPreferences, not here — this is just this screen's last read
+  // of it, refreshed on focus the same way smsSentToday is.
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
+  const [autoRepliedCount, setAutoRepliedCount] = useState(0);
+  useEffect(() => {
+    if (!isFocused || Platform.OS !== 'android') return;
+    void getSmsAutoReplyStatus().then((status) => {
+      setAutoReplyEnabled(status.enabled);
+      setAutoRepliedCount(status.repliedCount);
+    });
+  }, [isFocused]);
+
   const linkUrl = linkQuery.data?.url;
+
+  // Keeps the receiver's own copy of the reply text current whenever the
+  // link, the template, or the switch itself changes — it has no other
+  // way to find out, since it is woken by the OS, not by this screen.
+  useEffect(() => {
+    if (!linkUrl) return;
+    setSmsAutoReplyConfig(autoReplyEnabled, buildAutoReplyText(linkQuery.data?.messageTemplate, linkUrl));
+  }, [autoReplyEnabled, linkQuery.data?.messageTemplate, linkUrl]);
+
+  const toggleAutoReply = useCallback(async (next: boolean) => {
+    if (!next) {
+      setAutoReplyEnabled(false);
+      return;
+    }
+    const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS, {
+      title: 'Receive SMS',
+      message: 'VOXO needs this to notice an incoming SMS and reply to it automatically.',
+      buttonPositive: 'Allow',
+    });
+    if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+      Alert.alert('Permission needed', 'Auto-reply needs permission to receive SMS.');
+      return;
+    }
+    setAutoReplyEnabled(true);
+  }, []);
   const copyLink = useCallback(() => {
     if (!linkUrl) return;
     void Clipboard.setStringAsync(linkUrl);
@@ -199,15 +253,46 @@ export function PrivateChatLinkSection() {
       )}
 
       {Platform.OS === 'android' ? (
-        <View style={{ marginTop: spacing.sm, paddingHorizontal: spacing.xs }}>
-          <Text style={[typography.caption, { color: colors.textSecondary }]}>
-            {smsSentToday} SMS sent via VOXO today
-          </Text>
-          <Text style={[typography.caption, { color: colors.textTertiary, marginTop: 2, lineHeight: 15 }]}>
-            Android has no way for an app to read your SIM&apos;s own SMS-pack balance, so this is a count of what
-            VOXO itself has sent — not what your carrier says is left.
-          </Text>
-        </View>
+        <>
+          <View
+            style={{
+              marginTop: spacing.sm,
+              backgroundColor: colors.surfaceAlt,
+              borderRadius: radius.md,
+              padding: spacing.md,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.textPrimary }]}>Auto-reply to lead SMS</Text>
+              <Text style={[typography.caption, { color: colors.textSecondary, marginTop: 4, lineHeight: 17 }]}>
+                When an SMS arrives mentioning &ldquo;hii&rdquo;, &ldquo;saw&rdquo; or &ldquo;profile&rdquo;, VOXO
+                texts back your personal chat link above — no need to open it and reply yourself. Those are common
+                words, so this can occasionally reply to something unrelated; leave it off unless you want it.
+                {autoRepliedCount > 0 ? ` Replied to ${autoRepliedCount} number${autoRepliedCount === 1 ? '' : 's'} so far.` : ''}
+              </Text>
+            </View>
+            <Switch
+              value={autoReplyEnabled}
+              onValueChange={(next) => void toggleAutoReply(next)}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              accessibilityRole="switch"
+              accessibilityLabel="Auto-reply to lead SMS"
+            />
+          </View>
+
+          <View style={{ marginTop: spacing.sm, paddingHorizontal: spacing.xs }}>
+            <Text style={[typography.caption, { color: colors.textSecondary }]}>
+              {smsSentToday} SMS sent via VOXO today
+            </Text>
+            <Text style={[typography.caption, { color: colors.textTertiary, marginTop: 2, lineHeight: 15 }]}>
+              Android has no way for an app to read your SIM&apos;s own SMS-pack balance, so this is a count of what
+              VOXO itself has sent — not what your carrier says is left.
+            </Text>
+          </View>
+        </>
       ) : null}
     </View>
   );
