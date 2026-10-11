@@ -42,6 +42,28 @@ const DEFER_RECHECK_DELAY_MS = 3_000;
  *  honest answer for an agent who tapped send. */
 const MAX_DEFER_ATTEMPTS = 400;
 
+/**
+ * The window a NUDGE's send is spread across — see message.service.ts,
+ * which routes a nudge through this queue unconditionally (not only on
+ * overflow, unlike every other message type here) specifically to draw
+ * this delay. An agent can have several of these chats open and reply to
+ * each in the same breath; sending every one of those nudges the instant
+ * its button is tapped is the same clustered-in-time pattern that trips
+ * Meta's throughput limiting (130429) for the automatic invitation (see
+ * automaticInviteDispatch.queue.ts's own randomDispatchDelayMs, which
+ * this mirrors). Shorter than the invitation's window: a nudge is a send
+ * one specific agent is watching happen in one specific chat, where the
+ * invitation never has anyone waiting on it.
+ */
+const NUDGE_JITTER_MIN_MS = 2_000;
+const NUDGE_JITTER_MAX_MS = 20_000;
+
+/** A random delay for a nudge's first dispatch attempt, uniform over
+ *  [NUDGE_JITTER_MIN_MS, NUDGE_JITTER_MAX_MS). */
+export function randomNudgeDispatchDelayMs(): number {
+  return NUDGE_JITTER_MIN_MS + Math.floor(Math.random() * (NUDGE_JITTER_MAX_MS - NUDGE_JITTER_MIN_MS));
+}
+
 /** The subset of SendOutboundMessageInput that dispatch() actually reads
  *  — see metaDispatch.ts. Carried in the job itself rather than read back
  *  off the Message row, because a template's language/components and a
@@ -109,7 +131,11 @@ export async function enqueueOutboundDispatch(data: OutboundDispatchJobData, del
     // so this never collides with the job it is rescheduling, but two
     // identical enqueue calls for the same attempt (a retried request,
     // say) land on the same job instead of sending twice.
-    jobId: `${data.messageId}:${data.attempt ?? 0}`,
+    // BullMQ rejects a custom job id containing ':' (it's used as its own
+    // Redis-key delimiter) — see automaticInviteDispatch.queue.ts's own
+    // jobId for the identical bug this is fixed the same way, before it
+    // ever got the chance to bite here too.
+    jobId: `${data.messageId}-${data.attempt ?? 0}`,
     removeOnComplete: { count: 1000 },
     removeOnFail: { count: 2000 },
   });

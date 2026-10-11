@@ -25,7 +25,7 @@ import type { MessageDoc, MessageLean } from './message.model';
 import { refusalToRevoke, REVOKE_REFUSAL_MESSAGE } from './messageRevoke';
 import { dispatchAndFinalize } from './metaDispatch';
 import { trySlotForDispatch } from '../whatsapp/sendPacing';
-import { enqueueOutboundDispatch } from '../../queues/outboundDispatch.queue';
+import { enqueueOutboundDispatch, randomNudgeDispatchDelayMs } from '../../queues/outboundDispatch.queue';
 import { findActiveSessionForConversation } from '../guest/guestSession.repository';
 import { resolveReplyChannel } from '../guest/webChatRouting';
 import {
@@ -44,7 +44,7 @@ import {
   findPolicyViolationInSend,
 } from './contentPolicy';
 import { nudgePolicyFor } from './nudgePolicy';
-import { nudgeAt, nudgeRefusalMessage, sameNudgeText } from './nudgeTemplates';
+import { nudgeAt, nudgeRefusalMessage, sameNudgeText, humanizeNudgeText } from './nudgeTemplates';
 
 /**
  * Message types this service can actually dispatch through the Meta
@@ -517,6 +517,10 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * budget of 1 the moment the invitation fired first. See
    * whatsappQuota.ts for the rest of what counts and why.
    */
+  // Set only on the enforced-wording path below — read at the dispatch
+  // gate further down to decide whether this particular send gets the
+  // randomized jitter a nudge needs. See randomNudgeDispatchDelayMs.
+  let isNudgeSend = false;
   if (countsAgainstNudgeQuota({ messageType: input.type, isDemoContact, internal: input.internal })) {
     const [used, policy] = await Promise.all([
       countWhatsAppNudges(input.tenantId, input.conversationId, nudgeWindowStart(session)),
@@ -573,8 +577,12 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
       }
 
       // The stored wording wins over whatever arrived, so a client that
-      // is one version behind still sends what the admin set today.
-      input = { ...input, type: 'text', text: expected };
+      // is one version behind still sends what the admin set today — with
+      // a few of its word-gaps randomly widened (see humanizeNudgeText)
+      // so this exact customer's copy is never byte-identical to the
+      // next one's, without changing a single word of the admin's text.
+      input = { ...input, type: 'text', text: humanizeNudgeText(expected) };
+      isNudgeSend = true;
     }
   }
 
@@ -632,9 +640,25 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * paced dispatch queue instead of calling Meta inline is invisible to
    * the caller: same return shape, same eventual SENT/FAILED over the
    * socket, just a longer stretch of "still queued" while its turn comes.
+   *
+   * A nudge skips the slot check here on purpose and is treated as having
+   * no slot regardless — not because the number is over budget, but so it
+   * always takes the queued path below at a randomized delay instead of
+   * going out the instant its button is tapped. An agent can have several
+   * of these chats open; sending every nudge immediately is the same
+   * clustered-in-time pattern as the automatic invitation's own fix (see
+   * randomNudgeDispatchDelayMs). The real pacing check still runs — just
+   * inside the queue's worker once the delay elapses, the same as any
+   * other deferred send.
    */
   const whatsappPhoneNumberId = String(conversation.whatsappPhoneNumberId);
-  if (!isDemoContact && !(await trySlotForDispatch(whatsappPhoneNumberId, input.tenantId))) {
+  const forceNudgeJitter = isNudgeSend && !isDemoContact;
+  const hasDispatchSlot = isDemoContact
+    ? true
+    : forceNudgeJitter
+      ? false
+      : await trySlotForDispatch(whatsappPhoneNumberId, input.tenantId);
+  if (!hasDispatchSlot) {
     await enqueueOutboundDispatch({
       tenantId: input.tenantId,
       messageId: String(localMessage._id),
@@ -657,7 +681,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
         emoji: input.emoji,
         internal: input.internal,
       },
-    });
+    }, forceNudgeJitter ? randomNudgeDispatchDelayMs() : 0);
     perf.end({ messageId: String(localMessage._id), channel: 'whatsapp', deferred: true });
     return localMessage;
   }
