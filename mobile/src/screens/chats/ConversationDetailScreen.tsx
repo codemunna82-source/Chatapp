@@ -51,6 +51,7 @@ import {
   useStarMessage,
   useFilteredMessages,
   removeMessageFromCache,
+  upsertMessageInCache,
 } from '../../queries/useMessages';
 import { useConversationRoom } from '../../sockets/useConversationRoom';
 import { useSocketEvent } from '../../sockets/useSocketEvent';
@@ -653,14 +654,35 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
    * which rejects free-form text outside the window — but whatever is
    * typed here goes out over SMS instead, a wire WhatsApp's own rules
    * have no say over, so there's nothing to fix.
+   *
+   * A send here has no backend message behind it at all — it goes
+   * straight off the agent's own SIM, so there was nothing to show it
+   * ever happened, nothing to scroll back to. Dropped into the same
+   * message cache the real thread renders from (upsertMessageInCache,
+   * the same primitive a pending photo upload uses) rather than building
+   * a second, parallel way to draw a bubble — this is a real-looking row
+   * in the actual thread, just one the server never sees or stores,
+   * which is also why it's gone the moment the app is closed or this
+   * screen reloads from the server.
    */
   const handleSendSms = useCallback(
     (text: string) => {
       const phone = conversationQuery.data?.contact?.phone;
-      if (!phone || !text.trim()) return;
-      void sendSmsAutomatically(phone, text.trim());
+      const trimmed = text.trim();
+      if (!phone || !trimmed) return;
+      void sendSmsAutomatically(phone, trimmed);
+      upsertMessageInCache(queryClient, conversationId, {
+        id: `local-sms-${Date.now()}`,
+        conversationId,
+        direction: 'OUT',
+        type: 'text',
+        text: `📱 Sent via SMS\n${trimmed}`,
+        status: 'SENT',
+        sentAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
     },
-    [conversationQuery.data],
+    [conversationQuery.data, conversationId, queryClient],
   );
 
   /**
