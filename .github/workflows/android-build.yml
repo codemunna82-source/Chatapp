@@ -45,8 +45,9 @@ jobs:
     permissions:
       contents: write
     # Safeguard so a genuinely stuck run doesn't tie up a runner until
-    # GitHub's own 6-hour default job timeout.
-    timeout-minutes: 25
+    # GitHub's own 6-hour default job timeout. Room for the 35-minute
+    # universal-ABI assemble step below plus the steps around it.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: mobile
@@ -280,13 +281,18 @@ jobs:
 
       - name: Assemble release-type APK (debug-signed, JS bundle embedded)
         working-directory: mobile/android
-        timeout-minutes: 15
-        # Restricts the native (Reanimated/Gesture Handler/app) CMake/ninja
-        # build to arm64-v8a only, instead of gradle.properties' default of
-        # all 4 ABIs — arm64-v8a alone covers virtually every real Android
-        # device, and building 4 architectures roughly quadruples native
-        # compile time for no benefit on a smoke/test APK.
-        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+        timeout-minutes: 35
+        # Universal APK: every ABI gradle.properties lists (armeabi-v7a,
+        # arm64-v8a, x86, x86_64), not just arm64-v8a. This used to be
+        # restricted to arm64-v8a alone for a faster smoke build, on the
+        # assumption that covers virtually every real device — it doesn't:
+        # a real 32-bit-only phone got "There was a problem parsing the
+        # package" installing an arm64-only APK, because the installer
+        # found no native library it could use for that CPU at all. Costs
+        # roughly 4x the native (Reanimated/Hermes/WebRTC) compile time
+        # and a noticeably larger APK, which is the trade for the app
+        # actually installing on whatever phone someone hands it to.
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
