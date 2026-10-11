@@ -3,12 +3,20 @@ import { Types } from 'mongoose';
 import { GuestSession, type GuestSessionDoc } from './guestSession.model';
 
 /**
- * 32 bytes of CSPRNG output, base64url-encoded so it survives being a path
- * segment in a link that goes through WhatsApp's own URL handling without
- * any escaping.
+ * 16 bytes of CSPRNG output (128 bits), base64url-encoded so it survives
+ * being a path segment in a link that goes through WhatsApp's own URL
+ * handling without any escaping.
+ *
+ * Shorter than a first pass at this (32 bytes, 256 bits) for a shorter,
+ * easier-to-read link — but not shortened past the point that matters:
+ * 128 bits is the same order of randomness as a UUID, the usual bar for
+ * "not guessable," and every check against this is a database lookup an
+ * attacker makes one at a time over the network, not an offline search
+ * through billions of guesses a second. A shorter token narrows how much
+ * is typed or shown; it must never narrow how hard this is to guess.
  */
 export function generateGuestToken(): string {
-  return randomBytes(32).toString('base64url');
+  return randomBytes(16).toString('base64url');
 }
 
 export function hashGuestToken(token: string): string {
