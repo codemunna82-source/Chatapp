@@ -1,26 +1,39 @@
 package com.voxo.app
 
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.provider.Telephony
-import android.telephony.SmsManager
 
 /**
  * Catches an incoming SMS the instant it arrives — even if VOXO is not
  * running, since a manifest-declared receiver for this action still gets
  * started by the OS — and, if its text matches one of a small fixed
- * keyword list, replies with this agent's personal chat link.
+ * keyword list, schedules a reply with this agent's personal chat link.
+ *
+ * The reply does not go out from here. Several leads texting in within
+ * moments of each other must not turn into a burst of SMS sent back to
+ * back off this one SIM: a carrier's own spam filtering can flag that,
+ * and Android itself prompts "this app is sending a lot of messages" past
+ * a threshold — a prompt with no UI to answer, since nothing is on
+ * screen at the moment a background receiver fires. So each matching
+ * text is instead handed to SmsAutoReplySendReceiver with its own
+ * independently randomised delay (VoxoSmsAutoReplyModule.MIN/MAX_REPLY_
+ * DELAY_MS), via AlarmManager rather than a plain Handler.postDelayed —
+ * a delay held only in memory would vanish the moment Android reclaims
+ * this process, which a receiver with nothing keeping it foregrounded is
+ * an easy target for.
  *
  * Deliberately native end to end: it reads the on/off switch and the
  * reply text from the SharedPreferences file VoxoSmsAutoReplyModule
- * writes, and sends the reply itself, so none of this needs the JS
- * runtime alive or a network call at the moment a lead's text comes in.
+ * writes, so none of this needs the JS runtime alive or a network call
+ * at the moment a lead's text comes in.
  *
  * KEYWORDS must be kept in step with MATCH_KEYWORDS in
- * SmsInboxScreen.tsx — there is no shared source between Kotlin and TS
- * to enforce that automatically.
+ * smsLeadMatch.ts — there is no shared source between Kotlin and TS to
+ * enforce that automatically.
  */
 class SmsAutoReplyReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
@@ -39,32 +52,32 @@ class SmsAutoReplyReceiver : BroadcastReceiver() {
     val body = messages.joinToString("") { it.messageBody ?: "" }
     if (!matchesKeyword(body)) return
 
+    // Marked now, not after the delayed send actually fires — a second
+    // matching text from the same sender arriving during the delay
+    // window must not schedule a second reply on top of the first.
     val repliedKey = VoxoSmsAutoReplyModule.repliedKeyFor(sender)
     if (prefs.getBoolean(repliedKey, false)) return
+    prefs.edit().putBoolean(repliedKey, true).apply()
 
-    try {
-      // getDefault() is deprecated from API 31 on — the system-service
-      // lookup is its replacement, but only exists from API 31 on too, so
-      // minSdk 24 still needs the old call as a fallback.
-      val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        context.getSystemService(SmsManager::class.java)
-      } else {
-        @Suppress("DEPRECATION")
-        SmsManager.getDefault()
-      }
-      val parts = smsManager.divideMessage(replyText)
-      smsManager.sendMultipartTextMessage(sender, null, parts, null, null)
-      prefs.edit()
-        .putBoolean(repliedKey, true)
-        .putInt(
-          VoxoSmsAutoReplyModule.KEY_REPLIED_COUNT,
-          prefs.getInt(VoxoSmsAutoReplyModule.KEY_REPLIED_COUNT, 0) + 1,
-        )
-        .apply()
-    } catch (_: Exception) {
-      // Nothing is listening to report this to — no UI is open at the
-      // moment an SMS arrives in the background.
+    val delayMs = (VoxoSmsAutoReplyModule.MIN_REPLY_DELAY_MS..VoxoSmsAutoReplyModule.MAX_REPLY_DELAY_MS).random()
+    val sendIntent = Intent(context, SmsAutoReplySendReceiver::class.java).apply {
+      putExtra(VoxoSmsAutoReplyModule.EXTRA_SENDER, sender)
+      putExtra(VoxoSmsAutoReplyModule.EXTRA_BODY, replyText)
     }
+    // Request code from the sender's own hash, so a second text from the
+    // same number (which repliedKey already should have stopped) would
+    // at worst replace this alarm rather than stack a duplicate one.
+    val pendingIntent = PendingIntent.getBroadcast(
+      context,
+      sender.hashCode(),
+      sendIntent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    // Inexact on purpose — allowWhileIdle lets it still fire under Doze,
+    // and nothing about a jittered delay needs the precision (or the
+    // SCHEDULE_EXACT_ALARM permission) an exact alarm would ask for.
+    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + delayMs, pendingIntent)
   }
 
   companion object {
