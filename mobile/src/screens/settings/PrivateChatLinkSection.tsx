@@ -94,13 +94,24 @@ export function PrivateChatLinkSection() {
       setAutoReplyEnabled(false);
       return;
     }
-    const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS, {
-      title: 'Receive SMS',
-      message: 'VOXO needs this to notice an incoming SMS and reply to it automatically.',
-      buttonPositive: 'Allow',
-    });
-    if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-      Alert.alert('Permission needed', 'Auto-reply needs permission to receive SMS.');
+    // SmsAutoReplySendReceiver sends the reply itself with the SmsManager
+    // directly — it has no UI to ask from, so both permissions the whole
+    // round trip needs (notice the text, send the reply) have to already
+    // be granted before the switch flips on. Asking for RECEIVE_SMS alone
+    // let the switch turn on, the keyword match and schedule happen, and
+    // then the actual send throw a SecurityException the receiver only
+    // swallows — "enabled" with replies that silently never go out.
+    const results = await PermissionsAndroid.requestMultiple([
+      PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
+      PermissionsAndroid.PERMISSIONS.SEND_SMS,
+    ]);
+    const receiveGranted = results[PermissionsAndroid.PERMISSIONS.RECEIVE_SMS] === PermissionsAndroid.RESULTS.GRANTED;
+    const sendGranted = results[PermissionsAndroid.PERMISSIONS.SEND_SMS] === PermissionsAndroid.RESULTS.GRANTED;
+    if (!receiveGranted || !sendGranted) {
+      Alert.alert(
+        'Permission needed',
+        'Auto-reply needs both "Receive SMS" and "Send SMS" — it notices the text with one and sends the reply with the other. Check Settings > Permissions to see which is missing.',
+      );
       return;
     }
     setAutoReplyEnabled(true);

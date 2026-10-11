@@ -14,8 +14,16 @@ interface SentCounter {
   count: number;
 }
 
+// Device-local date, not UTC — a send at 11pm IST and a check at 1am IST
+// are still "today" and "today" to someone reading the count on their own
+// phone; toISOString() would roll the boundary to 5:30am IST instead and
+// disagree with VoxoSmsAutoReplyModule's own todayKey() (Kotlin's
+// SimpleDateFormat defaults to the device's local timezone).
 function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
 }
 
 export function recordSmsSent(): number {
