@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, PermissionsAndroid, Platform, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import SmsAndroid, { type RawSmsMessage } from 'react-native-get-sms-android';
 import { Screen } from '../../components/Screen';
 import { Button } from '../../components/Button';
@@ -94,17 +95,24 @@ export function SmsInboxScreen() {
     if (isGranted) void load(false);
   }, [load]);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS).then((already) => {
-      if (already) {
-        setPermission('granted');
-        void load(false);
-      } else {
-        setPermission('denied');
-      }
-    });
-  }, [load]);
+  // Re-checks and reloads every time this screen comes back into focus —
+  // not just on first mount — so a text that arrived while the agent was
+  // elsewhere in the app, or a permission granted from outside VOXO
+  // entirely (phone Settings, after an "Allow restricted settings" step),
+  // shows up here without the screen needing to be freshly opened.
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') return;
+      PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS).then((already) => {
+        if (already) {
+          setPermission('granted');
+          void load(false);
+        } else {
+          setPermission('denied');
+        }
+      });
+    }, [load]),
+  );
 
   const emptyState = useMemo(() => {
     if (loading) return null;
