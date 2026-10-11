@@ -27,6 +27,15 @@ export async function sendSmsAutomatically(phone: string, body: string): Promise
     buttonPositive: 'Allow',
   });
   if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+    // Silently falling back here reads as "VOXO opened the Messages app for
+    // no reason" — the actual, common cause (on Android 13+, a sideloaded
+    // APK's permission request can be silently blocked by "Restricted
+    // settings" until the agent allows it from the app's own Info page; see
+    // Settings > Permissions) needs to be said out loud, not left implicit.
+    Alert.alert(
+      'Could not send directly',
+      "VOXO doesn't have permission to send SMS, so the Messages app opened instead this time. Check Settings > Permissions — if \"Send SMS\" is blocked, open this app's own Info page (long-press the VOXO icon > App info > ⋮) and allow restricted settings first, then grant it again from there.",
+    );
     openSmsComposer(phone, body);
     return;
   }
