@@ -21,7 +21,14 @@ import { getSmsSentToday } from '../../storage/smsSendTracker';
 import { getSmsAutoReplyStatus, setSmsAutoReplyConfig, setSmsAutoReplyDailyLimit } from '../../native/smsAutoReply';
 
 const DEFAULT_TEMPLATE_PLACEHOLDER = 'Hi 👋, you can reach me directly here 🔗';
-const DAILY_LIMIT_PRESETS = [20, 50, 100, 200];
+/** 0 is VoxoSmsAutoReplyModule.UNLIMITED_DAILY_LIMIT — no cap at all, not "zero allowed". */
+const DAILY_LIMIT_PRESETS: { label: string; value: number }[] = [
+  { label: '20', value: 20 },
+  { label: '50', value: 50 },
+  { label: '100', value: 100 },
+  { label: '200', value: 200 },
+  { label: 'Unlimited', value: 0 },
+];
 
 /** What SmsAutoReplyReceiver actually sends — the template (or the same default shown as a placeholder) plus the link, each on its own line. */
 function buildAutoReplyText(messageTemplate: string | null | undefined, url: string): string {
@@ -304,20 +311,21 @@ export function PrivateChatLinkSection() {
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text style={[typography.bodyMedium, { color: colors.textPrimary }]}>Daily limit</Text>
               <Text style={[typography.caption, { color: colors.textSecondary }]}>
-                {sentToday} / {dailyLimit} today
+                {dailyLimit === 0 ? `${sentToday} sent today · unlimited` : `${sentToday} / ${dailyLimit} today`}
               </Text>
             </View>
             <Text style={[typography.caption, { color: colors.textSecondary, marginTop: 4, lineHeight: 17 }]}>
-              Stops scheduling new auto-replies once this many have gone out today — a safety net in case an
-              unusually busy day would otherwise mean dozens of replies with nothing slowing it down.
+              {dailyLimit === 0
+                ? "No cap — every matching text gets a reply today, however many there are. Still spaced out (10-90s apart), just never stopped."
+                : 'Stops scheduling new auto-replies once this many have gone out today — a safety net in case an unusually busy day would otherwise mean dozens of replies with nothing slowing it down.'}
             </Text>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
               {DAILY_LIMIT_PRESETS.map((preset) => {
-                const active = dailyLimit === preset;
+                const active = dailyLimit === preset.value;
                 return (
                   <Pressable
-                    key={preset}
-                    onPress={() => changeDailyLimit(preset)}
+                    key={preset.value}
+                    onPress={() => changeDailyLimit(preset.value)}
                     style={({ pressed }) => [
                       {
                         flex: 1,
@@ -332,7 +340,7 @@ export function PrivateChatLinkSection() {
                     ]}
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
-                    accessibilityLabel={`Daily limit ${preset}`}
+                    accessibilityLabel={`Daily limit ${preset.label}`}
                   >
                     <Text
                       style={[
@@ -340,7 +348,7 @@ export function PrivateChatLinkSection() {
                         { color: active ? colors.textOnPrimary : colors.textPrimary, fontWeight: '600' },
                       ]}
                     >
-                      {preset}
+                      {preset.label}
                     </Text>
                   </Pressable>
                 );

@@ -74,8 +74,14 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
      * slowing it down; a carrier's spam filtering and Android's own
      * bulk-SMS warning both watch for exactly that, whatever the per-send
      * delay already does to look less like a burst.
+     *
+     * 0 means no cap at all — SmsAutoReplyReceiver skips the check
+     * entirely rather than treating 0 as "zero allowed". Not this
+     * default: an agent chooses that explicitly (see the "Unlimited"
+     * option in PrivateChatLinkSection.tsx), it is never assumed.
      */
     const val DEFAULT_DAILY_LIMIT = 100
+    const val UNLIMITED_DAILY_LIMIT = 0
 
     private fun todayKey(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 

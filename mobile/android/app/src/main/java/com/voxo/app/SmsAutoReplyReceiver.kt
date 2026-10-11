@@ -58,14 +58,17 @@ class SmsAutoReplyReceiver : BroadcastReceiver() {
     val repliedKey = VoxoSmsAutoReplyModule.repliedKeyFor(sender)
     if (prefs.getBoolean(repliedKey, false)) return
 
-    // The daily cap — see VoxoSmsAutoReplyModule.DEFAULT_DAILY_LIMIT.
+    // The daily cap — see VoxoSmsAutoReplyModule.DEFAULT_DAILY_LIMIT. 0
+    // means the agent explicitly chose no cap at all, not "zero allowed".
     // Checked and spent here, at schedule time, not when the delayed send
     // actually fires: the count has to reflect what's already committed
     // to go out today, or two texts arriving close together could both
     // slip in under a limit meant to stop exactly that.
     val dailyLimit = prefs.getInt(VoxoSmsAutoReplyModule.KEY_DAILY_LIMIT, VoxoSmsAutoReplyModule.DEFAULT_DAILY_LIMIT)
-    if (VoxoSmsAutoReplyModule.readDailyCount(prefs) >= dailyLimit) return
-    VoxoSmsAutoReplyModule.incrementDailyCount(prefs)
+    if (dailyLimit != VoxoSmsAutoReplyModule.UNLIMITED_DAILY_LIMIT) {
+      if (VoxoSmsAutoReplyModule.readDailyCount(prefs) >= dailyLimit) return
+      VoxoSmsAutoReplyModule.incrementDailyCount(prefs)
+    }
 
     prefs.edit().putBoolean(repliedKey, true).apply()
 
