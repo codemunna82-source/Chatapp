@@ -153,7 +153,7 @@ function ChatsListScreenInner({ navigation }: Props) {
   // their sort order: the backend already orders pinned-then-recent, and
   // re-sorting everything by a client-side timestamp compare would break
   // that for the real chats to make room for the local ones.
-  const { threads: smsThreads } = useLocalSmsThreads();
+  const { threads: smsThreads, refresh: refreshSmsThreads } = useLocalSmsThreads();
   const showSmsSection = Platform.OS === 'android' && !showArchived && filter !== 'unread';
   const smsConversations = useMemo(() => {
     if (!showSmsSection) return [];
@@ -351,11 +351,16 @@ function ChatsListScreenInner({ navigation }: Props) {
     () => (
       <RefreshControl
         refreshing={query.isRefetching}
-        onRefresh={() => void query.refetch()}
+        onRefresh={() => {
+          void query.refetch();
+          // Not itself async — pull-to-refresh's own spinner tracks the
+          // real conversations fetch above, not this local re-scan.
+          refreshSmsThreads();
+        }}
         tintColor={colors.primary}
       />
     ),
-    [query, colors.primary],
+    [query, colors.primary, refreshSmsThreads],
   );
   const listContentStyle = useMemo(() => ({ paddingBottom: spacing.lg }), [spacing.lg]);
 

@@ -27,7 +27,7 @@ export interface LocalSmsThread {
  * nothing for a teammate on another phone to see — see the "device only"
  * choice this was built for.
  */
-export function useLocalSmsThreads(): { threads: LocalSmsThread[]; granted: boolean } {
+export function useLocalSmsThreads(): { threads: LocalSmsThread[]; granted: boolean; refresh: () => void } {
   const [threads, setThreads] = useState<LocalSmsThread[]>([]);
   const [granted, setGranted] = useState(false);
 
@@ -72,5 +72,5 @@ export function useLocalSmsThreads(): { threads: LocalSmsThread[]; granted: bool
     refresh();
   }, [refresh]);
 
-  return { threads, granted };
+  return { threads, granted, refresh };
 }
