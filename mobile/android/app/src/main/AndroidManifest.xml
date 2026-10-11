@@ -21,6 +21,12 @@
   <uses-permission android:name="android.permission.CAMERA"/>
   <uses-permission android:name="android.permission.READ_CONTACTS"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
+  <!-- The SMS inbox screen under Settings — reads the device's own SMS
+       content provider (react-native-get-sms-android) to surface messages
+       matching a small fixed keyword list, never the whole inbox. Runtime-
+       requested, same as camera/contacts; the OS prompt itself is the
+       consent, same reasoning as every other dangerous permission here. -->
+  <uses-permission android:name="android.permission.READ_SMS"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <!-- Raises the incoming-call UI over the lock screen, which is the one

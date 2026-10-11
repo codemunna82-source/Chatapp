@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { RingtoneSheet, ringtoneLabel } from './RingtoneSheet';
@@ -631,6 +631,12 @@ export function SettingsScreen({ navigation }: Props) {
           label="Contacts"
           onPress={() => navigation.navigate('ManageContacts')}
         />
+        {/* Android only — see SmsInboxScreen for why there is no iOS
+            equivalent. Visible to every member, same as Contacts above:
+            this reads the AGENT'S OWN phone, not anything tenant-scoped. */}
+        {Platform.OS === 'android' ? (
+          <SettingsRow icon="chatbox-outline" label="SMS" onPress={() => navigation.navigate('SmsInbox')} />
+        ) : null}
         {isMasterAdmin ? (
           <SettingsRow icon="wallet-outline" label="Wallet" onPress={() => navigation.navigate('Wallet')} />
         ) : null}
