@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Keyboard, Linking, PermissionsAndroid, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import SmsAndroid from 'react-native-get-sms-android';
+import { Alert, Keyboard, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   KeyboardState,
   useAnimatedKeyboard,
@@ -43,7 +42,7 @@ import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
 import { useGuestLinkStatus, useIssueGuestLink, useRevokeGuestLink } from '../../queries/useGuestChat';
-import { recordSmsSent } from '../../storage/smsSendTracker';
+import { sendSmsAutomatically } from '../../utils/sendSms';
 import {
   useMessages,
   flattenMessages,
@@ -636,53 +635,30 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
    * through the same channel that just failed would not recover anything.
    * SMS is a different wire entirely, so it still reaches the customer
    * when WhatsApp currently cannot.
-   *
-   * On Android this sends directly off the SIM (react-native-get-sms-
-   * android's autoSend) — no composer, no manual tap. iOS has no
-   * equivalent: Apple does not let an app send SMS on the user's behalf at
-   * all, so there the agent's own tap in the native composer is the only
-   * way, same as before.
    */
   const smsGuestLink = useCallback(
     (url: string) => {
       const phone = conversationQuery.data?.contact?.phone;
       if (!phone) return;
       const name = conversationQuery.data?.contact?.name || 'there';
-      const body = `Hi ${name}, continue our conversation privately here: ${url}`;
+      void sendSmsAutomatically(phone, `Hi ${name}, continue our conversation privately here: ${url}`);
+    },
+    [conversationQuery.data],
+  );
 
-      const openComposer = () => {
-        // iOS and Android disagree on how an sms: URL takes a prefilled body.
-        const separator = Platform.OS === 'ios' ? '&' : '?';
-        void Linking.openURL(`sms:${phone}${separator}body=${encodeURIComponent(body)}`);
-      };
-
-      if (Platform.OS !== 'android') {
-        openComposer();
-        return;
-      }
-
-      void (async () => {
-        const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.SEND_SMS, {
-          title: 'Send SMS',
-          message: "VOXO sends the invitation text straight from this phone's SIM, so you don't have to open the SMS app and tap send yourself.",
-          buttonPositive: 'Allow',
-        });
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          openComposer();
-          return;
-        }
-        SmsAndroid.autoSend(
-          phone,
-          body,
-          () => {
-            Alert.alert('Could not send automatically', 'Opening the SMS app so you can send it yourself.');
-            openComposer();
-          },
-          () => {
-            recordSmsSent();
-          },
-        );
-      })();
+  /**
+   * The composer's SMS escape hatch, offered alongside the fixed nudge
+   * text / template button while the customer hasn't opened their private
+   * chat yet: that wording is fixed because it goes out over WhatsApp,
+   * which rejects free-form text outside the window — but whatever is
+   * typed here goes out over SMS instead, a wire WhatsApp's own rules
+   * have no say over, so there's nothing to fix.
+   */
+  const handleSendSms = useCallback(
+    (text: string) => {
+      const phone = conversationQuery.data?.contact?.phone;
+      if (!phone || !text.trim()) return;
+      void sendSmsAutomatically(phone, text.trim());
     },
     [conversationQuery.data],
   );
@@ -1308,6 +1284,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               // applies, whatever this screen's cached conversation still
               // says.
               whatsappRepliesLeft={guestOpened ? null : conversationQuery.data?.whatsappRepliesLeft}
+              // The SMS escape hatch next to the nudge/template card —
+              // only worth offering while that card is even showing, i.e.
+              // before the customer has opened their private chat.
+              customerPhone={guestOpened ? undefined : conversationQuery.data?.contact?.phone}
+              onSendSms={handleSendSms}
             />
 
             {/* See keyboardGapStyle. */}

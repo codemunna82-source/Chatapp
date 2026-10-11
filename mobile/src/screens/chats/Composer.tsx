@@ -74,6 +74,15 @@ interface ComposerProps {
   replyToMessageId: string | undefined;
   /** Fired after any send this component performs itself, so the screen can clear the reply target. */
   onSent: () => void;
+  /**
+   * Present only while the restricted (pre-private-chat) composer is
+   * showing — undefined hides the SMS quick-send row entirely, both
+   * before the contact's phone number is known and once the customer has
+   * moved to the private chat and the normal composer takes over.
+   */
+  customerPhone?: string;
+  /** Sends free text by SMS, off the agent's own SIM — see sendSms.ts. */
+  onSendSms: (text: string) => void;
 }
 
 const TYPING_STOP_DELAY_MS = 2500;
@@ -174,6 +183,79 @@ function RecordingReadout({
   );
 }
 
+/**
+ * The SMS escape hatch offered alongside the nudge card / template
+ * button / exhausted-allowance message — all three only ever show before
+ * the customer has opened their private chat, same as this. Unlike that
+ * fixed wording, whatever is typed here goes out over SMS rather than
+ * WhatsApp, so there is nothing fixed about it: SMS has no 24-hour
+ * window or template requirement to run into.
+ */
+function SmsQuickSend({
+  colors,
+  spacing,
+  radius,
+  typography,
+  phone,
+  onSend,
+}: {
+  colors: ReturnType<typeof useTheme>['colors'];
+  spacing: ReturnType<typeof useTheme>['spacing'];
+  radius: ReturnType<typeof useTheme>['radius'];
+  typography: ReturnType<typeof useTheme>['typography'];
+  phone: string | undefined;
+  onSend: (text: string) => void;
+}) {
+  const [text, setText] = useState('');
+  if (!phone) return null;
+  const trimmed = text.trim();
+
+  return (
+    <View
+      style={{
+        marginTop: spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        gap: 8,
+      }}
+    >
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        placeholder="Or message them by SMS instead…"
+        placeholderTextColor={colors.textTertiary}
+        multiline
+        style={[
+          typography.body,
+          {
+            flex: 1,
+            maxHeight: 100,
+            backgroundColor: colors.surfaceAlt,
+            borderRadius: radius.md,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            color: colors.textPrimary,
+          },
+        ]}
+      />
+      <Pressable
+        onPress={() => {
+          if (!trimmed) return;
+          onSend(trimmed);
+          setText('');
+        }}
+        disabled={!trimmed}
+        hitSlop={8}
+        style={{ paddingVertical: 8, opacity: trimmed ? 1 : 0.4 }}
+        accessibilityRole="button"
+        accessibilityLabel="Send by SMS"
+      >
+        <Ionicons name="send" size={22} color={colors.primary} />
+      </Pressable>
+    </View>
+  );
+}
+
 export function Composer({
   conversationId,
   whatsappPhoneNumberId,
@@ -186,6 +268,8 @@ export function Composer({
   onSent,
   nextNudge,
   whatsappRepliesLeft,
+  customerPhone,
+  onSendSms,
 }: ComposerProps) {
   const { colors, spacing, radius, typography } = useTheme();
   // The bottom inset is owned by the screen's keyboard-tracking wrapper
@@ -643,6 +727,7 @@ export function Composer({
           You&apos;ve used up the WhatsApp replies allowed until this contact opens their private chat.
           Send them the private chat link — once they open it you can message them without any limit.
         </Text>
+        <SmsQuickSend colors={colors} spacing={spacing} radius={radius} typography={typography} phone={customerPhone} onSend={onSendSms} />
       </View>
     );
   }
@@ -664,6 +749,7 @@ export function Composer({
         >
           <Text style={[typography.bodyMedium, { color: colors.textOnPrimary, textAlign: 'center' }]}>Use a template</Text>
         </Pressable>
+        <SmsQuickSend colors={colors} spacing={spacing} radius={radius} typography={typography} phone={customerPhone} onSend={onSendSms} />
       </View>
     );
   }
@@ -880,6 +966,7 @@ export function Composer({
             </Text>
           </Pressable>
         </View>
+        <SmsQuickSend colors={colors} spacing={spacing} radius={radius} typography={typography} phone={customerPhone} onSend={onSendSms} />
       </View>
     );
   }
