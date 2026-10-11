@@ -191,11 +191,23 @@ android {
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
     signingConfigs {
+        // Explicit on both configs: the shipped APK was found to carry a
+        // v2 signature ONLY (no META-INF/CERT.RSA, no v1 JAR signature at
+        // all) — AGP's own default for this project apparently leaves v1
+        // out. Some real devices' package installers cannot verify a
+        // v2-only signature and fail to install with the generic "There
+        // was a problem parsing the package", even on a device that
+        // otherwise meets minSdkVersion. v1 costs nothing to also include
+        // and is understood by literally every Android version ever
+        // shipped, so there is no real device left unsigned-for.
         debug {
             storeFile file('debug.keystore')
             storePassword 'android'
             keyAlias 'androiddebugkey'
             keyPassword 'android'
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
         }
         if (releaseKeystoreConfigured) {
             release {
@@ -203,6 +215,9 @@ android {
                 storePassword keystoreProperties['storePassword']
                 keyAlias keystoreProperties['keyAlias']
                 keyPassword keystoreProperties['keyPassword']
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
             }
         }
     }
