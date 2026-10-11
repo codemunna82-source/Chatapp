@@ -28,6 +28,12 @@
        consent, same reasoning as every other dangerous permission here. -->
   <uses-permission android:name="android.permission.READ_SMS"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+  <!-- "Send invitation via SMS" on a conversation: sends the private-chat
+       link straight from the device's own SIM (react-native-get-sms-android
+       autoSend), instead of only opening the SMS app composer for the agent
+       to tap send themselves. Runtime-requested like every other dangerous
+       permission here. -->
+  <uses-permission android:name="android.permission.SEND_SMS"/>
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <!-- Raises the incoming-call UI over the lock screen, which is the one
        thing a ringing notification has to do that an ordinary one does

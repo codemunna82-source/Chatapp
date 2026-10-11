@@ -56,9 +56,11 @@
     "babel-preset-expo": "^57.0.9",
     "eslint": "^9.39.5",
     "eslint-config-expo": "^57.0.2",
+    "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "postinstall": "patch-package",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

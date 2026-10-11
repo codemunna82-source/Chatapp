@@ -1,11 +1,13 @@
-import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../../theme/ThemeProvider';
 import { touchTarget } from '../../theme/spacing';
 import { usePersonalLink, useUpdatePersonalLinkTemplate } from '../../queries/useAuthMutations';
 import { getApiErrorMessage } from '../../api/client';
+import { getSmsSentToday } from '../../storage/smsSendTracker';
 
 const DEFAULT_TEMPLATE_PLACEHOLDER = 'Hi 👋, you can reach me directly here 🔗';
 
@@ -24,6 +26,11 @@ export function PrivateChatLinkSection() {
   const updateTemplate = useUpdatePersonalLinkTemplate();
   const [editingTemplate, setEditingTemplate] = useState(false);
   const [draftTemplate, setDraftTemplate] = useState('');
+  const isFocused = useIsFocused();
+  // Re-reads the MMKV counter each time this screen comes back into focus,
+  // so a send made elsewhere (the conversation screen) shows up here
+  // without this screen needing its own subscription to that store.
+  const smsSentToday = useMemo(() => (isFocused ? getSmsSentToday() : 0), [isFocused]);
 
   const linkUrl = linkQuery.data?.url;
   const copyLink = useCallback(() => {
@@ -190,6 +197,18 @@ export function PrivateChatLinkSection() {
           <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
         </Pressable>
       )}
+
+      {Platform.OS === 'android' ? (
+        <View style={{ marginTop: spacing.sm, paddingHorizontal: spacing.xs }}>
+          <Text style={[typography.caption, { color: colors.textSecondary }]}>
+            {smsSentToday} SMS sent via VOXO today
+          </Text>
+          <Text style={[typography.caption, { color: colors.textTertiary, marginTop: 2, lineHeight: 15 }]}>
+            Android has no way for an app to read your SIM&apos;s own SMS-pack balance, so this is a count of what
+            VOXO itself has sent — not what your carrier says is left.
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

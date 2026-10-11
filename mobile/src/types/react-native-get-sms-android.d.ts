@@ -26,6 +26,7 @@ declare module 'react-native-get-sms-android' {
       onFail: (error: string) => void,
       onSuccess: (count: number, smsList: string) => void,
     ): void;
+    autoSend(phoneNumber: string, body: string, onFail: (error: string) => void, onSuccess: (id: string) => void): void;
   };
   export default SmsAndroid;
 }

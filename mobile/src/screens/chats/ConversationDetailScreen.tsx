@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Keyboard, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Keyboard, Linking, PermissionsAndroid, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import SmsAndroid from 'react-native-get-sms-android';
 import Animated, {
   KeyboardState,
   useAnimatedKeyboard,
@@ -42,6 +43,7 @@ import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
 import { useGuestLinkStatus, useIssueGuestLink, useRevokeGuestLink } from '../../queries/useGuestChat';
+import { recordSmsSent } from '../../storage/smsSendTracker';
 import {
   useMessages,
   flattenMessages,
@@ -625,9 +627,8 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     (conversationQuery.data?.isDemo ?? false) ||
     (conversationQuery.data?.withinCustomerServiceWindow ?? false);
   /**
-   * Opens the phone's own SMS app, pre-addressed to the customer with the
-   * private-chat link already in the body — sent from the agent's own SIM
-   * when they tap send there, not through any gateway VOXO operates.
+   * Sends the private-chat link to the customer by SMS, from the agent's
+   * own SIM, not through any gateway VOXO operates.
    *
    * Deliberately not a WhatsApp send: this exists for exactly the moment
    * WhatsApp itself is the problem (the automatic invitation refused,
@@ -635,6 +636,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
    * through the same channel that just failed would not recover anything.
    * SMS is a different wire entirely, so it still reaches the customer
    * when WhatsApp currently cannot.
+   *
+   * On Android this sends directly off the SIM (react-native-get-sms-
+   * android's autoSend) — no composer, no manual tap. iOS has no
+   * equivalent: Apple does not let an app send SMS on the user's behalf at
+   * all, so there the agent's own tap in the native composer is the only
+   * way, same as before.
    */
   const smsGuestLink = useCallback(
     (url: string) => {
@@ -642,9 +649,40 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       if (!phone) return;
       const name = conversationQuery.data?.contact?.name || 'there';
       const body = `Hi ${name}, continue our conversation privately here: ${url}`;
-      // iOS and Android disagree on how an sms: URL takes a prefilled body.
-      const separator = Platform.OS === 'ios' ? '&' : '?';
-      void Linking.openURL(`sms:${phone}${separator}body=${encodeURIComponent(body)}`);
+
+      const openComposer = () => {
+        // iOS and Android disagree on how an sms: URL takes a prefilled body.
+        const separator = Platform.OS === 'ios' ? '&' : '?';
+        void Linking.openURL(`sms:${phone}${separator}body=${encodeURIComponent(body)}`);
+      };
+
+      if (Platform.OS !== 'android') {
+        openComposer();
+        return;
+      }
+
+      void (async () => {
+        const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.SEND_SMS, {
+          title: 'Send SMS',
+          message: "VOXO sends the invitation text straight from this phone's SIM, so you don't have to open the SMS app and tap send yourself.",
+          buttonPositive: 'Allow',
+        });
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          openComposer();
+          return;
+        }
+        SmsAndroid.autoSend(
+          phone,
+          body,
+          () => {
+            Alert.alert('Could not send automatically', 'Opening the SMS app so you can send it yourself.');
+            openComposer();
+          },
+          () => {
+            recordSmsSent();
+          },
+        );
+      })();
     },
     [conversationQuery.data],
   );
