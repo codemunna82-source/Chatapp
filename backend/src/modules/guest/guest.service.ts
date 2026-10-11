@@ -51,7 +51,8 @@ import type { GuestReportLean, GuestReportReason } from './guestReport.model';
 import { resolveBusinessName, resolveBusinessNameForConversation } from './businessName';
 import { hasMovedToWebChat } from './webChatRouting';
 import { guestSessionExpiresAt } from './guestSessionExpiry';
-import { findCustomerFacingNameForPhoneNumber } from '../users/user.repository';
+import { findCustomerFacingNameForPhoneNumber, findUserByPersonalGuestLinkToken } from '../users/user.repository';
+import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
 import { guestChatUrl } from '../tenants/guestDomain';
 import { sendGuestLinkInvitationNow, type InvitationResult } from './guestAutoReply.service';
 import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
@@ -548,6 +549,54 @@ export async function issuePublicGuestLink(
     expiresAt,
   });
   return { url: guestChatUrl(linkBaseUrl, created.token), expiresAt: expiresAt.toISOString() };
+}
+
+/**
+ * Who a personal chat link ("My personal chat link" in Settings) actually
+ * belongs to, and the number any chat started through it will go out on.
+ *
+ * Public by design — this is what the landing page at /u/:token reads
+ * before anyone has entered a phone number, to show whose link this is —
+ * so it returns nothing more sensitive than a name. `null` covers both an
+ * unrecognised token and one belonging to a user this workspace has since
+ * disabled; the landing page shows the same "this link isn't working
+ * right now" either way.
+ */
+export async function resolvePersonalGuestLink(
+  token: string,
+): Promise<{ tenantId: string; whatsappPhoneNumberId: string; displayName: string | null } | null> {
+  const owner = await findUserByPersonalGuestLinkToken(token);
+  if (!owner) return null;
+
+  // Falls back to the tenant's first connected number the same way the
+  // rest of the app treats a user with no assignment — this repository
+  // has no number of its own to send from otherwise.
+  const whatsappPhoneNumberId =
+    owner.whatsappPhoneNumberId ?? String((await findFirstPhoneNumberForTenant(owner.tenantId))?._id ?? '');
+  if (!whatsappPhoneNumberId) return null;
+
+  return { tenantId: owner.tenantId, whatsappPhoneNumberId, displayName: owner.displayName };
+}
+
+/**
+ * Starts (or continues) a chat through someone's personal link.
+ *
+ * Deliberately the same underlying call as issuePublicGuestLink — a
+ * personal link and the automation-facing public API both end at "mint
+ * this phone number a guest session on this WhatsApp number," and
+ * keeping that one path is what makes the "isolated session per visitor,
+ * never anyone else's data" guarantee hold for both the same way.
+ */
+export async function startPersonalGuestChat(
+  token: string,
+  phone: string,
+): Promise<{ url: string; expiresAt: string; displayName: string | null }> {
+  const owner = await resolvePersonalGuestLink(token);
+  if (!owner) {
+    throw ApiError.notFound('PERSONAL_LINK_NOT_FOUND', 'This chat link is not working right now.');
+  }
+  const result = await issuePublicGuestLink(owner.tenantId, owner.whatsappPhoneNumberId, phone);
+  return { ...result, displayName: owner.displayName };
 }
 
 /**

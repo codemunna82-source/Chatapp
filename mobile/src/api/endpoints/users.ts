@@ -32,3 +32,23 @@ export function userAvatarUrl(userId: string, version?: string): string {
   const v = version ? `?v=${encodeURIComponent(version)}` : '';
   return `${apiBaseUrl}/users/${userId}/avatar${v}`;
 }
+
+/**
+ * The signed-in user's own permanent "chat with me" link — the same URL
+ * every time, unlike a per-conversation guest link. See Settings.
+ */
+export interface PersonalLinkInfo {
+  url: string;
+  messageTemplate: string | null;
+}
+
+export async function getOwnPersonalLink(): Promise<PersonalLinkInfo> {
+  const res = await apiClient.get<ApiSuccess<PersonalLinkInfo>>('/users/me/personal-link');
+  return res.data.data;
+}
+
+/** `null` clears it back to having no saved wording. */
+export async function updateOwnPersonalLinkTemplate(messageTemplate: string | null): Promise<PersonalLinkInfo> {
+  const res = await apiClient.patch<ApiSuccess<PersonalLinkInfo>>('/users/me/personal-link', { messageTemplate });
+  return res.data.data;
+}

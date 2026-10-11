@@ -29,4 +29,6 @@ export const queryKeys = {
   tenantSettings: ['tenantSettings'] as const,
   /** Whether a conversation has a live web chat window. */
   guestLink: (conversationId: string) => ['guestLink', conversationId] as const,
+  /** The signed-in user's own permanent "chat with me" link. */
+  personalLink: ['personalLink'] as const,
 };

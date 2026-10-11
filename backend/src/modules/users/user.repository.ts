@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { Types } from 'mongoose';
 import { User, type UserDoc, type UserRole, type UserStatus } from './user.model';
 import type { Permission } from './permission';
@@ -336,4 +337,89 @@ export async function findCustomerFacingNameForPhoneNumber(
 ): Promise<string | null> {
   const identity = await findCustomerFacingIdentityForPhoneNumber(tenantId, whatsappPhoneNumberId);
   return identity?.displayName ?? null;
+}
+
+function generatePersonalGuestLinkToken(): string {
+  // Shorter than a guest session's own token (guestSession.repository.ts) —
+  // this one is MEANT to be read and typed, not just tapped, and it does
+  // not carry a customer's private history behind it the way a session
+  // token does: knowing it only lets a stranger start a brand-new,
+  // isolated conversation with this one person, the same capability a
+  // business already hands out with its own WhatsApp number on a card.
+  return randomBytes(6).toString('base64url');
+}
+
+/**
+ * This user's own permanent link token, minted the first time anyone
+ * asks — see the field's own comment on the model for why that is lazy
+ * rather than done at account creation.
+ */
+export async function getOrCreatePersonalGuestLinkToken(userId: string, tenantId: string): Promise<string> {
+  const existing = await User.findOne({ _id: userId, tenantId }).select('personalGuestLinkToken').lean();
+  if (existing?.personalGuestLinkToken) return existing.personalGuestLinkToken;
+
+  // Retried on a collision rather than trusted blind: astronomically
+  // unlikely at this length, but the unique index is what actually
+  // enforces it, and this is the one write path that could hit it.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const token = generatePersonalGuestLinkToken();
+    try {
+      await User.updateOne(
+        { _id: userId, tenantId, personalGuestLinkToken: { $exists: false } },
+        { $set: { personalGuestLinkToken: token } },
+      );
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) continue; // token collision — try again
+      throw err;
+    }
+    const saved = await User.findOne({ _id: userId, tenantId }).select('personalGuestLinkToken').lean();
+    if (saved?.personalGuestLinkToken) return saved.personalGuestLinkToken;
+  }
+  throw new Error('Could not mint a personal chat link token after several attempts');
+}
+
+export interface PersonalGuestLinkOwner {
+  userId: string;
+  tenantId: string;
+  whatsappPhoneNumberId: string | null;
+  displayName: string | null;
+}
+
+/**
+ * Resolves a personal link token back to whose it is — the one lookup the
+ * public, unauthenticated landing page is allowed to make (see
+ * personalGuestLink.routes.ts). `whatsappPhoneNumberId` is this user's own
+ * assignment only; the caller falls back to the tenant's first connected
+ * number the same way every other unassigned-user path does, because this
+ * repository has no business deciding that policy itself.
+ */
+export async function findUserByPersonalGuestLinkToken(token: string): Promise<PersonalGuestLinkOwner | null> {
+  if (!token) return null;
+  const user = await User.findOne({ personalGuestLinkToken: token, status: 'ACTIVE' })
+    .select('tenantId whatsappPhoneNumberId displayName email')
+    .lean();
+  if (!user) return null;
+  return {
+    userId: String(user._id),
+    tenantId: String(user.tenantId),
+    whatsappPhoneNumberId: user.whatsappPhoneNumberId ? String(user.whatsappPhoneNumberId) : null,
+    displayName: user.displayName ?? user.email ?? null,
+  };
+}
+
+export async function getPersonalLinkMessageTemplate(userId: string, tenantId: string): Promise<string | null> {
+  const user = await User.findOne({ _id: userId, tenantId }).select('personalLinkMessageTemplate').lean();
+  return user?.personalLinkMessageTemplate ?? null;
+}
+
+export async function setPersonalLinkMessageTemplate(
+  userId: string,
+  tenantId: string,
+  text: string | null,
+): Promise<void> {
+  if (text) {
+    await User.updateOne({ _id: userId, tenantId }, { $set: { personalLinkMessageTemplate: text } });
+  } else {
+    await User.updateOne({ _id: userId, tenantId }, { $unset: { personalLinkMessageTemplate: '' } });
+  }
 }

@@ -101,3 +101,8 @@ export const userIdParamSchema = z.object({
 export const resetUserPasswordSchema = z.object({
   password: z.string().min(8, 'At least 8 characters').max(200),
 });
+
+/** `null` clears it back to having no saved wording at all. */
+export const updatePersonalLinkSchema = z.object({
+  messageTemplate: z.string().trim().max(1024).nullable(),
+});

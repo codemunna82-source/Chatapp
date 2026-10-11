@@ -67,6 +67,19 @@ export const updateOwnAvatarHandler = asyncHandler(async (req: Request, res: Res
   res.status(200).json({ success: true, data: user });
 });
 
+export const getOwnPersonalLinkHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const info = await userService.getOwnPersonalLink(auth.tenantId, auth.userId);
+  res.status(200).json({ success: true, data: info });
+});
+
+export const updateOwnPersonalLinkHandler = asyncHandler(async (req: Request, res: Response) => {
+  const auth = getTenantContext(req);
+  const { messageTemplate } = req.body as { messageTemplate: string | null };
+  const info = await userService.updateOwnPersonalLinkMessageTemplate(auth.tenantId, auth.userId, messageTemplate);
+  res.status(200).json({ success: true, data: info });
+});
+
 export const getUserAvatarHandler = asyncHandler(async (req: Request, res: Response) => {
   const auth = getTenantContext(req);
   const userId = req.params.id as string;

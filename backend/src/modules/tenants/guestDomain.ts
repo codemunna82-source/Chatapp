@@ -190,6 +190,16 @@ export function guestChatUrl(baseUrl: string, token: string): string {
 }
 
 /**
+ * A user's own permanent "chat with me" link — /u/ rather than /c/, a
+ * different frontend route entirely: this one has no session behind it
+ * yet, only a landing page that asks a new visitor for their phone number
+ * before minting one (see personalGuestLink.routes.ts).
+ */
+export function personalGuestLinkUrl(baseUrl: string, token: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/u/${token}`;
+}
+
+/**
  * What a WhatsApp template's URL button has to be built on.
  *
  * Meta lets an approved template's URL vary only in a trailing variable,

@@ -1,7 +1,13 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as authApi from '../api/endpoints/auth';
-import { uploadOwnAvatar, type PickedAvatarFile } from '../api/endpoints/users';
+import {
+  uploadOwnAvatar,
+  getOwnPersonalLink,
+  updateOwnPersonalLinkTemplate,
+  type PickedAvatarFile,
+} from '../api/endpoints/users';
 import { useAuthStore } from '../store/authStore';
+import { queryKeys } from './keys';
 
 export function useLogin() {
   const setSession = useAuthStore((s) => s.setSession);
@@ -49,5 +55,18 @@ export function useUploadOwnAvatar() {
   return useMutation({
     mutationFn: (file: PickedAvatarFile) => uploadOwnAvatar(file),
     onSuccess: (user) => updateUser({ avatarUpdatedAt: user.avatarUpdatedAt, displayName: user.displayName }),
+  });
+}
+
+/** Minted lazily server-side on first read — see getOwnPersonalLink. */
+export function usePersonalLink() {
+  return useQuery({ queryKey: queryKeys.personalLink, queryFn: getOwnPersonalLink });
+}
+
+export function useUpdatePersonalLinkTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (messageTemplate: string | null) => updateOwnPersonalLinkTemplate(messageTemplate),
+    onSuccess: (info) => queryClient.setQueryData(queryKeys.personalLink, info),
   });
 }

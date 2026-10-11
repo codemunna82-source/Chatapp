@@ -33,6 +33,7 @@ import { adminRouter } from './modules/admin/admin.routes';
 import { tenantRouter } from './modules/tenants/tenant.routes';
 import { guestRouter } from './modules/guest/guest.routes';
 import { guestLinkApiRouter } from './modules/guest/guestLinkApi.routes';
+import { personalGuestLinkRouter } from './modules/guest/personalGuestLink.routes';
 import { Sentry, isSentryEnabled, isReportableError } from './lib/sentry';
 
 export function createApp(): Express {
@@ -112,6 +113,11 @@ export function createApp(): Express {
   // per-number key rather than a login or a guest link token (see
   // guestLinkApi.routes.ts).
   app.use('/api/public/guest-link', guestLinkApiRouter);
+  // The landing page for someone's personal "chat with me" link —
+  // unauthenticated (there is no session yet) and its own route, not
+  // nested under /api/guest, which requires a guest session token this
+  // visitor does not have yet (see personalGuestLink.routes.ts).
+  app.use('/api/public/personal-link', personalGuestLinkRouter);
 
   app.use(notFoundHandler);
 

@@ -22,6 +22,7 @@ import { Avatar } from '../../components/Avatar';
 import { useAuthStore } from '../../store/authStore';
 import { useWhatsAppConnection } from '../../queries/useWhatsAppConnection';
 import { MyNumberQualityCard } from './MyNumberQualityCard';
+import { PrivateChatLinkSection } from './PrivateChatLinkSection';
 import { useThemePreferenceStore, type ThemePreference } from '../../store/themePreferenceStore';
 import {
   useChatWallpaperStore,
@@ -589,6 +590,7 @@ export function SettingsScreen({ navigation }: Props) {
 
       <AppearanceSection />
       <ChatWallpaperSection />
+      <PrivateChatLinkSection />
       <AlertsSection />
 
       {isMasterAdmin && subscription.data

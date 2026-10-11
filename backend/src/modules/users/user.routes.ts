@@ -9,6 +9,7 @@ import {
   listUsersQuerySchema,
   userIdParamSchema,
   resetUserPasswordSchema,
+  updatePersonalLinkSchema,
 } from './user.validation';
 import { AVATAR_MAX_SIZE_BYTES } from './user.service';
 import {
@@ -21,6 +22,8 @@ import {
   getUserAvatarHandler,
   resetUserPasswordHandler,
   removeUserHandler,
+  getOwnPersonalLinkHandler,
+  updateOwnPersonalLinkHandler,
 } from './user.controller';
 
 export const userRouter = Router();
@@ -35,6 +38,16 @@ const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSiz
 // their own avatar and view a teammate's (avatars aren't sensitive, and
 // need to render in Team/chat UI for regular SUB_USERs too).
 userRouter.patch('/me/avatar', requireAuth, avatarUpload.single('file'), updateOwnAvatarHandler);
+// Every signed-in team member's own link, including a SUB_USER with no
+// other permissions — this is their own personal setting, not a user
+// management capability, so it sits above the MASTER_ADMIN guard below.
+userRouter.get('/me/personal-link', requireAuth, getOwnPersonalLinkHandler);
+userRouter.patch(
+  '/me/personal-link',
+  requireAuth,
+  validate({ body: updatePersonalLinkSchema }),
+  updateOwnPersonalLinkHandler,
+);
 userRouter.get('/:id/avatar', requireAuth, validate({ params: userIdParamSchema }), getUserAvatarHandler);
 
 // User management is a MASTER_ADMIN-only capability (spec §8, §27):

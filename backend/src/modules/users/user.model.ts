@@ -82,8 +82,40 @@ const userSchema = new Schema(
     avatarContentType: { type: String, select: false },
     avatarCloudinaryPublicId: { type: String, select: false },
     avatarUpdatedAt: { type: Date },
+    /**
+     * This person's own, permanent "chat with me" link token — the same
+     * value every time, shared publicly (a bio, a card), unlike a guest
+     * session's token which is unique per customer and single-use in
+     * spirit. Generated once, lazily, on first request rather than at
+     * account creation: most users never open the screen that needs one,
+     * and minting a token nobody asked for is a token nobody is watching
+     * for leaks either.
+     *
+     * `select: false` for the same reason passwordHash is: this is handed
+     * to the public, unauthenticated route it resolves (see
+     * personalGuestLink.routes.ts), so it must never ride along on an
+     * ordinary user fetch that forgot to exclude it.
+     */
+    personalGuestLinkToken: { type: String, select: false },
+    /**
+     * This person's own wording for sharing their personal link — separate
+     * from Tenant.autoGuestLink.message, which is the automatic invitation
+     * the WORKSPACE controls. This one has no customer name to fill in
+     * (the personal link has no customer yet when it is shared), so it
+     * carries no {name} placeholder.
+     */
+    personalLinkMessageTemplate: { type: String, trim: true },
   },
   { timestamps: true },
+);
+
+// Public, unauthenticated lookups resolve a user by this token (see
+// personalGuestLink.routes.ts) — same partial-index shape as phone above,
+// for the same reason: a sparse index still indexes an explicit null, and
+// two users who have never generated one would collide on it.
+userSchema.index(
+  { personalGuestLinkToken: 1 },
+  { unique: true, partialFilterExpression: { personalGuestLinkToken: { $type: 'string' } } },
 );
 
 // Both sign-in identifiers are globally unique across the platform, not

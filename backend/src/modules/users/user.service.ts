@@ -6,6 +6,8 @@ import { recordAudit } from '../audit/auditLog.service';
 import * as repo from './user.repository';
 import { refuseUserRemoval } from './userRemoval';
 import { findPhoneNumberByIdAndTenant, findPhoneNumberByDisplayNumberAndTenant } from '../whatsapp/whatsapp.repository';
+import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
+import { personalGuestLinkUrl } from '../tenants/guestDomain';
 import { isCloudinaryConfigured, uploadBufferToCloudinary, fetchCloudinaryBuffer, deleteCloudinaryAsset } from '../../integrations/cloudinary';
 import { User, type UserDoc } from './user.model';
 import { DeviceToken } from '../devices/deviceToken.model';
@@ -458,4 +460,38 @@ export async function disableUserForTenant(
   }
   await recordAudit({ tenantId, actorUserId, action: 'user.disable', targetType: 'User', targetId: user._id });
   return toPublicUser(user);
+}
+
+export interface PersonalLinkInfo {
+  url: string;
+  messageTemplate: string | null;
+}
+
+/**
+ * This signed-in user's own permanent chat link and their saved wording
+ * for sharing it — minting the token on first request, same as tapping
+ * into any other lazily-created setting.
+ */
+export async function getOwnPersonalLink(tenantId: string, userId: string): Promise<PersonalLinkInfo> {
+  const [token, messageTemplate, linkBaseUrl] = await Promise.all([
+    repo.getOrCreatePersonalGuestLinkToken(userId, tenantId),
+    repo.getPersonalLinkMessageTemplate(userId, tenantId),
+    guestLinkBaseUrlFor(tenantId),
+  ]);
+  if (!linkBaseUrl) {
+    throw ApiError.serviceUnavailable(
+      'GUEST_LINK_NOT_CONFIGURED',
+      'No chat domain is configured on the server, so a chat link cannot be built yet',
+    );
+  }
+  return { url: personalGuestLinkUrl(linkBaseUrl, token), messageTemplate };
+}
+
+export async function updateOwnPersonalLinkMessageTemplate(
+  tenantId: string,
+  userId: string,
+  messageTemplate: string | null,
+): Promise<PersonalLinkInfo> {
+  await repo.setPersonalLinkMessageTemplate(userId, tenantId, messageTemplate?.trim() || null);
+  return getOwnPersonalLink(tenantId, userId);
 }
