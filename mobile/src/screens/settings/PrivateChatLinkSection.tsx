@@ -19,6 +19,7 @@ import { usePersonalLink, useUpdatePersonalLinkTemplate } from '../../queries/us
 import { getApiErrorMessage } from '../../api/client';
 import { getSmsSentToday } from '../../storage/smsSendTracker';
 import { getSmsAutoReplyStatus, setSmsAutoReplyConfig, setSmsAutoReplyDailyLimit } from '../../native/smsAutoReply';
+import { sendSmsAutomatically } from '../../utils/sendSms';
 
 const DEFAULT_TEMPLATE_PLACEHOLDER = 'Hi 👋, you can reach me directly here 🔗';
 /** 0 is VoxoSmsAutoReplyModule.UNLIMITED_DAILY_LIMIT — no cap at all, not "zero allowed". */
@@ -110,6 +111,25 @@ export function PrivateChatLinkSection() {
     Alert.alert('Link copied', 'Your personal chat link has been copied to your clipboard.');
   }, [linkUrl]);
 
+  // Same wording the auto-reply sends (buildAutoReplyText) — so pasting
+  // this somewhere by hand reads the same as a reply VOXO sent on its own.
+  const copyLinkWithMessage = useCallback(() => {
+    if (!linkUrl) return;
+    void Clipboard.setStringAsync(buildAutoReplyText(linkQuery.data?.messageTemplate, linkUrl));
+    Alert.alert('Copied', 'Your message and link have been copied to your clipboard.');
+  }, [linkUrl, linkQuery.data?.messageTemplate]);
+
+  const [sendingSms, setSendingSms] = useState(false);
+  const [smsPhone, setSmsPhone] = useState('');
+
+  const sendLinkViaSms = useCallback(() => {
+    const phone = smsPhone.trim();
+    if (!phone || !linkUrl) return;
+    void sendSmsAutomatically(phone, buildAutoReplyText(linkQuery.data?.messageTemplate, linkUrl));
+    setSendingSms(false);
+    setSmsPhone('');
+  }, [smsPhone, linkUrl, linkQuery.data?.messageTemplate]);
+
   const openTemplateEditor = useCallback(() => {
     setDraftTemplate(linkQuery.data?.messageTemplate ?? '');
     setEditingTemplate(true);
@@ -177,6 +197,125 @@ export function PrivateChatLinkSection() {
             <Ionicons name="copy-outline" size={16} color={colors.primary} />
           </Pressable>
         )}
+
+        {linkUrl ? (
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+            <Pressable
+              onPress={copyLinkWithMessage}
+              style={({ pressed }) => [
+                {
+                  flex: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  paddingVertical: 9,
+                  borderRadius: radius.sm,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.6 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Copy your message and link together"
+            >
+              <Ionicons name="chatbox-ellipses-outline" size={15} color={colors.textSecondary} />
+              <Text style={[typography.caption, { color: colors.textPrimary, fontWeight: '600' }]}>
+                Copy with message
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setSendingSms((s) => !s)}
+              style={({ pressed }) => [
+                {
+                  flex: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  paddingVertical: 9,
+                  borderRadius: radius.sm,
+                  backgroundColor: sendingSms ? colors.primary : colors.surfaceElevated,
+                  borderWidth: sendingSms ? 0 : 1,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Send your link by SMS"
+            >
+              <Ionicons
+                name="paper-plane-outline"
+                size={15}
+                color={sendingSms ? colors.textOnPrimary : colors.textSecondary}
+              />
+              <Text
+                style={[
+                  typography.caption,
+                  { color: sendingSms ? colors.textOnPrimary : colors.textPrimary, fontWeight: '600' },
+                ]}
+              >
+                Send via SMS
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {sendingSms ? (
+          <View style={{ marginTop: 10 }}>
+            <TextInput
+              value={smsPhone}
+              onChangeText={setSmsPhone}
+              placeholder="Phone number"
+              placeholderTextColor={colors.textTertiary}
+              keyboardType="phone-pad"
+              autoFocus
+              style={[
+                typography.body,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderRadius: radius.sm,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  color: colors.textPrimary,
+                },
+              ]}
+            />
+            <Text style={[typography.caption, { color: colors.textSecondary, marginTop: 6, lineHeight: 17 }]}>
+              Sent straight from this phone&apos;s SIM — no need to open the SMS app yourself.
+            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+              <Pressable
+                onPress={() => {
+                  setSendingSms(false);
+                  setSmsPhone('');
+                }}
+                style={{ paddingVertical: 8, paddingHorizontal: 14 }}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel sending by SMS"
+              >
+                <Text style={[typography.bodyMedium, { color: colors.textSecondary }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={sendLinkViaSms}
+                disabled={!smsPhone.trim()}
+                style={{
+                  backgroundColor: colors.primary,
+                  borderRadius: radius.full,
+                  paddingVertical: 8,
+                  paddingHorizontal: 18,
+                  opacity: smsPhone.trim() ? 1 : 0.5,
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Send"
+              >
+                <Text style={[typography.bodyMedium, { color: colors.textOnPrimary }]}>Send</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
       </View>
 
       {editingTemplate ? (
