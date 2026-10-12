@@ -43,8 +43,17 @@ export async function sendSmsAutomatically(phone: string, body: string): Promise
   SmsAndroid.autoSend(
     phone,
     body,
-    () => {
-      Alert.alert('Could not send automatically', 'Opening the SMS app so you can send it yourself.');
+    // The library's own failure reason (see SmsModule.java) — "Generic
+    // failure", "No service", "Null PDU" or "Radio off" — not shown
+    // before, so a real cause (most often: a dual-SIM phone with no
+    // default SIM chosen for SMS, which SmsManager.getDefault() then has
+    // nothing to pick) read as an unexplained fallback to the Messages
+    // app instead of a diagnosable error.
+    (reason: string) => {
+      Alert.alert(
+        'Could not send automatically',
+        `${reason}. Opening the SMS app so you can send it yourself. If this keeps happening on a dual-SIM phone, check Settings > Apps > Messages/SIM cards for a default SIM chosen for SMS — Android needs one to send without asking.`,
+      );
       openSmsComposer(phone, body);
     },
     () => {
