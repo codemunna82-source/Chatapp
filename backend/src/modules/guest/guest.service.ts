@@ -137,7 +137,12 @@ export interface GuestMessageView {
    * offer to take it back. A message they sent from WhatsApp shows in
    * this window too, and cannot be withdrawn from it.
    */
-  channel?: 'whatsapp' | 'web';
+  // 'sms' is in the type for parity with MessageChannel — a guest window
+  // only ever exists on a WhatsApp-origin conversation, so a message here
+  // is never actually that channel, but this stays a straight passthrough
+  // of messageChannel() rather than a narrower type the compiler cannot
+  // actually verify holds.
+  channel?: 'whatsapp' | 'web' | 'sms';
   /**
    * Set when this message was taken back by whoever sent it. The window
    * draws a tombstone; `text`, `mediaId` and `location` are absent

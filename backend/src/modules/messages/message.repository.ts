@@ -35,6 +35,15 @@ export interface CreateMessageInput {
   templateName?: string;
   /** Set only on a message created by messageRetry.queue.ts — see the schema. */
   rateLimitRetryAttempt?: number;
+  /**
+   * Backdates the message to when it actually happened rather than when
+   * this request reached the server — used by sms/sms.service.ts, whose
+   * sync can run minutes after the text itself was sent or received.
+   * Mongoose's `timestamps: true` only fills createdAt when the document
+   * does not already carry one, so passing it through here is enough;
+   * every other caller leaves this unset and gets "now", as before.
+   */
+  createdAt?: Date;
 }
 
 /**

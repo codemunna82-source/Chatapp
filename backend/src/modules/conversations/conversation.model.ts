@@ -15,7 +15,16 @@ const conversationSchema = new Schema(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
     contactId: { type: Schema.Types.ObjectId, ref: 'Contact', required: true, index: true },
-    whatsappPhoneNumberId: { type: Schema.Types.ObjectId, ref: 'WhatsAppPhoneNumber', required: true },
+    /**
+     * Absent for an SMS-only conversation (sms/sms.service.ts) — there is
+     * no WhatsApp number behind a text sent off an agent's own SIM. Every
+     * WhatsApp-origin conversation still always has one; nothing about the
+     * webhook path changed. Optional rather than a sentinel ObjectId so an
+     * SMS conversation stays honestly absent from WhatsApp-number-scoped
+     * queries (conversation.access.ts's visibleWhatsAppPhoneNumberId
+     * filter) instead of needing to recognise a fake id to exclude.
+     */
+    whatsappPhoneNumberId: { type: Schema.Types.ObjectId, ref: 'WhatsAppPhoneNumber' },
     lastMessageAt: { type: Date },
     lastMessagePreview: { type: String },
     /**
@@ -87,6 +96,17 @@ const conversationSchema = new Schema(
 // index; Mongoose would otherwise leave it in place and it would reject
 // the second thread with a duplicate-key error.
 conversationSchema.index({ tenantId: 1, contactId: 1, whatsappPhoneNumberId: 1 }, { unique: true });
+// The SMS-only equivalent of the index above: one SMS conversation per
+// (tenant, contact), since there is no WhatsApp number to tell two apart
+// by. A partial index rather than including whatsappPhoneNumberId in a
+// sparse one — Mongo's sparse indexes still collide two docs that are
+// BOTH missing the field, which is exactly the case this has to allow a
+// contact's WhatsApp conversation and their SMS conversation to coexist
+// as two separate documents rather than fighting over one unique key.
+conversationSchema.index(
+  { tenantId: 1, contactId: 1 },
+  { unique: true, partialFilterExpression: { whatsappPhoneNumberId: { $exists: false } } },
+);
 // The chat list, exactly as it is sorted and paginated: pinned first, then
 // most recent, with _id breaking ties and carrying the keyset cursor (see
 // listConversationsByTenant). All four fields in the sort's own order and

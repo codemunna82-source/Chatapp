@@ -86,6 +86,19 @@ export async function findOrCreateConversation(
   return Conversation.create({ tenantId, contactId, whatsappPhoneNumberId });
 }
 
+/**
+ * The SMS-only counterpart of findOrCreateConversation above — one per
+ * (tenant, contact), with whatsappPhoneNumberId left unset entirely
+ * rather than null (Mongo's $exists check and the partial unique index
+ * on conversation.model.ts both key off the field being genuinely
+ * absent, not merely falsy).
+ */
+export async function findOrCreateSmsConversation(tenantId: string, contactId: string): Promise<ConversationDoc> {
+  const existing = await Conversation.findOne({ tenantId, contactId, whatsappPhoneNumberId: { $exists: false } });
+  if (existing) return existing;
+  return Conversation.create({ tenantId, contactId });
+}
+
 export async function findConversationByIdAndTenant(
   id: string,
   tenantId: string,

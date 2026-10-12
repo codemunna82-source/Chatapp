@@ -8,6 +8,7 @@ import { LoadingIndicator } from '../components/LoadingIndicator';
 import { useAuthStore } from '../store/authStore';
 import { RealtimeSync } from '../sockets/RealtimeSync';
 import { OutboxFlusher } from '../sockets/OutboxFlusher';
+import { SmsSyncRunner } from '../utils/SmsSyncRunner';
 import { PushNotificationSync } from '../notifications/PushNotificationSync';
 import { CallOverlay } from '../calling/CallOverlay';
 import { PendingCallSync } from '../calling/PendingCallSync';
@@ -67,6 +68,7 @@ export function RootNavigator() {
         <>
           <RealtimeSync navigationRef={navigationRef} />
           <OutboxFlusher />
+          <SmsSyncRunner />
           <PushNotificationSync navigationRef={navigationRef} />
           <PendingCallSync />
           {/* Checks, on every foreground, that this phone can still ring —

@@ -78,7 +78,8 @@ export interface Conversation {
   tenantId: string;
   contactId: string;
   contact?: Contact;
-  whatsappPhoneNumberId: string;
+  /** Null for an SMS-only conversation — a text sent off an agent's own SIM has no WhatsApp number behind it. */
+  whatsappPhoneNumberId: string | null;
   lastMessageAt?: string;
   lastMessagePreview?: string;
   /** Who sent the last message, and how far our own send got — lets the
@@ -216,7 +217,7 @@ export interface Message {
    * field existed, which is read as WhatsApp — the safe direction, since
    * being wrong that way only withholds a button.
    */
-  channel?: 'whatsapp' | 'web';
+  channel?: 'whatsapp' | 'web' | 'sms';
   /**
    * Set when whoever sent this message took it back — "delete for
    * everyone". `text`, `mediaId` and `location` are empty on such a

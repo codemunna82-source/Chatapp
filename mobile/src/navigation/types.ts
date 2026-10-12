@@ -16,9 +16,10 @@ export type ChatsStackParamList = {
   // note and the window-aware caption it shows are reached by an agent
   // already inside a specific thread.
   ContactInfo: { conversationId: string };
-  // A lead SMS thread — see useLocalSmsThreads.ts. Not a real conversation:
-  // everything it shows comes from the device's own SMS inbox, grouped by
-  // sender, never a backend conversationId.
+  // Not a screen of its own — resolves a phone number (all
+  // SmsAutoReplyReceiver.kt's lead-SMS notification deep link can carry)
+  // into a real conversation id and redirects to ConversationDetail. See
+  // SmsThreadScreen.tsx.
   SmsThread: { phone: string };
 };
 

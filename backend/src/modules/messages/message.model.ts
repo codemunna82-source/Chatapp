@@ -30,9 +30,9 @@ export type MessageType = (typeof MESSAGE_TYPES)[number];
 export const MESSAGE_STATUSES = ['QUEUED', 'SENT', 'DELIVERED', 'READ', 'FAILED'] as const;
 export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 
-/** The two wires a message can travel on — Meta's, or this app's own
- *  private web chat. See the `channel` field. */
-export const MESSAGE_CHANNELS = ['whatsapp', 'web'] as const;
+/** The wires a message can travel on — Meta's, this app's own private web
+ *  chat, or a plain SMS sent off an agent's own SIM. See the `channel` field. */
+export const MESSAGE_CHANNELS = ['whatsapp', 'web', 'sms'] as const;
 export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
 
 /** Who withdrew a message. Deliberately the two sides of the chat rather

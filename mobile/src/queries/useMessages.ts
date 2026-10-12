@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import * as messagesApi from '../api/endpoints/messages';
 import type { SendMessageBody } from '../api/endpoints/messages';
+import { sendSms as sendSmsToBackend } from '../api/endpoints/sms';
 import type { Message } from '../api/types';
 import { queryKeys } from './keys';
 import { perfStart, perfMark, perfEnd } from '../utils/perfTrace';
@@ -10,6 +11,8 @@ import { getApiErrorCode, isOfflineError } from '../api/client';
 import { useOutboxStore, isQueueableBody } from '../store/outboxStore';
 import { captureHandledError } from '../lib/sentry';
 import { readCachedMessages, writeCachedMessages } from '../storage/chatCache';
+import { sendSmsAutomatically } from '../utils/sendSms';
+import { findSentSmsClientMessageId } from '../utils/smsSync';
 
 type MessagesPage = { items: Message[]; nextCursor: string | null };
 type MessagesData = InfiniteData<MessagesPage, string | undefined>;
@@ -499,6 +502,113 @@ export function useSendMessage(conversationId: string) {
       // spent, in which case the header is now showing a count that is
       // one too many.
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversation(conversationId) });
+    },
+  });
+}
+
+/**
+ * Sends free text for a real SMS-channel conversation (no
+ * whatsappPhoneNumberId — see ConversationDetailScreen's
+ * isSmsConversation), mirroring useSendMessage's optimistic-bubble
+ * shape so the two channels' composers behave identically, but over a
+ * genuinely different wire: the text leaves this phone's own SIM
+ * (sendSmsAutomatically), and only once that has actually happened is
+ * it recorded on the backend (sms.ts's sendSms) so every other signed-
+ * in device sees it too.
+ *
+ * `phone` undefined (a brand new SMS conversation whose contact
+ * somehow has none) fails the mutation outright — there is nowhere to
+ * send it.
+ */
+export function useSendSmsMessage(conversationId: string, phone: string | undefined) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (vars: { text: string; clientMessageId?: string }): Promise<Message | null> => {
+      if (!phone) throw new Error('This conversation has no phone number to send SMS to.');
+      const sent = await sendSmsAutomatically(phone, vars.text);
+      // Nothing left this phone — safe to fail the mutation outright;
+      // the optimistic bubble below becomes a FAILED one a retry can
+      // safely re-attempt from scratch, since nothing went out yet.
+      if (!sent) throw new Error('Could not send that text.');
+
+      try {
+        // The exact same id smsSync.ts's own periodic re-scan of
+        // content://sms/sent will resolve for this text later, so an
+        // immediate record here and that background one agree on one
+        // identity instead of the backend's dedup index being the only
+        // thing standing between them and two rows for one real SMS.
+        const clientMessageId = (await findSentSmsClientMessageId(phone, vars.text)) ?? vars.clientMessageId!;
+        return await sendSmsToBackend({ phone, body: vars.text, date: Date.now(), direction: 'OUT', clientMessageId });
+      } catch {
+        // The text already left this phone's SIM over its carrier
+        // network — only this backend record of it failed, almost
+        // always for lack of mobile data/WiFi right now rather than
+        // anything wrong with the send itself. null (not a throw) is
+        // deliberate: it routes to onSuccess, not onError, because a
+        // FAILED bubble here would invite a retry that calls
+        // sendSmsAutomatically again — a second, real text on the wire
+        // for one that already went out. The background sync above
+        // already resolved the same clientMessageId this text will
+        // eventually be persisted under regardless of this call's
+        // outcome.
+        return null;
+      }
+    },
+    onMutate: (vars: { text: string; clientMessageId?: string }) => {
+      const tempId = makeTempId();
+      vars.clientMessageId = tempId;
+
+      const optimistic: Message = {
+        id: tempId,
+        conversationId,
+        direction: 'OUT',
+        type: 'text',
+        text: vars.text,
+        status: 'QUEUED',
+        createdAt: new Date().toISOString(),
+      };
+      upsertMessageInCache(queryClient, conversationId, optimistic);
+      return { tempId };
+    },
+    onSuccess: (message, _vars, context) => {
+      if (!message) {
+        // Sent, not yet confirmed by the backend — flip the placeholder
+        // so it doesn't read as still-sending forever. If the
+        // background sync's own push later delivers the real message
+        // under a different id, this leaves a harmless duplicate-
+        // looking row behind rather than a misleading FAILED one; see
+        // the mutationFn catch above for why that tradeoff is on
+        // purpose.
+        patchMessages(queryClient, conversationId, (pages) =>
+          pages.map((page) => ({
+            ...page,
+            items: page.items.map((m) => (m.id === context.tempId ? { ...m, status: 'SENT' as const } : m)),
+          })),
+        );
+        return;
+      }
+      patchMessages(queryClient, conversationId, (pages) =>
+        pages.map((page) => ({
+          ...page,
+          items: page.items.filter((m) => m.id !== context.tempId),
+        })),
+      );
+      upsertMessageInCache(queryClient, conversationId, message);
+      playSentSound();
+    },
+    onError: (err, _vars, context) => {
+      if (!context) return;
+      // Only ever reached when sendSmsAutomatically itself failed —
+      // nothing physically went out, so FAILED with a retry (which
+      // re-attempts the native send) is safe.
+      captureHandledError(err, { stage: 'sendSmsMessage' });
+      patchMessages(queryClient, conversationId, (pages) =>
+        pages.map((page) => ({
+          ...page,
+          items: page.items.map((m) => (m.id === context.tempId ? { ...m, status: 'FAILED' as const } : m)),
+        })),
+      );
     },
   });
 }

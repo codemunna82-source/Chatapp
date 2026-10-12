@@ -22,11 +22,21 @@ function openSmsComposer(phone: string, body: string) {
  * iOS is the one genuine exception: Apple gives no app a way to send
  * SMS on the user's behalf at all, so the native compose sheet opening
  * there is the only path that exists, not a fallback VOXO is choosing.
+ *
+ * Returns whether it actually went out, so a caller that needs to know
+ * (the real SMS-channel composer in ConversationDetailScreen, deciding
+ * whether to also persist this send to the backend) can tell a genuine
+ * failure apart from success — every existing caller that only fires
+ * this off (`void sendSmsAutomatically(...)`) is unaffected, since this
+ * already alerted the agent itself either way.
  */
-export async function sendSmsAutomatically(phone: string, body: string): Promise<void> {
+export async function sendSmsAutomatically(phone: string, body: string): Promise<boolean> {
   if (Platform.OS !== 'android') {
     openSmsComposer(phone, body);
-    return;
+    // No way to know if they actually sent it from the composer that
+    // opened — treated as success since nothing on this path can fail
+    // before the point VOXO's own part of the job (opening it) is done.
+    return true;
   }
 
   const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.SEND_SMS, {
@@ -42,12 +52,13 @@ export async function sendSmsAutomatically(phone: string, body: string): Promise
       'Could not send',
       'VOXO doesn\'t have permission to send SMS, so nothing was sent. Check Settings > Permissions — if "Send SMS" is blocked, open this app\'s own Info page (long-press the VOXO icon > App info > ⋮) and allow restricted settings first, then grant it and try again.',
     );
-    return;
+    return false;
   }
 
   try {
     await sendSmsNative(phone, body);
     recordSmsSent();
+    return true;
   } catch (err) {
     // The native reason (see VoxoSmsAutoReplyModule.sendSms) — a dual-SIM
     // phone with no default SIM chosen for SMS was the common cause
@@ -59,5 +70,6 @@ export async function sendSmsAutomatically(phone: string, body: string): Promise
       'Could not send',
       `${reason}. Nothing opened — try sending again in a moment. If this keeps happening on a dual-SIM phone, check Settings > Apps > Messages (or SIM cards) for a default SIM chosen for SMS.`,
     );
+    return false;
   }
 }

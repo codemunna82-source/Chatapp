@@ -478,6 +478,19 @@ function MessageBubbleImpl({
           {message.starredAt ? (
             <Ionicons name="star" size={11} color={textColor} style={styles.starMark} />
           ) : null}
+          {/* The one visible sign this bubble didn't go over WhatsApp —
+              everything else about it (shape, colour, position, ticks)
+              stays exactly the same, on purpose: this is a different wire,
+              not a different kind of message. */}
+          {message.channel === 'sms' ? (
+            <Ionicons
+              name="call-outline"
+              size={11}
+              color={textColor}
+              style={styles.smsMark}
+              accessibilityLabel="Sent by SMS"
+            />
+          ) : null}
           {showFailure ? (
             <Text style={[typography.caption, { color: colors.danger, marginRight: 4 }]}>
               {failureNote ? 'Not sent' : 'Failed · tap to retry'}
@@ -534,6 +547,7 @@ const styles = StyleSheet.create({
   // Sits with the timestamp rather than over the text: it marks the message
   // without competing with what the message says.
   starMark: { marginRight: 4, opacity: 0.75 },
+  smsMark: { marginRight: 4, opacity: 0.6 },
   failureNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginTop: 4 },
   failureIcon: { marginTop: 1 },
   revoked: { flexDirection: 'row', alignItems: 'center', gap: 6 },

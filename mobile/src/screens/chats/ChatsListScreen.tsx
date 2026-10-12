@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
@@ -32,55 +32,11 @@ import { touchTarget } from '../../theme/spacing';
 import type { ChatsStackParamList } from '../../navigation/types';
 import { impactMedium, selectionFeedback } from '../../utils/haptics';
 import type { Conversation } from '../../api/types';
-import { useLocalSmsThreads, type LocalSmsThread } from './useLocalSmsThreads';
 
 type Props = NativeStackScreenProps<ChatsStackParamList, 'ChatsList'>;
 
 /** Module scope: a stable identity FlashList can rely on across renders. */
 const keyExtractor = (item: Conversation) => item.id;
-
-/**
- * Local SMS lead threads (useLocalSmsThreads) are not real conversations —
- * there is no backend record behind them at all — but they render in the
- * same list, via the same ChatListItem, as a row shaped like one. This
- * prefix is how every handler below tells the two apart, since a real
- * conversation's id is a backend-issued one this can never collide with.
- */
-const SMS_ID_PREFIX = 'sms:';
-const smsConversationId = (phone: string) => `${SMS_ID_PREFIX}${phone}`;
-const phoneFromSmsConversationId = (id: string) => id.slice(SMS_ID_PREFIX.length);
-const isSmsConversationId = (id: string) => id.startsWith(SMS_ID_PREFIX);
-
-function smsThreadToConversation(thread: LocalSmsThread): Conversation {
-  const latest = thread.messages[0];
-  const iso = latest ? new Date(latest.date).toISOString() : new Date().toISOString();
-  return {
-    id: smsConversationId(thread.phone),
-    tenantId: '',
-    contactId: smsConversationId(thread.phone),
-    contact: {
-      id: smsConversationId(thread.phone),
-      tenantId: '',
-      phone: thread.phone,
-      tags: [],
-      isDemo: false,
-      blocked: false,
-      createdAt: iso,
-      updatedAt: iso,
-    },
-    whatsappPhoneNumberId: '',
-    lastMessageAt: iso,
-    lastMessagePreview: latest?.body,
-    withinCustomerServiceWindow: false,
-    isDemo: false,
-    unreadCount: 0,
-    manuallyUnread: false,
-    pinned: false,
-    status: 'OPEN',
-    createdAt: iso,
-    updatedAt: iso,
-  };
-}
 
 /**
  * The inbox wears the same palette as the conversation it opens.
@@ -148,29 +104,6 @@ function ChatsListScreenInner({ navigation }: Props) {
   // the freshly-allocated array flatten returns, so the list only rebuilds
   // when the conversations actually change.
   const conversations = useMemo(() => flattenConversations(query.data), [query.data]);
-  // Local SMS lead threads — Android only, see useLocalSmsThreads.ts. Shown
-  // as their own section above the real conversations, never merged into
-  // their sort order: the backend already orders pinned-then-recent, and
-  // re-sorting everything by a client-side timestamp compare would break
-  // that for the real chats to make room for the local ones.
-  const { threads: smsThreads, refresh: refreshSmsThreads } = useLocalSmsThreads();
-  const showSmsSection = Platform.OS === 'android' && !showArchived && filter !== 'unread';
-  const smsConversations = useMemo(() => {
-    if (!showSmsSection) return [];
-    const searchQuery = debouncedSearch.trim().toLowerCase();
-    const filtered = searchQuery
-      ? smsThreads.filter(
-          (t) =>
-            t.phone.toLowerCase().includes(searchQuery) ||
-            t.messages.some((m) => m.body.toLowerCase().includes(searchQuery)),
-        )
-      : smsThreads;
-    return filtered.map(smsThreadToConversation);
-  }, [showSmsSection, smsThreads, debouncedSearch]);
-  const listData = useMemo(
-    () => (smsConversations.length ? [...smsConversations, ...conversations] : conversations),
-    [smsConversations, conversations],
-  );
   const pinConversation = usePinConversation();
   const archiveConversation = useArchiveConversation();
   const deleteConversation = useDeleteConversation();
@@ -200,12 +133,6 @@ function ChatsListScreenInner({ navigation }: Props) {
 
   const handleOpen = useCallback(
     (conversation: Conversation) => {
-      // A local SMS thread has no backend id to select, pin, archive or
-      // delete — it always just opens, selection mode or not.
-      if (isSmsConversationId(conversation.id)) {
-        navigation.navigate('SmsThread', { phone: phoneFromSmsConversationId(conversation.id) });
-        return;
-      }
       // While selecting, a tap toggles the row rather than leaving the
       // screen — the same rule the message list uses.
       if (selectionMode) {
@@ -219,8 +146,6 @@ function ChatsListScreenInner({ navigation }: Props) {
 
   const handleLongPress = useCallback(
     (conversation: Conversation) => {
-      // No action sheet for a local SMS thread — same reasoning as above.
-      if (isSmsConversationId(conversation.id)) return;
       // Long-pressing during a selection extends it instead of opening a
       // single-chat sheet whose actions would contradict the selection.
       if (selectionMode) {
@@ -326,7 +251,7 @@ function ChatsListScreenInner({ navigation }: Props) {
         conversation={item}
         onPress={handleOpen}
         onLongPress={handleLongPress}
-        selectable={selectionMode && !isSmsConversationId(item.id)}
+        selectable={selectionMode}
         selected={selectedIds.includes(item.id)}
       />
     ),
@@ -353,19 +278,16 @@ function ChatsListScreenInner({ navigation }: Props) {
         refreshing={query.isRefetching}
         onRefresh={() => {
           void query.refetch();
-          // Not itself async — pull-to-refresh's own spinner tracks the
-          // real conversations fetch above, not this local re-scan.
-          refreshSmsThreads();
         }}
         tintColor={colors.primary}
       />
     ),
-    [query, colors.primary, refreshSmsThreads],
+    [query, colors.primary],
   );
   const listContentStyle = useMemo(() => ({ paddingBottom: spacing.lg }), [spacing.lg]);
 
   const showSkeleton = query.isLoading;
-  const showEmpty = !showSkeleton && listData.length === 0;
+  const showEmpty = !showSkeleton && conversations.length === 0;
 
   return (
     // paddingTop, not a SafeAreaView: the status bar has to be the SAME
@@ -492,7 +414,7 @@ function ChatsListScreenInner({ navigation }: Props) {
         />
       ) : (
         <FlashList
-          data={listData}
+          data={conversations}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           // Memoized, not an inline arrow. An arrow here is a NEW COMPONENT

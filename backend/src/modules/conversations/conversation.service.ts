@@ -22,7 +22,8 @@ export interface PublicConversation {
   tenantId: string;
   contactId: string;
   contact?: PublicContact;
-  whatsappPhoneNumberId: string;
+  /** Null for an SMS-only conversation — see Conversation.whatsappPhoneNumberId. */
+  whatsappPhoneNumberId: string | null;
   lastMessageAt?: Date;
   lastMessagePreview?: string;
   /** Who sent the last message, and — for our own sends — how far it got.
@@ -90,7 +91,7 @@ function toPublicConversation(doc: ConversationLean, contact?: ContactLean): Pub
     tenantId: String(doc.tenantId),
     contactId: String(doc.contactId),
     contact: contact ? toPublicContact(contact) : undefined,
-    whatsappPhoneNumberId: String(doc.whatsappPhoneNumberId),
+    whatsappPhoneNumberId: doc.whatsappPhoneNumberId ? String(doc.whatsappPhoneNumberId) : null,
     lastMessageAt: doc.lastMessageAt ?? undefined,
     lastMessagePreview: doc.lastMessagePreview ?? undefined,
     lastMessageDirection: (doc.lastMessageDirection as 'IN' | 'OUT' | null) ?? undefined,
