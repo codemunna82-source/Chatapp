@@ -26,12 +26,26 @@ keystore.properties
 *.keystore
 *.jks
 
-# The debug keystore is the opposite case: it's Android's well-known,
-# publicly documented shared debug signing key (password "android", alias
-# "androiddebugkey" — see https://developer.android.com/studio/publish/app-signing#debug-mode),
-# not a secret, and it's what "*.keystore" above would otherwise exclude.
-# It IS committed so every clone (including CI) gets byte-identical debug
-# builds instead of `:app:validateSigningDebug` failing on a missing file.
+# The debug keystore is the opposite case: it's what "*.keystore" above
+# would otherwise exclude, and it IS committed — every clone (including CI)
+# needs the same file or `:app:validateSigningDebug` fails on a missing one.
+#
+# Only the storePassword/keyPassword/keyAlias ("android"/"android"/
+# "androiddebugkey" — see https://developer.android.com/studio/publish/app-signing#debug-mode)
+# are the public, standard convention; those are not a secret and were
+# never the issue. The actual key PAIR inside this file must stay unique to
+# this project rather than being Android/React Native's literal shared
+# template keystore (which this file used to be, byte for byte — same
+# fingerprint as whatever countless other tutorial/boilerplate repos on
+# GitHub also ship). Google Play Protect's on-device reputation check
+# flagged exactly that: a certificate it has seen attached to thousands of
+# unrelated apps, on an app that also asks for SMS permissions, got a hard
+# "blocked to protect your device" with no install-anyway option. Generated
+# fresh for this project with `keytool -genkeypair` (same alias/passwords,
+# a new random key) to get out from under that shared-certificate history.
+# Replacing it again means every device with VOXO already installed has to
+# uninstall before the next build can go on — Android won't update an app
+# in place across a different signing certificate.
 !app/debug.keystore
 
 # Firebase config for FCM — identifies one specific Firebase project, so
