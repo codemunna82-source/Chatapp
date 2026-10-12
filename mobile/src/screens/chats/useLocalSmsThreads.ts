@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { listInboxSms } from '../../utils/localSmsInbox';
-import { matchesLeadKeywords } from '../../utils/smsLeadMatch';
+import { isIndianMobileSender } from '../../utils/smsLeadMatch';
 
 export interface LocalSmsMessage {
   id: number;
@@ -18,9 +18,9 @@ export interface LocalSmsThread {
 
 /**
  * Lead SMS threads, grouped by sender, from the device's own inbox — the
- * same keyword-matched set Settings > SMS already reads, regrouped so the
- * Chats tab can show one row per sender (like a conversation) instead of
- * one row per text.
+ * same real-mobile-number-filtered set Settings > SMS already reads (see
+ * isIndianMobileSender), regrouped so the Chats tab can show one row per
+ * sender (like a conversation) instead of one row per text.
  *
  * Android only, and entirely local: nothing here is a backend
  * conversation, so there is no history once the device changes and
@@ -43,7 +43,7 @@ export function useLocalSmsThreads(): { threads: LocalSmsThread[]; granted: bool
         .then((raw) => {
           const bySender = new Map<string, LocalSmsMessage[]>();
           for (const sms of raw) {
-            if (!matchesLeadKeywords(sms.body)) continue;
+            if (!isIndianMobileSender(sms.address)) continue;
             const list = bySender.get(sms.address) ?? [];
             list.push({ id: sms._id, body: sms.body, date: sms.date });
             bySender.set(sms.address, list);

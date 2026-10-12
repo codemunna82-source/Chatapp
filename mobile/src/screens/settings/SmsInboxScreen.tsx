@@ -6,7 +6,7 @@ import { Screen } from '../../components/Screen';
 import { Button } from '../../components/Button';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatChatListTime } from '../../utils/formatTime';
-import { MATCH_KEYWORDS, matchesLeadKeywords } from '../../utils/smsLeadMatch';
+import { isIndianMobileSender } from '../../utils/smsLeadMatch';
 import { listInboxSms } from '../../utils/localSmsInbox';
 
 interface MatchedSms {
@@ -19,12 +19,13 @@ interface MatchedSms {
 type PermissionState = 'unknown' | 'granted' | 'denied';
 
 /**
- * Messages from the phone's own SMS inbox that mention this workspace's
- * leads — matched locally on-device against a small fixed keyword list
- * (see MATCH_KEYWORDS), never the agent's whole personal inbox. Android
- * only: there is no equivalent API on iOS to read another app's SMS at
- * all, which is itself exactly the privacy boundary this screen respects
- * by filtering down to three words instead of mirroring everything.
+ * Messages from the phone's own SMS inbox that look like they came from a
+ * real person's number — filtered locally on-device by sender shape (see
+ * isIndianMobileSender), never by what a message says, and never the
+ * agent's whole personal inbox: an OTP, bank alert or promotional blast
+ * comes from an alphanumeric or short-code sender id and is excluded by
+ * that filter regardless of its text. Android only: there is no
+ * equivalent API on iOS to read another app's SMS at all.
  */
 export function SmsInboxScreen() {
   const { colors, spacing, radius, typography } = useTheme();
@@ -41,7 +42,7 @@ export function SmsInboxScreen() {
     try {
       const raw = await listInboxSms();
       const matched = raw
-        .filter((sms) => matchesLeadKeywords(sms.body))
+        .filter((sms) => isIndianMobileSender(sms.address))
         .map((sms) => ({ id: sms._id, address: sms.address, body: sms.body, date: sms.date }))
         .sort((a, b) => b.date - a.date);
       setMessages(matched);
@@ -91,7 +92,7 @@ export function SmsInboxScreen() {
         <View style={styles.centered}>
           <Ionicons name="chatbox-outline" size={28} color={colors.textTertiary} />
           <Text style={[typography.body, { color: colors.textSecondary, marginTop: spacing.sm, textAlign: 'center' }]}>
-            No SMS matching &ldquo;{MATCH_KEYWORDS.join('", "')}&rdquo; yet.
+            No SMS from a real mobile number yet.
           </Text>
         </View>
       );

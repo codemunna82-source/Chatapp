@@ -17,8 +17,14 @@ import androidx.core.app.Person
 /**
  * Catches an incoming SMS the instant it arrives — even if VOXO is not
  * running, since a manifest-declared receiver for this action still gets
- * started by the OS — and, if its text matches one of a small fixed
- * keyword list, schedules a reply with this agent's personal chat link.
+ * started by the OS — and does two independent things with it: shows it
+ * to the agent (postLeadNotification, Chats tab, Settings > SMS) for any
+ * sender that looks like a real mobile number, and, only if its text
+ * also matches one of a small fixed keyword list, schedules an auto-reply
+ * with this agent's personal chat link. The first is about noticing a
+ * text arrived; the second is about replying to it on VOXO's own
+ * initiative, which is why a wider net on the first was never a reason
+ * to widen the second — see isIndianMobileSender vs. matchesKeyword below.
  *
  * The reply does not go out from here. Several leads texting in within
  * moments of each other must not turn into a burst of SMS sent back to
@@ -51,16 +57,24 @@ class SmsAutoReplyReceiver : BroadcastReceiver() {
 
     val sender = messages[0].originatingAddress ?: return
     val body = messages.joinToString("") { it.messageBody ?: "" }
-    if (!matchesKeyword(body)) return
 
-    // Shown the moment a matching text arrives, whether or not auto-reply
-    // is even turned on — "VOXO replies on its own" and "the agent notices
-    // a lead texted in" are two different things, and only the first one
-    // was ever gated on the switch. Without this, the only way to find out
-    // a matching SMS had arrived was to happen to open the Chats tab and
-    // have it re-scan — nothing ever pushed it to the agent the way an
-    // incoming WhatsApp message does.
-    postLeadNotification(context, sender, body)
+    // Shown for any text that looks like it came from a real person's
+    // number — see isIndianMobileSender below — regardless of what it
+    // says, whether or not auto-reply is even turned on. "VOXO replies on
+    // its own" and "the agent notices someone texted in" are different
+    // things, and only the first one is gated on a keyword at all.
+    // Without this, the only way to find out an SMS had arrived was to
+    // happen to open the Chats tab and have it re-scan — nothing ever
+    // pushed it to the agent the way an incoming WhatsApp message does.
+    if (isIndianMobileSender(sender)) {
+      postLeadNotification(context, sender, body)
+    }
+
+    // The auto-reply itself stays keyword-gated — see MATCH_KEYWORDS.
+    // Relaxing what gets SHOWN to the agent is not a reason to relax what
+    // gets a chat-link texted back automatically; that would mean a
+    // stray "hi mom" gets a reply nobody asked for.
+    if (!matchesKeyword(body)) return
 
     val prefs = context.getSharedPreferences(VoxoSmsAutoReplyModule.PREFS_NAME, Context.MODE_PRIVATE)
     if (!prefs.getBoolean(VoxoSmsAutoReplyModule.KEY_ENABLED, false)) return
@@ -176,6 +190,24 @@ class SmsAutoReplyReceiver : BroadcastReceiver() {
     private fun matchesKeyword(body: String): Boolean {
       val lower = body.lowercase()
       return KEYWORDS.any { lower.contains(it) }
+    }
+
+    /**
+     * Must match isIndianMobileSender in smsLeadMatch.ts — no shared
+     * source between Kotlin and TS to enforce that automatically, same
+     * as KEYWORDS/MATCH_KEYWORDS above.
+     *
+     * True for a sender that looks like a real 10-digit Indian mobile
+     * number (optionally with a country code or trunk prefix), false for
+     * a DLT-registered alphanumeric sender id ("VM-HDFCBK") or a short
+     * numeric gateway code ("56070", "121") — the senders an OTP, a bank
+     * alert, or a promotional blast actually come from.
+     */
+    private fun isIndianMobileSender(address: String): Boolean {
+      if (address.any { it.isLetter() }) return false
+      val digits = address.filter { it.isDigit() }
+      if (digits.length < 10 || digits.length > 12) return false
+      return digits.takeLast(10).first() in '6'..'9'
     }
   }
 }
