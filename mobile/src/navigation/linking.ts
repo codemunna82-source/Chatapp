@@ -17,6 +17,10 @@ export const linking: LinkingOptions<ReactNavigation.RootParamList> = {
         screens: {
           ChatsList: 'chats',
           ConversationDetail: 'conversation/:conversationId',
+          // Matches SmsAutoReplyReceiver.kt's own voxo://sms-thread/<phone>
+          // notification — the native half has no way to read this file,
+          // so the path has to be kept in step by hand.
+          SmsThread: 'sms-thread/:phone',
         },
       },
       DashboardTab: 'dashboard',

@@ -1,11 +1,18 @@
 package com.voxo.app
 
 import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
+import android.net.Uri
+import android.os.Build
 import android.provider.Telephony
+import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 
 /**
  * Catches an incoming SMS the instant it arrives — even if VOXO is not
@@ -39,18 +46,27 @@ class SmsAutoReplyReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
     if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
 
-    val prefs = context.getSharedPreferences(VoxoSmsAutoReplyModule.PREFS_NAME, Context.MODE_PRIVATE)
-    if (!prefs.getBoolean(VoxoSmsAutoReplyModule.KEY_ENABLED, false)) return
-
-    val replyText = prefs.getString(VoxoSmsAutoReplyModule.KEY_REPLY_TEXT, null)
-    if (replyText.isNullOrBlank()) return
-
     val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
     if (messages.isNullOrEmpty()) return
 
     val sender = messages[0].originatingAddress ?: return
     val body = messages.joinToString("") { it.messageBody ?: "" }
     if (!matchesKeyword(body)) return
+
+    // Shown the moment a matching text arrives, whether or not auto-reply
+    // is even turned on — "VOXO replies on its own" and "the agent notices
+    // a lead texted in" are two different things, and only the first one
+    // was ever gated on the switch. Without this, the only way to find out
+    // a matching SMS had arrived was to happen to open the Chats tab and
+    // have it re-scan — nothing ever pushed it to the agent the way an
+    // incoming WhatsApp message does.
+    postLeadNotification(context, sender, body)
+
+    val prefs = context.getSharedPreferences(VoxoSmsAutoReplyModule.PREFS_NAME, Context.MODE_PRIVATE)
+    if (!prefs.getBoolean(VoxoSmsAutoReplyModule.KEY_ENABLED, false)) return
+
+    val replyText = prefs.getString(VoxoSmsAutoReplyModule.KEY_REPLY_TEXT, null)
+    if (replyText.isNullOrBlank()) return
 
     // Marked now, not after the delayed send actually fires — a second
     // matching text from the same sender arriving during the delay
@@ -93,8 +109,69 @@ class SmsAutoReplyReceiver : BroadcastReceiver() {
     alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + delayMs, pendingIntent)
   }
 
+  /**
+   * Drawn natively rather than through notifee/expo-notifications
+   * (messageNotification.ts) on purpose: those need the JS runtime
+   * running, and nothing wakes it for a plain SMS_RECEIVED broadcast the
+   * way an FCM data message wakes a headless JS task for a real WhatsApp
+   * message. This has to work with VOXO fully killed, so it is built with
+   * plain NotificationCompat instead — styled to read the same as a real
+   * message notification (MessagingStyle, the same channel, the same
+   * accent colour), not literally the same code path.
+   *
+   * CHAT_CHANNEL_ID must match pushRegistration.ts's own constant of the
+   * same name — same reasoning as KEYWORDS above, no shared source
+   * between Kotlin and TS. The channel is usually already created by the
+   * JS side by the time any SMS arrives (first app launch sets it up),
+   * but is created here too, defensively, for the install that receives
+   * a lead text before VOXO has ever been opened once.
+   */
+  private fun postLeadNotification(context: Context, sender: String, body: String) {
+    val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager.getNotificationChannel(CHAT_CHANNEL_ID) == null) {
+      val channel = NotificationChannel(CHAT_CHANNEL_ID, "Messages", NotificationManager.IMPORTANCE_HIGH)
+      channel.enableVibration(true)
+      channel.vibrationPattern = longArrayOf(0, 250, 250, 250)
+      channel.lightColor = ACCENT_COLOR
+      manager.createNotificationChannel(channel)
+    }
+
+    // Opens straight to this lead's SMS thread — SmsThread in
+    // linking.ts — rather than just launching the app and leaving the
+    // agent to go find it.
+    val uri = Uri.Builder().scheme("voxo").authority("sms-thread").appendPath(sender).build()
+    val openIntent = Intent(Intent.ACTION_VIEW, uri, context, MainActivity::class.java).apply {
+      flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+    }
+    val contentIntent = PendingIntent.getActivity(
+      context,
+      sender.hashCode(),
+      openIntent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    val person = Person.Builder().setName(sender).build()
+    val style = NotificationCompat.MessagingStyle(person).addMessage(body, System.currentTimeMillis(), person)
+
+    val notification = NotificationCompat.Builder(context, CHAT_CHANNEL_ID)
+      .setSmallIcon(R.drawable.notification_icon)
+      .setColor(ACCENT_COLOR)
+      .setStyle(style)
+      .setContentIntent(contentIntent)
+      .setAutoCancel(true)
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+      .build()
+
+    manager.notify(sender.hashCode(), notification)
+  }
+
   companion object {
     private val KEYWORDS = listOf("hii", "saw", "profile")
+
+    /** Must match pushRegistration.ts's CHAT_CHANNEL_ID. */
+    private const val CHAT_CHANNEL_ID = "voxo-messages"
+    private val ACCENT_COLOR = Color.parseColor("#26344D")
 
     private fun matchesKeyword(body: String): Boolean {
       val lower = body.lowercase()
