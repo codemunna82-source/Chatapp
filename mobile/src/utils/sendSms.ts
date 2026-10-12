@@ -1,5 +1,5 @@
 import { Alert, Linking, PermissionsAndroid, Platform } from 'react-native';
-import SmsAndroid from 'react-native-get-sms-android';
+import { sendSmsNative } from '../native/smsAutoReply';
 import { recordSmsSent } from '../storage/smsSendTracker';
 
 function openSmsComposer(phone: string, body: string) {
@@ -10,10 +10,18 @@ function openSmsComposer(phone: string, body: string) {
 
 /**
  * Sends an SMS straight off the device's own SIM on Android — no
- * composer, no manual tap to send — via react-native-get-sms-android's
- * autoSend. Falls back to opening the native SMS composer on iOS (Apple
- * gives no app a way to send SMS on the user's behalf at all), if the
- * SEND_SMS permission is denied, or if the send itself fails.
+ * composer, no other app opening, ever — via VoxoSmsAutoReplyModule's
+ * own sendSms (native, subscription-aware; see its own doc for why
+ * react-native-get-sms-android's autoSend was dropped: it always called
+ * the bare SmsManager.getDefault(), which fails outright on a dual-SIM
+ * phone with no default SIM chosen for SMS and used to fall back to an
+ * "Open with" app chooser nobody asked for). A failure now surfaces as
+ * an alert with the real reason instead — nothing opens, so the agent
+ * is never left wondering why Messages or WhatsApp suddenly appeared.
+ *
+ * iOS is the one genuine exception: Apple gives no app a way to send
+ * SMS on the user's behalf at all, so the native compose sheet opening
+ * there is the only path that exists, not a fallback VOXO is choosing.
  */
 export async function sendSmsAutomatically(phone: string, body: string): Promise<void> {
   if (Platform.OS !== 'android') {
@@ -27,37 +35,29 @@ export async function sendSmsAutomatically(phone: string, body: string): Promise
     buttonPositive: 'Allow',
   });
   if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-    // Silently falling back here reads as "VOXO opened the Messages app for
-    // no reason" — the actual, common cause (on Android 13+, a sideloaded
-    // APK's permission request can be silently blocked by "Restricted
-    // settings" until the agent allows it from the app's own Info page; see
-    // Settings > Permissions) needs to be said out loud, not left implicit.
+    // On Android 13+, a sideloaded APK's permission request can be
+    // silently blocked by "Restricted settings" until the agent allows
+    // it from the app's own Info page — see Settings > Permissions.
     Alert.alert(
-      'Could not send directly',
-      "VOXO doesn't have permission to send SMS, so the Messages app opened instead this time. Check Settings > Permissions — if \"Send SMS\" is blocked, open this app's own Info page (long-press the VOXO icon > App info > ⋮) and allow restricted settings first, then grant it again from there.",
+      'Could not send',
+      'VOXO doesn\'t have permission to send SMS, so nothing was sent. Check Settings > Permissions — if "Send SMS" is blocked, open this app\'s own Info page (long-press the VOXO icon > App info > ⋮) and allow restricted settings first, then grant it and try again.',
     );
-    openSmsComposer(phone, body);
     return;
   }
 
-  SmsAndroid.autoSend(
-    phone,
-    body,
-    // The library's own failure reason (see SmsModule.java) — "Generic
-    // failure", "No service", "Null PDU" or "Radio off" — not shown
-    // before, so a real cause (most often: a dual-SIM phone with no
-    // default SIM chosen for SMS, which SmsManager.getDefault() then has
-    // nothing to pick) read as an unexplained fallback to the Messages
-    // app instead of a diagnosable error.
-    (reason: string) => {
-      Alert.alert(
-        'Could not send automatically',
-        `${reason}. Opening the SMS app so you can send it yourself. If this keeps happening on a dual-SIM phone, check Settings > Apps > Messages/SIM cards for a default SIM chosen for SMS — Android needs one to send without asking.`,
-      );
-      openSmsComposer(phone, body);
-    },
-    () => {
-      recordSmsSent();
-    },
-  );
+  try {
+    await sendSmsNative(phone, body);
+    recordSmsSent();
+  } catch (err) {
+    // The native reason (see VoxoSmsAutoReplyModule.sendSms) — a dual-SIM
+    // phone with no default SIM chosen for SMS was the common cause
+    // getSmsManager now resolves around; a genuine radio/signal failure
+    // can still surface here, which is why this stays an alert rather
+    // than a silent retry.
+    const reason = err instanceof Error ? err.message : 'Could not send';
+    Alert.alert(
+      'Could not send',
+      `${reason}. Nothing opened — try sending again in a moment. If this keeps happening on a dual-SIM phone, check Settings > Apps > Messages (or SIM cards) for a default SIM chosen for SMS.`,
+    );
+  }
 }

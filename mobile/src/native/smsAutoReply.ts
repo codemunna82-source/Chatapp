@@ -24,6 +24,7 @@ interface VoxoSmsAutoReplyNative {
   setConfig(enabled: boolean, replyText: string): void;
   setDailyLimit(limit: number): void;
   getStatus(): Promise<SmsAutoReplyStatus>;
+  sendSms(phone: string, body: string): Promise<boolean>;
 }
 
 const native: VoxoSmsAutoReplyNative | undefined =
@@ -47,4 +48,18 @@ export async function getSmsAutoReplyStatus(): Promise<SmsAutoReplyStatus> {
   } catch {
     return DEFAULT_STATUS;
   }
+}
+
+/**
+ * Sends an SMS straight off the resolved SmsManager — see
+ * VoxoSmsAutoReplyModule.kt's own getSmsManager for why this exists
+ * instead of react-native-get-sms-android's autoSend: that library
+ * always calls the bare SmsManager.getDefault(), which fails outright
+ * on a dual-SIM phone with no default SIM chosen for SMS, where
+ * getSmsManager resolves an explicit subscription instead. Android
+ * only; sendSms.ts is the caller and handles the iOS / failure cases.
+ */
+export async function sendSmsNative(phone: string, body: string): Promise<void> {
+  if (!native) throw new Error('Native SMS sending is only available on Android.');
+  await native.sendSms(phone, body);
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
 import android.telephony.SmsManager
+import android.telephony.SubscriptionManager
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -49,6 +50,33 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
     map.putInt("dailyLimit", prefs().getInt(KEY_DAILY_LIMIT, DEFAULT_DAILY_LIMIT))
     map.putInt("sentToday", readDailyCount(prefs()))
     promise.resolve(map)
+  }
+
+  /**
+   * sendSms.ts's own send, replacing react-native-get-sms-android's
+   * autoSend — that library always calls the bare SmsManager.getDefault(),
+   * which has nothing to pick on a dual-SIM phone with no default SIM
+   * chosen for SMS and fails with "Generic failure"/"No service" every
+   * time, falling back to an "Open with" app chooser an agent never
+   * asked for. getSmsManager below resolves an explicit subscription
+   * first, which is what actually fixes that — this method exists so
+   * the fix is used by the composer / SMS thread send path too, not just
+   * the auto-reply one that already called getSmsManager.
+   *
+   * No sent-intent/delivery confirmation, same as SmsAutoReplySendReceiver
+   * — resolves as soon as the synchronous call does not throw, which is
+   * as much certainty as that receiver has ever had.
+   */
+  @ReactMethod
+  fun sendSms(phone: String, body: String, promise: Promise) {
+    try {
+      val smsManager = getSmsManager(reactApplicationContext)
+      val parts = smsManager.divideMessage(body)
+      smsManager.sendMultipartTextMessage(phone, null, parts, null, null)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("SEND_FAILED", e.message ?: "Could not send", e)
+    }
   }
 
   private fun prefs() =
@@ -117,16 +145,32 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
     fun repliedKeyFor(sender: String): String = "replied_to:$sender"
 
     /**
-     * getDefault() is deprecated from API 31 on — the system-service
-     * lookup is its replacement, but only exists from API 31 on too, so
-     * minSdk 24 still needs the old call as a fallback.
+     * The bare SmsManager (getDefault() / the system-service lookup that
+     * replaces it from API 31) has nothing to disambiguate with on a
+     * dual-SIM phone where no line has been chosen as the default for
+     * SMS — Android's own "always ask" setting — and sending through it
+     * then fails outright rather than asking anything, since there is no
+     * UI in front of a plain API call to ask with. getDefaultSmsSubscriptionId
+     * is what the Messages app itself reads for exactly this before
+     * sending, so resolving a SmsManager FOR that subscription id first
+     * is what actually avoids the failure, not just explains it.
+     *
+     * Falls back to the bare lookup only when there is truly no default
+     * to resolve (INVALID_SUBSCRIPTION_ID) — same behaviour as before for
+     * single-SIM phones and dual-SIM phones that do have a default set,
+     * which is the common case either way.
      */
-    fun getSmsManager(context: Context): SmsManager =
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    fun getSmsManager(context: Context): SmsManager {
+      val defaultSubId = SmsManager.getDefaultSmsSubscriptionId()
+      if (defaultSubId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+        return SmsManager.getSmsManagerForSubscriptionId(defaultSubId)
+      }
+      return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         context.getSystemService(SmsManager::class.java)
       } else {
         @Suppress("DEPRECATION")
         SmsManager.getDefault()
       }
+    }
   }
 }
