@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { listInboxSms } from '../../utils/localSmsInbox';
+import { listSms } from '../../utils/localSmsInbox';
 import { isIndianMobileSender } from '../../utils/smsLeadMatch';
 
 export interface LocalSmsMessage {
   id: number;
   body: string;
   date: number;
+  /** True for a message VOXO itself sent — see listSms('sent'). */
+  outgoing: boolean;
 }
 
 export interface LocalSmsThread {
@@ -17,10 +19,15 @@ export interface LocalSmsThread {
 }
 
 /**
- * Lead SMS threads, grouped by sender, from the device's own inbox — the
- * same real-mobile-number-filtered set Settings > SMS already reads (see
- * isIndianMobileSender), regrouped so the Chats tab can show one row per
- * sender (like a conversation) instead of one row per text.
+ * Lead SMS threads, grouped by sender, from the device's own inbox AND
+ * sent box — the same real-mobile-number-filtered set Settings > SMS
+ * already reads for the inbox half (see isIndianMobileSender), merged
+ * with VOXO's own sends (sendSms in VoxoSmsAutoReplyModule.kt inserts a
+ * row into content://sms/sent, the same thing the Messages app itself
+ * does) so a reply shows up as a real, persisted message rather than
+ * local-only state that vanished the moment this screen unmounted —
+ * which used to read as "it sent the first time, then stopped" even
+ * though every send had gone out fine the whole time.
  *
  * Android only, and entirely local: nothing here is a backend
  * conversation, so there is no history once the device changes and
@@ -39,15 +46,22 @@ export function useLocalSmsThreads(): { threads: LocalSmsThread[]; granted: bool
         setThreads([]);
         return;
       }
-      void listInboxSms()
-        .then((raw) => {
+      void Promise.all([listSms('inbox'), listSms('sent')])
+        .then(([inbox, sent]) => {
           const bySender = new Map<string, LocalSmsMessage[]>();
-          for (const sms of raw) {
-            if (!isIndianMobileSender(sms.address)) continue;
-            const list = bySender.get(sms.address) ?? [];
-            list.push({ id: sms._id, body: sms.body, date: sms.date });
-            bySender.set(sms.address, list);
-          }
+          const add = (address: string, id: number, body: string, date: number, outgoing: boolean) => {
+            if (!isIndianMobileSender(address)) return;
+            const list = bySender.get(address) ?? [];
+            list.push({ id, body, date, outgoing });
+            bySender.set(address, list);
+          };
+          for (const sms of inbox) add(sms.address, sms._id, sms.body, sms.date, false);
+          // A sent row's own "_id" is only unique within its own box — an
+          // inbox message and a sent message can share the same id, which
+          // would collide as one FlatList/React key if both ever landed in
+          // the same thread. Offset keeps them apart without needing to
+          // touch every call site that reads LocalSmsMessage.id.
+          for (const sms of sent) add(sms.address, sms._id + 10_000_000, sms.body, sms.date, true);
           const grouped = Array.from(bySender.entries()).map(([phone, messages]) => ({
             phone,
             messages: messages.sort((a, b) => b.date - a.date),

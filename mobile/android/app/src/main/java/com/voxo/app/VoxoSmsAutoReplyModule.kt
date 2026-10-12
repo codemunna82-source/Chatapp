@@ -1,7 +1,9 @@
 package com.voxo.app
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Build
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
@@ -73,6 +75,27 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
       val smsManager = getSmsManager(reactApplicationContext)
       val parts = smsManager.divideMessage(body)
       smsManager.sendMultipartTextMessage(phone, null, parts, null, null)
+
+      // Without this, a send existed only as this screen's own local
+      // React state — gone the moment it unmounted, reading as "it sent
+      // the first time, then stopped working" on the next visit even
+      // though every later send had gone out fine too. Inserting into
+      // the system's own sent box (what the Messages app itself does
+      // after a send) is what useLocalSmsThreads now reads back, so a
+      // sent message is a real, persisted row rather than state that
+      // outlives nothing.
+      try {
+        val values = ContentValues()
+        values.put("address", phone)
+        values.put("body", body)
+        reactApplicationContext.contentResolver.insert(Uri.parse("content://sms/sent"), values)
+      } catch (_: Exception) {
+        // Best-effort — a handset that refuses this insert (some OEMs
+        // restrict content://sms writes to the default SMS app) still
+        // sent the text itself just fine above; only the local history
+        // entry is missing.
+      }
+
       promise.resolve(true)
     } catch (e: Exception) {
       promise.reject("SEND_FAILED", e.message ?: "Could not send", e)

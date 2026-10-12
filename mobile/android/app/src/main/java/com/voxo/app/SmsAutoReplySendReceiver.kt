@@ -1,8 +1,10 @@
 package com.voxo.app
 
 import android.content.BroadcastReceiver
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 
 /**
  * The second half of the auto-reply: fires from the AlarmManager alarm
@@ -23,6 +25,19 @@ class SmsAutoReplySendReceiver : BroadcastReceiver() {
       val smsManager = VoxoSmsAutoReplyModule.getSmsManager(context)
       val parts = smsManager.divideMessage(body)
       smsManager.sendMultipartTextMessage(sender, null, parts, null, null)
+
+      // Same reasoning as VoxoSmsAutoReplyModule.sendSms — without this an
+      // auto-reply never showed up as an outgoing bubble in the SMS
+      // thread at all, since useLocalSmsThreads reads the system's own
+      // sent box rather than anything this receiver could hand back to JS.
+      try {
+        val values = ContentValues()
+        values.put("address", sender)
+        values.put("body", body)
+        context.contentResolver.insert(Uri.parse("content://sms/sent"), values)
+      } catch (_: Exception) {
+        // Best-effort, same as sendSms — the reply itself already went out above.
+      }
 
       val prefs = context.getSharedPreferences(VoxoSmsAutoReplyModule.PREFS_NAME, Context.MODE_PRIVATE)
       prefs.edit()

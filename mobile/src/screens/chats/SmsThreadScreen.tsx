@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, Keyboard, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { KeyboardState, useAnimatedKeyboard, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Screen } from '../../components/Screen';
@@ -21,6 +22,23 @@ interface OutgoingDraft {
   body: string;
   date: number;
 }
+
+/**
+ * How often this screen re-scans the device's SMS boxes while it stays
+ * open. There is no OS push for "a new local SMS arrived" the way a
+ * socket event covers a real conversation, so without this a text that
+ * came in (or VOXO's own reply, once it lands in the sent box) while the
+ * agent was already sitting on this exact screen would never appear
+ * until they left and came back — which read as "it worked the first
+ * time, then stopped" even though nothing was actually broken.
+ */
+const POLL_INTERVAL_MS = 4000;
+
+/** How long an optimistic sent draft is shown before being dropped — long
+ *  enough for sendSms's own content://sms/sent insert and the next poll
+ *  tick to have caught up, so it is not left duplicated once the real,
+ *  persisted row appears in thread.messages. */
+const DRAFT_MAX_AGE_MS = 10_000;
 
 /**
  * A lead SMS thread, shown the way a real conversation is — one bubble
@@ -89,12 +107,36 @@ function SmsThreadScreenInner({ route, navigation }: Props) {
       (keyboard.state.value === KeyboardState.OPEN || keyboard.state.value === KeyboardState.OPENING);
     return { paddingBottom: up ? Math.max(keyboard.height.value, insets.bottom) : insets.bottom };
   });
-  const { threads } = useLocalSmsThreads();
+  const { threads, refresh } = useLocalSmsThreads();
   const thread = threads.find((t) => t.phone === phone);
   const [text, setText] = useState('');
-  // Optimistic: the OS inbox query won't see a just-sent SMS as "inbox"
-  // (it's outbox), so a reply is held here until the next natural refresh.
+  // Optimistic: there is a short real gap between tapping send and the
+  // content provider's own sent-box row existing for the next poll to
+  // pick up (see sendSms in VoxoSmsAutoReplyModule.kt) — held here just
+  // long enough to bridge that, then dropped once the real one has had
+  // time to appear in thread.messages (see DRAFT_MAX_AGE_MS below).
   const [sentDrafts, setSentDrafts] = useState<OutgoingDraft[]>([]);
+
+  // Re-scans every POLL_INTERVAL_MS while this screen is actually on
+  // screen, not just once on focus-gain — see POLL_INTERVAL_MS above.
+  useFocusEffect(
+    useCallback(() => {
+      const id = setInterval(refresh, POLL_INTERVAL_MS);
+      return () => clearInterval(id);
+    }, [refresh]),
+  );
+
+  // Clears out any optimistic draft old enough that the real, persisted
+  // version should already be in thread.messages — leaving it any longer
+  // would show the same text twice.
+  useEffect(() => {
+    if (sentDrafts.length === 0) return;
+    const id = setInterval(() => {
+      const cutoff = Date.now() - DRAFT_MAX_AGE_MS;
+      setSentDrafts((prev) => prev.filter((d) => d.date >= cutoff));
+    }, 2000);
+    return () => clearInterval(id);
+  }, [sentDrafts.length]);
 
   const headerBg = chatHeaderBackground[scheme];
   const headerFg = chatHeaderForeground[scheme];
@@ -144,7 +186,7 @@ function SmsThreadScreenInner({ route, navigation }: Props) {
   type Row = { key: string; body: string; date: number; outgoing: boolean };
   const rows: Row[] = [
     ...(thread?.messages ?? []).map(
-      (m: LocalSmsMessage): Row => ({ key: `in-${m.id}`, body: m.body, date: m.date, outgoing: false }),
+      (m: LocalSmsMessage): Row => ({ key: `sms-${m.id}`, body: m.body, date: m.date, outgoing: m.outgoing }),
     ),
     ...sentDrafts.map((d): Row => ({ key: d.id, body: d.body, date: d.date, outgoing: true })),
   ].sort((a, b) => a.date - b.date);
