@@ -1,15 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import {
-  FlatList,
-  KeyboardAvoidingView,
-  Linking,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { FlatList, Keyboard, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import Animated, { KeyboardState, useAnimatedKeyboard, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Screen } from '../../components/Screen';
@@ -68,6 +60,35 @@ function SmsThreadScreenInner({ route, navigation }: Props) {
   const scheme = useResolvedScheme();
   const { colors, spacing, radius, typography } = useTheme();
   const { phone } = route.params;
+
+  // Same fix as ConversationDetailScreen's keyboardPadStyle, for the same
+  // reason: plain KeyboardAvoidingView does not work on this app's
+  // edge-to-edge (targetSdk 36) Android build — the composer stayed
+  // pinned under the keyboard instead of rising above it, which is
+  // exactly "the input hides" reported on this screen. useAnimatedKeyboard
+  // reads the IME inset straight off WindowInsets on the UI thread, the
+  // one source that stays correct under edge-to-edge.
+  const keyboard = useAnimatedKeyboard();
+  const insets = useSafeAreaInsets();
+  const keyboardGone = useSharedValue(1);
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', () => {
+      keyboardGone.value = 0;
+    });
+    const hidden = Keyboard.addListener('keyboardDidHide', () => {
+      keyboardGone.value = 1;
+    });
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, [keyboardGone]);
+  const keyboardPadStyle = useAnimatedStyle(() => {
+    const up =
+      keyboardGone.value === 0 &&
+      (keyboard.state.value === KeyboardState.OPEN || keyboard.state.value === KeyboardState.OPENING);
+    return { paddingBottom: up ? Math.max(keyboard.height.value, insets.bottom) : insets.bottom };
+  });
   const { threads } = useLocalSmsThreads();
   const thread = threads.find((t) => t.phone === phone);
   const [text, setText] = useState('');
@@ -130,11 +151,7 @@ function SmsThreadScreenInner({ route, navigation }: Props) {
 
   return (
     <Screen padded={false} edges={['bottom']}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
+      <Animated.View style={[styles.flex, keyboardPadStyle]}>
         <FlatList
           data={rows}
           keyExtractor={(item) => item.key}
@@ -223,7 +240,7 @@ function SmsThreadScreenInner({ route, navigation }: Props) {
             <Ionicons name="send" size={22} color={colors.primary} />
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </Animated.View>
     </Screen>
   );
 }
