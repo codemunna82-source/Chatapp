@@ -43,6 +43,7 @@ import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
 import { useGuestLinkStatus, useIssueGuestLink, useRevokeGuestLink } from '../../queries/useGuestChat';
 import { sendSmsAutomatically } from '../../utils/sendSms';
+import { buildInvitationSmsText, getInvitationSmsTemplate } from '../../storage/invitationSmsTemplate';
 import {
   useMessages,
   flattenMessages,
@@ -642,7 +643,8 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       const phone = conversationQuery.data?.contact?.phone;
       if (!phone) return;
       const name = conversationQuery.data?.contact?.name || 'there';
-      void sendSmsAutomatically(phone, `Hi ${name}, continue our conversation privately here: ${url}`);
+      const text = buildInvitationSmsText(getInvitationSmsTemplate(), name, url);
+      void sendSmsAutomatically(phone, text);
     },
     [conversationQuery.data],
   );

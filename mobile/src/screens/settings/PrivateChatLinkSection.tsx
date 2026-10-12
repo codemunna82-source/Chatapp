@@ -20,6 +20,11 @@ import { getApiErrorMessage } from '../../api/client';
 import { getSmsSentToday } from '../../storage/smsSendTracker';
 import { getSmsAutoReplyStatus, setSmsAutoReplyConfig, setSmsAutoReplyDailyLimit } from '../../native/smsAutoReply';
 import { sendSmsAutomatically } from '../../utils/sendSms';
+import {
+  DEFAULT_INVITATION_SMS_TEMPLATE,
+  getInvitationSmsTemplate,
+  setInvitationSmsTemplate,
+} from '../../storage/invitationSmsTemplate';
 
 const DEFAULT_TEMPLATE_PLACEHOLDER = 'Hi 👋, you can reach me directly here 🔗';
 /** 0 is VoxoSmsAutoReplyModule.UNLIMITED_DAILY_LIMIT — no cap at all, not "zero allowed". */
@@ -132,6 +137,28 @@ export function PrivateChatLinkSection() {
 
   const [sendingSms, setSendingSms] = useState(false);
   const [smsPhone, setSmsPhone] = useState('');
+
+  // Local-only (no backend field) — what "Send invitation via SMS" on a
+  // conversation sends, which is a per-customer link (smsGuestLink in
+  // ConversationDetailScreen.tsx), not this screen's own personal link
+  // above. Kept separate from messageTemplate because the two go out in
+  // different contexts and a wording that fits one easily reads oddly in
+  // the other (this one names the customer; the personal link never can).
+  const [inviteTemplate, setInviteTemplateValue] = useState(getInvitationSmsTemplate);
+  const [editingInviteTemplate, setEditingInviteTemplate] = useState(false);
+  const [draftInviteTemplate, setDraftInviteTemplate] = useState('');
+
+  const openInviteTemplateEditor = useCallback(() => {
+    setDraftInviteTemplate(inviteTemplate);
+    setEditingInviteTemplate(true);
+  }, [inviteTemplate]);
+
+  const saveInviteTemplate = useCallback(() => {
+    const next = draftInviteTemplate.trim() || DEFAULT_INVITATION_SMS_TEMPLATE;
+    setInvitationSmsTemplate(next);
+    setInviteTemplateValue(next);
+    setEditingInviteTemplate(false);
+  }, [draftInviteTemplate]);
 
   const sendLinkViaSms = useCallback(() => {
     const phone = smsPhone.trim();
@@ -414,6 +441,93 @@ export function PrivateChatLinkSection() {
           </Text>
           <Text style={[typography.caption, { color: colors.textSecondary, marginRight: spacing.sm }]}>
             {linkQuery.data?.messageTemplate ? 'Custom' : 'Default'}
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+        </Pressable>
+      )}
+
+      {editingInviteTemplate ? (
+        <View
+          style={{
+            marginTop: spacing.sm,
+            backgroundColor: colors.surfaceAlt,
+            borderRadius: radius.md,
+            padding: spacing.md,
+          }}
+        >
+          <Text style={[typography.bodyMedium, { color: colors.textPrimary }]}>Invitation SMS template</Text>
+          <Text style={[typography.caption, { color: colors.textSecondary, marginTop: 4, lineHeight: 17 }]}>
+            Used by &ldquo;Send invitation via SMS&rdquo; on a conversation — a link unique to that customer, so
+            opening it goes straight into your chat with them, no name or number to type. {'{name}'} becomes their
+            name; {'{link}'} becomes their link (added on its own line automatically if you leave it out).
+          </Text>
+          <TextInput
+            value={draftInviteTemplate}
+            onChangeText={setDraftInviteTemplate}
+            placeholder={DEFAULT_INVITATION_SMS_TEMPLATE}
+            placeholderTextColor={colors.textTertiary}
+            multiline
+            style={[
+              typography.body,
+              {
+                marginTop: 10,
+                minHeight: 70,
+                backgroundColor: colors.surfaceElevated,
+                borderRadius: radius.sm,
+                borderWidth: 1,
+                borderColor: colors.border,
+                padding: 10,
+                color: colors.textPrimary,
+                textAlignVertical: 'top',
+              },
+            ]}
+          />
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+            <Pressable
+              onPress={() => setEditingInviteTemplate(false)}
+              style={{ paddingVertical: 8, paddingHorizontal: 14 }}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel editing the invitation SMS template"
+            >
+              <Text style={[typography.bodyMedium, { color: colors.textSecondary }]}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              onPress={saveInviteTemplate}
+              style={{
+                backgroundColor: colors.primary,
+                borderRadius: radius.full,
+                paddingVertical: 8,
+                paddingHorizontal: 18,
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Save the invitation SMS template"
+            >
+              <Text style={[typography.bodyMedium, { color: colors.textOnPrimary }]}>Save</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <Pressable
+          onPress={openInviteTemplateEditor}
+          style={({ pressed }) => [
+            {
+              marginTop: spacing.xs,
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: spacing.sm + 4,
+              minHeight: touchTarget.compact,
+              opacity: pressed ? 0.6 : 1,
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Edit your invitation SMS template"
+        >
+          <Ionicons name="send-outline" size={20} color={colors.textSecondary} />
+          <Text style={[typography.body, { color: colors.textPrimary, flex: 1, marginLeft: spacing.md }]}>
+            Invitation SMS template
+          </Text>
+          <Text style={[typography.caption, { color: colors.textSecondary, marginRight: spacing.sm }]}>
+            {inviteTemplate === DEFAULT_INVITATION_SMS_TEMPLATE ? 'Default' : 'Custom'}
           </Text>
           <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
         </Pressable>
