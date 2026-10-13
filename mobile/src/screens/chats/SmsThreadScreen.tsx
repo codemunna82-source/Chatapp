@@ -19,6 +19,9 @@ import { touchTarget } from '../../theme/spacing';
 import { formatPhoneForDisplay } from '../../utils/formatPhone';
 import { dayKey } from '../../utils/formatTime';
 import { LOCAL_SMS_ID_PREFIX, useLocalSmsMessages, useMarkSmsThreadRead, useSendLocalSms } from '../../queries/useLocalSms';
+import { getSmsInviteLink } from '../../api/endpoints/sms';
+import { getApiErrorMessage } from '../../api/client';
+import { buildInvitationSmsText, getInvitationSmsTemplate } from '../../storage/invitationSmsTemplate';
 import type { ChatsStackParamList } from '../../navigation/types';
 import type { Message } from '../../api/types';
 
@@ -109,6 +112,25 @@ export function SmsThreadScreen({ route, navigation }: Props) {
     [handleSendText],
   );
 
+  const [linkBusy, setLinkBusy] = useState(false);
+  /** Texts this number the invitation template with their own private chat link. */
+  const handleSendLink = useCallback(() => {
+    if (linkBusy) return;
+    Alert.alert('Send private chat link?', `Your invitation message and a chat link go to ${phone} by SMS.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Send',
+        onPress: () => {
+          setLinkBusy(true);
+          getSmsInviteLink(phone)
+            .then(({ url }) => handleSendText(buildInvitationSmsText(getInvitationSmsTemplate(), 'there', url)))
+            .catch((err: unknown) => Alert.alert('Could not create link', getApiErrorMessage(err)))
+            .finally(() => setLinkBusy(false));
+        },
+      },
+    ]);
+  }, [linkBusy, phone, handleSendText]);
+
   const handleLongPress = useCallback((message: Message) => {
     if (!message.text) return;
     Alert.alert('Message', undefined, [
@@ -127,17 +149,30 @@ export function SmsThreadScreen({ route, navigation }: Props) {
       headerTintColor: headerFg,
       headerTitleStyle: { color: headerFg },
       headerRight: () => (
-        <Pressable
-          onPress={() => void Linking.openURL(`tel:${phone}`)}
-          style={styles.headerAction}
-          accessibilityRole="button"
-          accessibilityLabel="Call this number"
-        >
-          {({ pressed }) => <Ionicons name="call" size={22} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />}
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={handleSendLink}
+            disabled={linkBusy}
+            style={styles.headerAction}
+            accessibilityRole="button"
+            accessibilityLabel="Send private chat link by SMS"
+          >
+            {({ pressed }) => (
+              <Ionicons name="link" size={23} color={headerFg} style={{ opacity: pressed || linkBusy ? 0.5 : 1 }} />
+            )}
+          </Pressable>
+          <Pressable
+            onPress={() => void Linking.openURL(`tel:${phone}`)}
+            style={styles.headerAction}
+            accessibilityRole="button"
+            accessibilityLabel="Call this number"
+          >
+            {({ pressed }) => <Ionicons name="call" size={22} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />}
+          </Pressable>
+        </View>
       ),
     });
-  }, [navigation, name, phone, headerBg, headerFg]);
+  }, [navigation, name, phone, headerBg, headerFg, handleSendLink, linkBusy]);
 
   // Same keyboard handling as ConversationDetailScreen (edge-to-edge: the
   // window is not resized for the IME, so the inset is read on the UI thread).
@@ -232,6 +267,7 @@ export function SmsThreadScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
   headerAction: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingVertical: 8, flexGrow: 1, justifyContent: 'flex-end' },
 });
