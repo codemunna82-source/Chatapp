@@ -40,16 +40,6 @@ export function useSendGuestLinkInvitation(conversationId: string | undefined) {
   });
 }
 
-export function useRevokeGuestLink(conversationId: string | undefined) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => guestChatApi.revokeGuestLink(conversationId as string),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.guestLink(conversationId ?? '') });
-    },
-  });
-}
-
 /**
  * Sends into the web window. The thread refreshes from the socket like any
  * other send, so nothing is patched into the cache here.

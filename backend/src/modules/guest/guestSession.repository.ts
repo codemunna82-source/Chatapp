@@ -1,6 +1,15 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Types } from 'mongoose';
 import { GuestSession, type GuestSessionDoc } from './guestSession.model';
+import { env } from '../../config/env';
+
+/**
+ * With GUEST_SESSION_TTL_DAYS = 0 a link never expires — including links
+ * issued while a lifetime was still set, whose stored expiresAt is ignored.
+ */
+function notExpired(): Record<string, unknown> {
+  return env.GUEST_SESSION_TTL_DAYS > 0 ? { expiresAt: { $gt: new Date() } } : {};
+}
 
 /**
  * 16 bytes of CSPRNG output (128 bits), base64url-encoded so it survives
@@ -61,7 +70,7 @@ export async function findActiveSessionForConversation(
     conversationId,
     tenantId,
     revokedAt: { $exists: false },
-    expiresAt: { $gt: new Date() },
+    ...notExpired(),
   }).sort({ expiresAt: -1 });
 }
 
@@ -80,7 +89,7 @@ export async function findSessionByToken(token: string): Promise<GuestSessionDoc
     // thread, which is the exact failure this change exists to fix.
     $or: [{ tokenHashes: hash }, { tokenHash: hash }],
     revokedAt: { $exists: false },
-    expiresAt: { $gt: new Date() },
+    ...notExpired(),
   });
 }
 
@@ -141,14 +150,9 @@ export async function isConversationBlockedByGuest(
   return Boolean(session?.blockedAt);
 }
 
-/** Revokes every live link for a conversation. Returns how many were closed. */
-export async function revokeSessionsForConversation(conversationId: string, tenantId: string): Promise<number> {
-  if (!Types.ObjectId.isValid(conversationId)) return 0;
-  const result = await GuestSession.updateMany(
-    { conversationId, tenantId, revokedAt: { $exists: false } },
-    { $set: { revokedAt: new Date() } },
-  );
-  return result.modifiedCount;
+/** Points a session at a new conversation and contact — see guest.service.ts ensureSessionConversation. */
+export async function retargetGuestSession(sessionId: string, conversationId: string, contactId: string): Promise<void> {
+  await GuestSession.updateOne({ _id: sessionId }, { $set: { conversationId, contactId } });
 }
 
 /**

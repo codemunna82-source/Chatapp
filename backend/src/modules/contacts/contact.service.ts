@@ -4,7 +4,6 @@ import * as repo from './contact.repository';
 import type { ContactLean } from './contact.model';
 import { deleteConversationsByContact } from '../conversations/conversation.repository';
 import { deleteMessagesByConversation } from '../messages/message.repository';
-import { revokeSessionsForConversation } from '../guest/guestSession.repository';
 import { deleteGuestPushTokensForConversation } from '../guest/guestPushToken.repository';
 import {
   isCloudinaryConfigured,
@@ -132,11 +131,8 @@ export async function deleteContactForTenant(tenantId: string, id: string, actor
   const conversationIds = await deleteConversationsByContact(tenantId, id);
   for (const conversationId of conversationIds) {
     await deleteMessagesByConversation(tenantId, conversationId);
-    // A live private-chat link left behind here fails every send with a
-    // raw not-found instead of the clean "no longer valid" the guest app
-    // already shows for a deliberately revoked one — see
-    // deleteConversationForTenant for the same fix.
-    await revokeSessionsForConversation(conversationId, tenantId);
+    // The customer's link stays valid and reopens onto a fresh chat — see
+    // guest.service.ts ensureSessionConversation.
     await deleteGuestPushTokensForConversation(tenantId, conversationId);
   }
   await repo.deleteContact(id, tenantId);

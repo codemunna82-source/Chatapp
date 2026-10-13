@@ -39,14 +39,13 @@ import {
   createGuestSession,
   findActiveSessionForConversation,
   findSessionByToken,
-  revokeSessionsForConversation,
   setSessionBlocked,
   touchSession,
   activateGuestSession,
   reissueGuestSessionToken,
+  retargetGuestSession,
 } from './guestSession.repository';
 import { countRecentGuestReports, createGuestReport, listGuestReportsForConversation } from './guestReport.repository';
-import { deleteGuestPushTokensForConversation } from './guestPushToken.repository';
 import { pushGuestMessage } from './guestPush.service';
 import type { GuestReportLean, GuestReportReason } from './guestReport.model';
 import { resolveBusinessName, resolveBusinessNameForConversation } from './businessName';
@@ -325,14 +324,45 @@ export async function resolveGuestContextFromToken(token: string): Promise<Guest
     throw ApiError.unauthorized('GUEST_LINK_INVALID', 'This chat link is no longer valid');
   }
   touchSession(String(session._id));
+  const { conversationId, contactId } = await ensureSessionConversation(session);
   return {
     sessionId: String(session._id),
     tenantId: String(session.tenantId),
-    conversationId: String(session.conversationId),
-    contactId: String(session.contactId),
+    conversationId,
+    contactId,
     whatsappPhoneNumberId: String(session.whatsappPhoneNumberId),
     blockedAt: session.blockedAt ?? undefined,
   };
+}
+
+/**
+ * A link outlives its chat: if the agent deleted the conversation (or the
+ * contact), the customer's link still opens, onto a fresh empty chat that
+ * reappears in the agent's list. Deleting a chat in VOXO is tidying the
+ * inbox, not taking back a link the customer was given.
+ */
+async function ensureSessionConversation(
+  session: NonNullable<Awaited<ReturnType<typeof findSessionByToken>>>,
+): Promise<{ conversationId: string; contactId: string }> {
+  const tenantId = String(session.tenantId);
+  const current = await findConversationByIdAndTenant(String(session.conversationId), tenantId);
+  if (current) return { conversationId: String(current._id), contactId: String(session.contactId) };
+
+  const contact =
+    (await findContactByIdAndTenant(String(session.contactId), tenantId)) ??
+    (await createContact({
+      tenantId,
+      phone: `web-${randomBytes(6).toString('hex')}`,
+      name: 'Returning customer',
+      webOnly: true,
+    }));
+  const conversation = await findOrCreateConversation(
+    tenantId,
+    String(contact._id),
+    String(session.whatsappPhoneNumberId),
+  );
+  await retargetGuestSession(String(session._id), String(conversation._id), String(contact._id));
+  return { conversationId: String(conversation._id), contactId: String(contact._id) };
 }
 
 /**
@@ -413,14 +443,18 @@ export async function issueGuestLinkForConversation(
 
   const existing = await findActiveSessionForConversation(conversationId, auth.tenantId);
   if (existing) {
-    // The plaintext token was only ever returned once, at creation — the
-    // stored hash cannot be reversed back into a URL. So a reused session
-    // can report when it expires but not what its link was; the agent app
-    // keeps the URL from the call that created it.
-    throw ApiError.conflict(
-      'GUEST_LINK_EXISTS',
-      'This conversation already has an active chat link. Revoke it first to issue a new one.',
-    );
+    // A fresh token for the same chat, added alongside the old ones: every
+    // link the customer was already sent keeps working.
+    const reissued = await reissueGuestSessionToken(String(existing._id), auth.tenantId);
+    if (!reissued) {
+      throw ApiError.serviceUnavailable('GUEST_LINK_UNAVAILABLE', 'Could not prepare a link for this customer.');
+    }
+    return {
+      url: guestChatUrl(linkBaseUrl, reissued),
+      token: reissued,
+      expiresAt: existing.expiresAt.toISOString(),
+      reused: true,
+    };
   }
 
   const expiresAt = guestSessionExpiresAt();
@@ -750,10 +784,11 @@ export async function revokeGuestLinkForConversation(
   if (!conversation || (scope && String(conversation.whatsappPhoneNumberId) !== scope)) {
     throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
   }
-  const revoked = await revokeSessionsForConversation(conversationId, auth.tenantId);
-  // The link is gone, so the notifications must go with it.
-  await deleteGuestPushTokensForConversation(auth.tenantId, conversationId);
-  return { revoked };
+  // Links are never taken back: a customer may tap any link they were ever
+  // sent. Kept as a no-op so older app versions, which call this before
+  // asking for a new link, still get one — the issue call adds a token
+  // alongside the existing ones.
+  return { revoked: 0 };
 }
 
 /**

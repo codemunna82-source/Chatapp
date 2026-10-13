@@ -71,12 +71,6 @@ export async function sendGuestLinkInvitation(conversationId: string): Promise<S
   return res.data.data;
 }
 
-export async function revokeGuestLink(conversationId: string): Promise<{ revoked: number }> {
-  const res = await apiClient.delete<ApiSuccess<{ revoked: number }>>(
-    `/conversations/${conversationId}/guest/link`,
-  );
-  return res.data.data;
-}
 
 /**
  * A reply delivered to the web window instead of WhatsApp.

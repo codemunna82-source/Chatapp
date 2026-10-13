@@ -9,7 +9,7 @@ import { findFirstPhoneNumberForTenant, findPhoneNumberByIdAndTenant } from '../
 import { findAssignedPhoneNumberId } from '../users/user.repository';
 import { countWhatsAppNudges, deleteMessagesByConversation } from '../messages/message.repository';
 import { nudgesLeft, nudgeWindowStart } from '../messages/whatsappQuota';
-import { findActiveSessionForConversation, revokeSessionsForConversation } from '../guest/guestSession.repository';
+import { findActiveSessionForConversation } from '../guest/guestSession.repository';
 import { deleteGuestPushTokensForConversation } from '../guest/guestPushToken.repository';
 import { hasMovedToWebChat } from '../guest/webChatRouting';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
@@ -382,7 +382,6 @@ export async function deleteConversationForTenant(auth: AuthContext, id: string)
   await loadVisibleConversation(auth, id);
   await deleteMessagesByConversation(tenantId, id);
   await repo.deleteConversation(id, tenantId);
-  await revokeSessionsForConversation(id, tenantId);
   await deleteGuestPushTokensForConversation(tenantId, id);
   await recordAudit({
     tenantId,
@@ -442,7 +441,6 @@ export async function bulkUpdateConversationsForTenant(
     // actually-revoked one.
     for (const id of deletedIds) {
       await deleteMessagesByConversation(tenantId, id);
-      await revokeSessionsForConversation(id, tenantId);
       await deleteGuestPushTokensForConversation(tenantId, id);
     }
     affected = deletedIds.length;

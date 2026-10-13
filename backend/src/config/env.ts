@@ -199,7 +199,9 @@ const envSchema = z.object({
    * enough to be "practically never" for a business that would still
    * rather have an outer bound.
    */
-  GUEST_SESSION_TTL_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
+  // 0 = private chat links never expire (the default). A positive value
+  // restores a fixed lifetime for newly issued links.
+  GUEST_SESSION_TTL_DAYS: z.coerce.number().int().min(0).max(3650).default(0),
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),

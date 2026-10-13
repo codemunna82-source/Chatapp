@@ -41,7 +41,7 @@ import { clearMessageNotification } from '../../notifications/messageNotificatio
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
-import { useGuestLinkStatus, useIssueGuestLink, useRevokeGuestLink } from '../../queries/useGuestChat';
+import { useGuestLinkStatus, useIssueGuestLink } from '../../queries/useGuestChat';
 import { sendSmsAutomatically } from '../../utils/sendSms';
 import { buildInvitationSmsText, getInvitationSmsTemplate } from '../../storage/invitationSmsTemplate';
 import {
@@ -621,7 +621,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const guestLinkQuery = useGuestLinkStatus(conversationId);
   const uploadContactAvatar = useUploadContactAvatar();
   const issueGuestLink = useIssueGuestLink(conversationId);
-  const revokeGuestLink = useRevokeGuestLink(conversationId);
 
   const guestActive = guestLinkQuery.data?.active ?? false;
   /**
@@ -774,44 +773,16 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   }, [contactId, uploadContactAvatar]);
 
   /**
-   * Mints (or replaces) the private-chat link and opens it in the phone's
-   * SMS app — see smsGuestLink above for why SMS specifically.
+   * Texts the customer their private-chat link from this phone's SIM. A link
+   * already sent keeps working; the server adds a new one alongside it.
    */
   const handleSendInvitationSms = useCallback(() => {
-    if (issueGuestLink.isPending || revokeGuestLink.isPending) return;
-
-    const create = () => {
-      issueGuestLink.mutate(undefined, {
-        onSuccess: (link) => smsGuestLink(link.url),
-        onError: (err) => Alert.alert('Could not create link', getApiErrorMessage(err)),
-      });
-    };
-
-    if (!guestActive) {
-      create();
-      return;
-    }
-
-    // The URL of a live link cannot be shown again — only its hash is
-    // stored — so the honest offer is to replace it, which is also what
-    // makes every copy already sent stop working.
-    Alert.alert(
-      'A link is already active',
-      'The existing link cannot be shown again. Creating a new one will stop the old link working.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'New link',
-          style: 'destructive',
-          onPress: () =>
-            revokeGuestLink.mutate(undefined, {
-              onSuccess: create,
-              onError: (err) => Alert.alert('Could not replace link', getApiErrorMessage(err)),
-            }),
-        },
-      ],
-    );
-  }, [guestActive, issueGuestLink, revokeGuestLink, smsGuestLink]);
+    if (issueGuestLink.isPending) return;
+    issueGuestLink.mutate(undefined, {
+      onSuccess: (link) => smsGuestLink(link.url),
+      onError: (err) => Alert.alert('Could not create link', getApiErrorMessage(err)),
+    });
+  }, [issueGuestLink, smsGuestLink]);
 
   const handleSendText = useCallback(
     (text: string, nudgeIndex?: number) => {
