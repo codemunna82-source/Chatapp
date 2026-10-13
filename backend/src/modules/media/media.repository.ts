@@ -12,6 +12,9 @@ export interface CreateMediaInput {
   status?: MediaStatus;
   /** Known up-front for inbound (webhook-delivered) media; absent for a fresh outbound upload. */
   metaMediaId?: string;
+  cloudinaryPublicId?: string;
+  /** Our own copy, kept in Mongo when there is no Cloudinary — see media.service.ts storeOwnCopy. */
+  bytes?: Buffer;
 }
 
 export async function createMedia(input: CreateMediaInput): Promise<MediaDoc> {

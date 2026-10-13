@@ -1,6 +1,6 @@
 import { ApiError } from '../../lib/ApiError';
 import { logger } from '../../lib/logger';
-import { findMediaByIdAndTenant } from '../media/media.repository';
+import { ensureMetaMediaId } from '../media/media.service';
 import { resolveMetaCredentialsForPhoneNumber, type ResolvedMetaCredentials } from '../whatsapp/whatsapp.service';
 import { markConnectionExpired } from '../whatsapp/embeddedSignup.service';
 import { getMetaGateway, toMetaApiError, MetaApiError } from '../../integrations/meta';
@@ -58,14 +58,9 @@ async function dispatch(
       if (!input.mediaId && !input.mediaLink) {
         throw ApiError.badRequest('MEDIA_REQUIRED', 'mediaId or mediaLink is required');
       }
-      let metaMediaId: string | undefined;
-      if (input.mediaId) {
-        const mediaDoc = await findMediaByIdAndTenant(input.mediaId, input.tenantId);
-        if (!mediaDoc?.metaMediaId) {
-          throw ApiError.badRequest('MEDIA_NOT_UPLOADED', 'This media has not finished uploading to Meta yet');
-        }
-        metaMediaId = mediaDoc.metaMediaId;
-      }
+      const metaMediaId = input.mediaId
+        ? await ensureMetaMediaId(input.tenantId, input.mediaId, gateway, credentials)
+        : undefined;
       const result = await gateway.sendMedia(credentials, {
         to: toPhone,
         mediaType: input.type,

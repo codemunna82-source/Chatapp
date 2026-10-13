@@ -109,56 +109,119 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
     return existing;
   }
 
+  /**
+   * Our own copy first, Meta second.
+   *
+   * The upload does not know where the message will go. A customer in their
+   * private web chat receives it from our copy and Meta is never involved,
+   * so a Meta failure (an expired token, a disconnected number) must not
+   * stop the photo reaching them. With our own copy kept, a Meta failure
+   * only matters for a WhatsApp send, which retries the upload then — see
+   * ensureMetaMediaId.
+   */
+  const ownCopy = await storeOwnCopy(input.tenantId, file.buffer);
+
   const media = await createMedia({
     tenantId: input.tenantId,
     whatsappPhoneNumberId: input.whatsappPhoneNumberId,
     mimeType: file.mimeType,
     sizeBytes: file.buffer.length,
     sha256,
-    storageRef: `pending:${sha256}`,
+    storageRef: ownCopy?.storageRef ?? `pending:${sha256}`,
+    ...(ownCopy?.cloudinaryPublicId ? { cloudinaryPublicId: ownCopy.cloudinaryPublicId } : {}),
+    ...(ownCopy?.bytes ? { bytes: ownCopy.bytes } : {}),
     status: 'UPLOADING',
   });
 
   try {
     const credentials = await resolveMetaCredentialsForPhoneNumber(input.tenantId, input.whatsappPhoneNumberId);
-    const gateway = getMetaGateway();
-    const result = await gateway.uploadMedia(credentials, {
+    const result = await getMetaGateway().uploadMedia(credentials, {
       buffer: file.buffer,
       mimeType: file.mimeType,
       filename: file.filename,
     });
-
     const ready = await markMediaReady(String(media._id), input.tenantId, result.metaMediaId);
-    await recordAudit({
-      tenantId: input.tenantId,
-      actorUserId: input.actorUserId,
-      action: 'media.upload',
-      targetType: 'Media',
-      targetId: media._id,
-      metadata: { mimeType: file.mimeType, sizeBytes: file.buffer.length },
-    });
-
-    // Cache to Cloudinary while the buffer is already in hand — never lets
-    // a Cloudinary hiccup fail the upload, since the Meta upload above is
-    // what actually matters for being able to send the message at all.
-    if (isCloudinaryConfigured()) {
-      try {
-        const cached = await uploadBufferToCloudinary(file.buffer, {
-          folder: cloudinaryFolderFor(input.tenantId),
-          resourceType: 'auto',
-        });
-        const withRef = await setMediaCloudinaryRef(String(media._id), input.tenantId, cached.url, cached.publicId);
-        return withRef ?? ready ?? media;
-      } catch (err) {
-        logger.warn({ err, mediaId: String(media._id) }, 'Cloudinary cache-write failed for outbound media upload');
-      }
-    }
-
+    await auditUpload(input, media, file);
     return ready ?? media;
   } catch (err) {
+    if (ownCopy) {
+      logger.warn({ err, mediaId: String(media._id) }, 'Meta media upload failed; keeping our own copy for web delivery');
+      media.status = 'READY';
+      await media.save();
+      await auditUpload(input, media, file);
+      return media;
+    }
     media.status = 'FAILED';
     await media.save();
     throw err instanceof ApiError ? err : ApiError.internal('MEDIA_UPLOAD_FAILED', 'Failed to upload media to Meta');
+  }
+}
+
+/** Mongo's document limit is 16MB; anything near it can only live at Cloudinary or Meta. */
+const MAX_DB_BYTES = 12 * 1024 * 1024;
+
+async function storeOwnCopy(
+  tenantId: string,
+  buffer: Buffer,
+): Promise<{ storageRef: string; cloudinaryPublicId?: string; bytes?: Buffer } | null> {
+  if (isCloudinaryConfigured()) {
+    try {
+      const cached = await uploadBufferToCloudinary(buffer, { folder: cloudinaryFolderFor(tenantId), resourceType: 'auto' });
+      return { storageRef: cached.url, cloudinaryPublicId: cached.publicId };
+    } catch (err) {
+      logger.warn({ err }, 'Cloudinary write failed for outbound media upload');
+    }
+  }
+  if (buffer.length <= MAX_DB_BYTES) {
+    const sha256 = createHash('sha256').update(buffer).digest('hex');
+    return { storageRef: `db:${sha256}`, bytes: buffer };
+  }
+  return null;
+}
+
+async function auditUpload(
+  input: UploadMediaInput,
+  media: MediaDoc,
+  file: { buffer: Buffer; mimeType: string },
+): Promise<void> {
+  await recordAudit({
+    tenantId: input.tenantId,
+    actorUserId: input.actorUserId,
+    action: 'media.upload',
+    targetType: 'Media',
+    targetId: media._id,
+    metadata: { mimeType: file.mimeType, sizeBytes: file.buffer.length },
+  });
+}
+
+/**
+ * The Meta media id a WhatsApp send needs, uploading our own copy to Meta
+ * now if the original upload could not reach it.
+ */
+export async function ensureMetaMediaId(
+  tenantId: string,
+  mediaId: string,
+  gateway: Pick<ReturnType<typeof getMetaGateway>, 'uploadMedia'>,
+  credentials: Parameters<ReturnType<typeof getMetaGateway>['uploadMedia']>[0],
+): Promise<string> {
+  const media = await findMediaByIdAndTenant(mediaId, tenantId);
+  if (!media) throw ApiError.notFound('MEDIA_NOT_FOUND', 'Media not found');
+  if (media.metaMediaId) return media.metaMediaId;
+
+  let file: { buffer: Buffer; mimeType: string };
+  try {
+    file = await getMediaBytesForTenant(tenantId, mediaId);
+  } catch {
+    throw ApiError.badRequest('MEDIA_NOT_UPLOADED', 'This media has not finished uploading to Meta yet');
+  }
+  try {
+    const result = await gateway.uploadMedia(credentials, { buffer: file.buffer, mimeType: file.mimeType });
+    await markMediaReady(mediaId, tenantId, result.metaMediaId);
+    return result.metaMediaId;
+  } catch (err) {
+    throw err instanceof ApiError
+      ? err
+      : ApiError.badRequest('MEDIA_UPLOAD_FAILED', 'This file could not be uploaded to WhatsApp. It can still be sent in the private chat.');
   }
 }
 

@@ -72,7 +72,7 @@ export interface SendOutboundMessageInput {
   senderId?: string;
   type: SendableMessageType;
   text?: string;
-  mediaId?: string; // our Media._id — must already be uploaded to Meta (has metaMediaId)
+  mediaId?: string; // our Media._id — a WhatsApp send uploads it to Meta first if it is not there yet
   mediaLink?: string; // alternative to mediaId: a public HTTPS URL
   caption?: string;
   filename?: string;
