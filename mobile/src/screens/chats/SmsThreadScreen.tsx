@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { Alert, Keyboard, Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Keyboard, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { KeyboardState, useAnimatedKeyboard, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets, type Edge } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
@@ -16,7 +16,7 @@ import { ChatHeaderTitle } from './ChatHeaderTitle';
 import { ThemeProvider, useResolvedScheme } from '../../theme/ThemeProvider';
 import { chatLightColors, chatDarkColors, chatHeaderBackground, chatHeaderForeground } from '../../theme/chatTheme';
 import { touchTarget } from '../../theme/spacing';
-import { formatPhoneForDisplay } from '../../utils/formatPhone';
+import { formatPhoneForDisplay, smsAddressToE164 } from '../../utils/formatPhone';
 import { dayKey } from '../../utils/formatTime';
 import { LOCAL_SMS_ID_PREFIX, useLocalSmsMessages, useMarkSmsThreadRead, useSendLocalSms } from '../../queries/useLocalSms';
 import { getSmsInviteLink } from '../../api/endpoints/sms';
@@ -131,7 +131,7 @@ export function SmsThreadScreen({ route, navigation }: Props) {
         text: 'Send',
         onPress: () => {
           setLinkBusy(true);
-          getSmsInviteLink(phone)
+          getSmsInviteLink(smsAddressToE164(phone))
             .then(({ url }) => handleSendText(buildInvitationSmsText(getInvitationSmsTemplate(), 'there', url)))
             .catch((err: unknown) => Alert.alert('Could not create link', getApiErrorMessage(err)))
             .finally(() => setLinkBusy(false));
@@ -251,6 +251,23 @@ export function SmsThreadScreen({ route, navigation }: Props) {
               drawDistance={600}
               contentContainerStyle={styles.listContent}
             />
+            {/* The business flow's reply: one tap texts this customer the
+                invitation template plus their own private chat link. */}
+            <Pressable
+              onPress={handleSendLink}
+              disabled={linkBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Send private chat invite by SMS"
+              style={({ pressed }) => [
+                styles.inviteBar,
+                { backgroundColor: chatColors.surfaceElevated, borderColor: chatColors.border, opacity: pressed || linkBusy ? 0.6 : 1 },
+              ]}
+            >
+              <Ionicons name="link" size={18} color={chatColors.primary} />
+              <Text style={[styles.inviteText, { color: chatColors.primary }]}>
+                {linkBusy ? 'Preparing link…' : 'Send private chat invite'}
+              </Text>
+            </Pressable>
             <Composer
               conversationId={`${LOCAL_SMS_ID_PREFIX}${phone}`}
               whatsappPhoneNumberId={undefined}
@@ -278,5 +295,17 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center' },
   headerAction: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
+  inviteBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    marginBottom: 6,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  inviteText: { marginLeft: 8, fontSize: 14, fontWeight: '600' },
   listContent: { paddingVertical: 8, flexGrow: 1, justifyContent: 'flex-end' },
 });

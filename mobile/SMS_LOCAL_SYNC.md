@@ -70,7 +70,6 @@ Changed (JS)
 - `screens/chats/SmsThreadScreen.tsx` — the SMS thread, built from MessageBubble, DateSeparator, ChatWallpaper, ChatHeaderTitle and Composer.
 - `screens/chats/Composer.tsx` — `localOnly` prop: no typing events to the server for an SMS thread.
 - `screens/chats/ConversationDetailScreen.tsx` — a legacy server-side SMS-only conversation now opens the local SMS thread instead; no SMS is recorded on the server.
-- `screens/settings/SmsInboxScreen.tsx` — "SMS sync status" card (permissions, battery optimisation, stored count, receiver last ran, last error).
 - `screens/settings/PermissionsScreen.tsx` — accurate SMS permission descriptions; granting starts a sync immediately.
 
 Removed
@@ -94,11 +93,11 @@ No new runtime dependency. Test-only (`testImplementation`, not in the APK):
 | Outgoing, two SIMs | Phone state (`READ_PHONE_STATE`) | If the phone asks "which SIM?" for every SMS, VOXO picks the first active SIM instead of failing |
 | Setup | "Allow restricted settings" (App info > ⋮) | Android 13+ blocks SMS permissions for an APK installed outside a store until this is allowed |
 
-Settings > Permissions shows each one with a live status and "X of Y allowed"; Settings > SMS shows when the receiver last ran, SMS stored, and the last error.
+Settings > Permissions shows each one with a live status and "X of Y allowed"; Settings > Permissions also shows when the receiver last ran, SMS stored, and the last error.
 
 ## Outgoing: how a send is tracked
 
-`sendTracked` stores the text as **SENDING**, hands it to the radio with a sent-intent per part, and `SmsSentReceiver` settles it: **SENT** when the network accepted it, **FAILED** (with the reason in Settings > SMS: no signal, airplane mode, refused, ...) otherwise. A failed bubble has a retry that removes the failed copy and sends again. Before this, every send showed as sent the moment it was pressed.
+`sendTracked` stores the text as **SENDING**, hands it to the radio with a sent-intent per part, and `SmsSentReceiver` settles it: **SENT** when the network accepted it, **FAILED** (with the reason in Settings > Permissions: no signal, airplane mode, refused, ...) otherwise. A failed bubble has a retry that removes the failed copy and sends again. Before this, every send showed as sent the moment it was pressed.
 
 ## Not adopted: react-native-android-sms-listener
 
@@ -115,7 +114,7 @@ Reviewed and deliberately not added. It registers its receiver on the Activity a
 | Duplicate broadcast | Dropped by the dedup key. |
 | Multipart SMS | Android reassembles the parts into one broadcast; they are joined in order. |
 | Dual SIM | Subscription id read from the intent extras (`android.telephony.extra.SUBSCRIPTION_INDEX`, `subscription`, …); slot from `SubscriptionManager.getSlotIndex` (API 29+) or OEM extras. `-1` when the device does not say. |
-| Database error | The message is parked in SharedPreferences and flushed into SQLite on the next successful open; the error is shown in Settings > SMS. |
+| Database error | The message is parked in SharedPreferences and flushed into SQLite on the next successful open; the error is shown in Settings > Permissions. |
 | Permission denied | Nothing is captured or imported; the list shows only server chats. Asked once automatically; afterwards from Settings > Permissions. |
 
 ## Device-specific limitations (read before testing)
@@ -130,7 +129,7 @@ Reviewed and deliberately not added. It registers its receiver on the Activity a
   SMS. Some installers/OEMs do not allow it at all; then no SMS can be captured or imported.
 - **OEM battery managers** (Realme/ColorOS, Xiaomi/MIUI, Vivo, Oppo, Samsung):
   may block background starts. Set VOXO's battery usage to "Unrestricted"/"No
-  restrictions" and allow auto-start. Settings > SMS shows whether battery
+  restrictions" and allow auto-start. Settings > Permissions shows whether battery
   optimisation is on.
 - **Not the default SMS app**: VOXO reads and receives SMS but is not the
   phone's default SMS app, so it cannot mark SMS read in the phone's Messages
@@ -151,7 +150,7 @@ Reviewed and deliberately not added. It registers its receiver on the Activity a
 ### On-device test checklist
 
 1. Install the APK, open VOXO, sign in, allow SMS when asked (or Settings > Permissions).
-2. Chats: existing SMS threads appear (history import). Settings > SMS shows "SMS stored on this phone" > 0.
+2. Chats: existing SMS threads appear (history import). Settings > Permissions shows "SMS stored on this phone" > 0.
 3. With VOXO open on Chats, send a text to the phone from another phone → it appears at the top within a second; open it → unread clears.
 4. Send a long (> 160 chars) text → one bubble, full text.
 5. Swipe VOXO away (do NOT force-stop), receive an SMS, open VOXO → it is there; "Receiver last ran" updated.

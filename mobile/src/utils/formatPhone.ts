@@ -67,3 +67,24 @@ export function contactDisplayName(
   if (name) return name;
   return formatPhoneForDisplay(contact?.phone) || fallback;
 }
+
+/**
+ * An SMS sender address as the server's phone rule wants it (+country code).
+ *
+ * Indian handsets often receive a 10-digit "9876543210" or "09876543210" with
+ * no country code; the server would read those as another country's number
+ * and mint the invite for the wrong person. A bare 10-digit mobile number
+ * starting 6-9, with or without a leading 0, is read as +91. Anything that
+ * already has a "+" or an international prefix is left alone, and an
+ * alphanumeric sender (a bank or an OTP service) is returned unchanged so
+ * the server refuses it.
+ */
+export function smsAddressToE164(address: string): string {
+  const trimmed = address.trim();
+  if (/[A-Za-z]/.test(trimmed) || trimmed.startsWith('+')) return trimmed;
+  const digits = trimmed.replace(/\D/g, '');
+  if (/^[6-9]\d{9}$/.test(digits)) return `+91${digits}`;
+  if (/^0[6-9]\d{9}$/.test(digits)) return `+91${digits.slice(1)}`;
+  if (/^91[6-9]\d{9}$/.test(digits)) return `+${digits}`;
+  return trimmed;
+}

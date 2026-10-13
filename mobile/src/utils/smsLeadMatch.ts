@@ -7,7 +7,7 @@
  * receives would mean a stray "hi" from a friend gets a chat-link SMS
  * back.
  *
- * NOT what decides what the Chats tab or Settings > SMS show any more —
+ * NOT what decides what the Chats tab show —
  * see isIndianMobileSender below for that.
  */
 export const MATCH_KEYWORDS = ['hii', 'saw', 'profile'];
@@ -18,7 +18,7 @@ export function matchesLeadKeywords(body: string): boolean {
 }
 
 /**
- * What the Chats tab and Settings > SMS actually filter the inbox by:
+ * What the lead notification filters on:
  * does this text look like it came from a real person's mobile number,
  * not a keyword in its body. An OTP, a bank alert, or a promotional
  * blast comes from a DLT-registered alphanumeric sender id ("VM-

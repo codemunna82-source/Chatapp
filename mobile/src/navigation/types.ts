@@ -31,7 +31,6 @@ export type SettingsStackParamList = {
   WhatsAppNumbers: undefined;
   ConnectWhatsApp: undefined;
   ManageContacts: undefined;
-  SmsInbox: undefined;
   Permissions: undefined;
 };
 

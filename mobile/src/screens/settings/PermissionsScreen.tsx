@@ -20,7 +20,7 @@ interface PermissionItem {
   label: string;
   description: string;
   icon: IoniconName;
-  /** Android-only items (the three SMS ones) have no iOS counterpart at all — see SmsInboxScreen. */
+  /** Android-only items (the SMS ones, battery, autostart) have no iOS counterpart: Apple gives no app access to SMS. */
   androidOnly?: boolean;
   /** null: Android gives no way to read this one, so it can only be opened and confirmed by eye. */
   check: () => Promise<boolean | null>;

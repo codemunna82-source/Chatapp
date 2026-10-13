@@ -8,6 +8,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { useGuestPresenceStore } from '../../store/guestPresenceStore';
 import { formatChatListTime } from '../../utils/formatTime';
 import type { Conversation } from '../../api/types';
+import { isLocalSmsId } from '../../queries/useLocalSms';
 
 interface ChatListItemProps {
   conversation: Conversation;
@@ -98,6 +99,17 @@ function ChatListItemImpl({
             <View style={styles.previewTick}>
               <MessageStatusIcon status={conversation.lastMessageStatus} size={13} />
             </View>
+          ) : null}
+          {isLocalSmsId(conversation.id) ? (
+            // A plain SMS chat, kept on this phone — distinct from the same
+            // person's private chat on VOXO's server.
+            <Ionicons
+              name="call-outline"
+              size={12}
+              color={colors.textTertiary}
+              style={styles.previewTick}
+              accessibilityLabel="SMS chat"
+            />
           ) : null}
           <Text
             style={[typography.body, { color: unread ? colors.textPrimary : colors.textSecondary, flex: 1 }]}
