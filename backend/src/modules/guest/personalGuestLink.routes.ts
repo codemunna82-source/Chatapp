@@ -7,7 +7,7 @@ import { guestRateLimiter } from '../../middleware/rateLimit.middleware';
 import { resolvePersonalGuestLink, startPersonalGuestChat } from './guest.service';
 
 const tokenParamSchema = z.object({ token: z.string().trim().min(1).max(64) });
-const startBodySchema = z.object({ phone: z.string().trim().min(1).max(32) });
+const startBodySchema = z.object({ phone: z.string().trim().min(1).max(32).optional() });
 
 /**
  * The public landing page for someone's personal chat link

@@ -81,6 +81,16 @@ describe('resolveReplyChannel', () => {
     );
   });
 
+  it('never sends to WhatsApp for a visitor who gave no phone number', () => {
+    for (const messageType of ['text', 'template']) {
+      for (const session of [opened, issuedNotOpened, blocked, null]) {
+        expect(
+          resolveReplyChannel({ messageType, isDemoContact: false, isWebOnlyContact: true, session }, NOW),
+        ).toBe('web');
+      }
+    }
+  });
+
   it('keeps demo contacts on their sandbox gateway', () => {
     expect(resolveReplyChannel({ messageType: 'text', isDemoContact: true, session: opened }, NOW)).toBe(
       'whatsapp',

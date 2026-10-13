@@ -397,6 +397,7 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
   const channel = resolveReplyChannel({
     messageType: input.type,
     isDemoContact,
+    isWebOnlyContact: contact.webOnly === true,
     session,
   });
 

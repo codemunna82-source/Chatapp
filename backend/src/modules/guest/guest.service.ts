@@ -3,7 +3,8 @@ import { logger } from '../../lib/logger';
 import { trace } from '../../lib/perfTrace';
 import type { AuthContext } from '../../types/express';
 import { Tenant } from '../tenants/tenant.model';
-import { findContactByIdAndTenant, findOrCreateContactByPhone } from '../contacts/contact.repository';
+import { randomBytes } from 'crypto';
+import { createContact, findContactByIdAndTenant, findOrCreateContactByPhone } from '../contacts/contact.repository';
 import { contactDisplayName, normalizePhone } from '../../lib/phone';
 import type { GuestMediaKind } from './guestMedia.service';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
@@ -594,14 +595,53 @@ export async function resolvePersonalGuestLink(
  */
 export async function startPersonalGuestChat(
   token: string,
-  phone: string,
+  phone?: string,
 ): Promise<{ url: string; expiresAt: string; displayName: string | null }> {
   const owner = await resolvePersonalGuestLink(token);
   if (!owner) {
     throw ApiError.notFound('PERSONAL_LINK_NOT_FOUND', 'This chat link is not working right now.');
   }
-  const result = await issuePublicGuestLink(owner.tenantId, owner.whatsappPhoneNumberId, phone);
+  const result = phone
+    ? await issuePublicGuestLink(owner.tenantId, owner.whatsappPhoneNumberId, phone)
+    : await issueWebOnlyGuestLink(owner.tenantId, owner.whatsappPhoneNumberId);
   return { ...result, displayName: owner.displayName };
+}
+
+/**
+ * A chat for a visitor who gave no phone number: a fresh web-only contact
+ * every time, since there is nothing to recognise a returning visitor by.
+ * The landing page remembers the returned link on the visitor's device so
+ * reopening the personal link resumes this chat instead of starting another.
+ */
+async function issueWebOnlyGuestLink(
+  tenantId: string,
+  whatsappPhoneNumberId: string,
+): Promise<{ url: string; expiresAt: string }> {
+  const linkBaseUrl = await guestLinkBaseUrlFor(tenantId);
+  if (!linkBaseUrl) {
+    throw ApiError.serviceUnavailable(
+      'GUEST_LINK_NOT_CONFIGURED',
+      'No chat domain is configured on the server, so a chat link cannot be built yet',
+    );
+  }
+
+  const suffix = randomBytes(6).toString('hex');
+  const contact = await createContact({
+    tenantId,
+    phone: `web-${suffix}`,
+    name: `Web visitor ${suffix.slice(0, 4).toUpperCase()}`,
+    webOnly: true,
+  });
+  const conversation = await findOrCreateConversation(tenantId, String(contact._id), whatsappPhoneNumberId);
+  const expiresAt = guestSessionExpiresAt();
+  const created = await createGuestSession({
+    tenantId,
+    conversationId: String(conversation._id),
+    contactId: String(contact._id),
+    whatsappPhoneNumberId,
+    expiresAt,
+  });
+  return { url: guestChatUrl(linkBaseUrl, created.token), expiresAt: expiresAt.toISOString() };
 }
 
 /**

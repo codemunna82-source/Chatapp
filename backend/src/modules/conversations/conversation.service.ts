@@ -257,7 +257,7 @@ async function whatsappRepliesLeftFor(
   session: Awaited<ReturnType<typeof findActiveSessionForConversation>>,
   withinCustomerServiceWindow: boolean,
 ): Promise<{ left: number | null; nextNudge: NextNudge | null }> {
-  if (contact?.isDemo) return { left: null, nextNudge: null };
+  if (contact?.isDemo || contact?.webOnly) return { left: null, nextNudge: null };
   if (hasMovedToWebChat(session)) return { left: null, nextNudge: null };
 
   const [used, policy] = await Promise.all([

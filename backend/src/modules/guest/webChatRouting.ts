@@ -84,10 +84,13 @@ export function resolveReplyChannel(
   input: {
     messageType: string;
     isDemoContact: boolean;
+    isWebOnlyContact?: boolean;
     session: Pick<GuestSessionDoc, 'activatedAt' | 'blockedAt' | 'lastSeenAt'> | null;
   },
   now: Date = new Date(),
 ): ReplyChannel {
+  // No real number to send to, so the web window is the only way out.
+  if (input.isWebOnlyContact) return 'web';
   if (input.messageType === 'template') return 'whatsapp';
   if (input.isDemoContact) return 'whatsapp';
   return hasMovedToWebChat(input.session, now) ? 'web' : 'whatsapp';

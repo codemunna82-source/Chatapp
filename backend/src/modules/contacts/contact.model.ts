@@ -23,6 +23,12 @@ const contactSchema = new Schema(
      */
     isDemo: { type: Boolean, default: false },
     /**
+     * A visitor who started a chat from a personal link without giving a
+     * phone number. `phone` then holds a unique placeholder, not a number,
+     * so every reply goes to the web chat window and nothing reaches Meta.
+     */
+    webOnly: { type: Boolean, default: false },
+    /**
      * A photo the workspace uploaded for this contact.
      *
      * Mirrors the User avatar fields exactly, including select:false — the

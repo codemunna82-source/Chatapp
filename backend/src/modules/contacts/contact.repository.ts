@@ -9,6 +9,7 @@ export interface CreateContactInput {
   tags?: string[];
   /** Only the seed script sets this — see contact.model.ts. */
   isDemo?: boolean;
+  webOnly?: boolean;
 }
 
 export async function deleteContact(id: string, tenantId: string): Promise<boolean> {
