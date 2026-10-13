@@ -22,6 +22,11 @@ export function isLocalSmsId(id: string): boolean {
 const THREAD_LIMIT = 500;
 const MESSAGE_LIMIT = 500;
 
+/** SENDING shows the clock, FAILED the red retry; everything else is one tick. */
+function outgoingStatus(status: StoredSms['status']): Message['status'] {
+  return status === 'FAILED' ? 'FAILED' : status === 'SENDING' ? 'QUEUED' : 'SENT';
+}
+
 /**
  * A local SMS thread in the shape ChatListItem already renders, so the list
  * row looks exactly like every other chat. Only the fields the row reads
@@ -48,7 +53,7 @@ export function threadToConversation(thread: StoredSmsThread): Conversation {
     lastMessageAt: iso,
     lastMessagePreview: thread.body,
     lastMessageDirection: thread.direction,
-    lastMessageStatus: thread.direction === 'OUT' ? (thread.status === 'FAILED' ? 'FAILED' : 'SENT') : undefined,
+    lastMessageStatus: thread.direction === 'OUT' ? outgoingStatus(thread.status) : undefined,
     withinCustomerServiceWindow: true,
     isDemo: false,
     unreadCount: thread.unreadCount,
@@ -68,7 +73,7 @@ export function smsToMessage(sms: StoredSms): Message {
     direction: sms.direction,
     type: 'text',
     text: sms.body,
-    status: sms.direction === 'OUT' ? (sms.status === 'FAILED' ? 'FAILED' : 'SENT') : 'READ',
+    status: sms.direction === 'OUT' ? outgoingStatus(sms.status) : 'READ',
     sentAt: iso,
     channel: 'sms',
     createdAt: iso,

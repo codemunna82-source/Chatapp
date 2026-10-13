@@ -18,7 +18,8 @@ export interface StoredSms {
   /** When this phone stored it, epoch ms. */
   receivedAt: number;
   direction: 'IN' | 'OUT';
-  status: 'RECEIVED' | 'SENT' | 'FAILED';
+  /** SENDING until the radio answers; FAILED when the network refused it. */
+  status: 'RECEIVED' | 'SENDING' | 'SENT' | 'FAILED';
   /** -1 when the device did not say which SIM. */
   subscriptionId: number;
   simSlot: number;
@@ -34,6 +35,8 @@ export interface SmsPermissionStatus {
   receiveSms: boolean;
   readSms: boolean;
   sendSms: boolean;
+  /** Needed on dual-SIM phones set to "ask every time", to pick a SIM to send from. */
+  readPhoneState: boolean;
   isDefaultSmsApp: boolean;
   ignoringBatteryOptimizations: boolean;
   sdkInt: number;
@@ -59,6 +62,7 @@ interface VoxoSmsStoreNative {
   getMessages(address: string, limit: number, beforeTimestamp: number): Promise<StoredSms[]>;
   markThreadRead(address: string): Promise<number>;
   deleteThread(address: string): Promise<number>;
+  deleteMessage(id: number): Promise<number>;
   getUndelivered(limit: number): Promise<StoredSms[]>;
   markDelivered(upToId: number): Promise<boolean>;
   importHistory(maxPerBox: number, sinceMs: number): Promise<{ scanned: number; imported: number }>;
@@ -81,7 +85,7 @@ export async function getSmsPermissionStatus(): Promise<SmsPermissionStatus | nu
 export type SmsPermissionResult = 'granted' | 'denied' | 'blocked';
 
 /**
- * Asks for RECEIVE_SMS and READ_SMS together.
+ * Asks for RECEIVE_SMS, READ_SMS and SEND_SMS together.
  *
  * 'blocked' is "never ask again" — or, on Android 13+ for an APK installed
  * outside an app store, "Restricted settings": the system refuses the dialog
@@ -93,6 +97,7 @@ export async function requestSmsPermissions(): Promise<SmsPermissionResult> {
   const result = await PermissionsAndroid.requestMultiple([
     PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
     PermissionsAndroid.PERMISSIONS.READ_SMS,
+    PermissionsAndroid.PERMISSIONS.SEND_SMS,
   ]);
   const values = Object.values(result);
   if (values.every((v) => v === PermissionsAndroid.RESULTS.GRANTED)) return 'granted';
@@ -115,6 +120,11 @@ export async function markSmsThreadRead(address: string): Promise<void> {
 /** Removes the thread from VOXO only; the phone's Messages app keeps it. */
 export async function deleteSmsThread(address: string): Promise<void> {
   if (native) await native.deleteThread(address);
+}
+
+/** Removes one message (a failed send being retried) from VOXO only. */
+export async function deleteSmsMessage(id: number): Promise<void> {
+  if (native) await native.deleteMessage(id);
 }
 
 export async function getUndeliveredSms(limit = 500): Promise<StoredSms[]> {

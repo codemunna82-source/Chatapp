@@ -1,8 +1,12 @@
 package com.voxo.app
 
+import android.Manifest
+import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.telephony.SmsManager
@@ -58,45 +62,15 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
    * sendSms.ts's own send, replacing react-native-get-sms-android's
    * autoSend — that library always calls the bare SmsManager.getDefault(),
    * which has nothing to pick on a dual-SIM phone with no default SIM
-   * chosen for SMS and fails with "Generic failure"/"No service" every
-   * time, falling back to an "Open with" app chooser an agent never
-   * asked for. getSmsManager below resolves an explicit subscription
-   * first, which is what actually fixes that — this method exists so
-   * the fix is used by the composer / SMS thread send path too, not just
-   * the auto-reply one that already called getSmsManager.
-   *
-   * No sent-intent/delivery confirmation, same as SmsAutoReplySendReceiver
-   * — resolves as soon as the synchronous call does not throw, which is
-   * as much certainty as that receiver has ever had.
+   * chosen for SMS. sendTracked resolves an explicit SIM, stores the text as
+   * SENDING, and the radio's answer (SmsSentReceiver) later turns it into
+   * SENT or FAILED. This promise resolves once the text is handed to the
+   * radio; it rejects only when that hand-over itself throws.
    */
   @ReactMethod
   fun sendSms(phone: String, body: String, promise: Promise) {
     try {
-      val smsManager = getSmsManager(reactApplicationContext)
-      val parts = smsManager.divideMessage(body)
-      smsManager.sendMultipartTextMessage(phone, null, parts, null, null)
-
-      // Without this, a send existed only as this screen's own local
-      // React state — gone the moment it unmounted, reading as "it sent
-      // the first time, then stopped working" on the next visit even
-      // though every later send had gone out fine too. Inserting into
-      // the system's own sent box (what the Messages app itself does
-      // after a send) is what useLocalSmsThreads now reads back, so a
-      // sent message is a real, persisted row rather than state that
-      // outlives nothing.
-      try {
-        val values = ContentValues()
-        values.put("address", phone)
-        values.put("body", body)
-        reactApplicationContext.contentResolver.insert(Uri.parse("content://sms/sent"), values)
-      } catch (_: Exception) {
-        // Best-effort — a handset that refuses this insert (some OEMs
-        // restrict content://sms writes to the default SMS app) still
-        // sent the text itself just fine above; only the local history
-        // entry is missing.
-      }
-
-      recordOutgoing(reactApplicationContext, phone, body)
+      sendTracked(reactApplicationContext, phone, body)
       promise.resolve(true)
     } catch (e: Exception) {
       promise.reject("SEND_FAILED", e.message ?: "Could not send", e)
@@ -166,12 +140,61 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
     const val MAX_REPLY_DELAY_MS = 90_000L
 
     /**
-     * Puts a text VOXO itself just sent into the on-device store, so it shows
-     * in the SMS thread at once, and tells a listening UI about it. Never
-     * throws: the SMS already went out, and a storage failure must not turn
-     * that into a reported send failure.
+     * Sends a text off this phone's SIM and records it. The one send path for
+     * the composer, the invitation link and the auto-reply.
+     *
+     * The message is stored as SENDING first, so it shows at once and a
+     * failure has a row to land on; the sent-intent of every part reports to
+     * SmsSentReceiver, which settles it as SENT or FAILED. Throws only when
+     * the request cannot even be handed to the radio — the row is then
+     * FAILED too.
      */
-    fun recordOutgoing(context: Context, phone: String, body: String) {
+    fun sendTracked(context: Context, phone: String, body: String): StoredSms? {
+      val smsManager = getSmsManager(context)
+      val row = recordOutgoing(context, phone, body)
+      val parts = smsManager.divideMessage(body)
+      val sentIntents =
+        if (row == null) null
+        else ArrayList<PendingIntent>(parts.indices.map { sentIntentFor(context, row.id, it) })
+      try {
+        smsManager.sendMultipartTextMessage(phone, null, parts, sentIntents, null)
+      } catch (e: Exception) {
+        if (row != null) SmsSentReceiver.handle(context, row.id, SmsManager.RESULT_ERROR_GENERIC_FAILURE)
+        throw e
+      }
+
+      // The phone's own sent box, as the Messages app keeps it. Only the
+      // default SMS app is allowed to write there on most handsets, so this is
+      // best-effort; VOXO's own store is what the thread reads.
+      try {
+        val values = ContentValues()
+        values.put("address", phone)
+        values.put("body", body)
+        context.contentResolver.insert(Uri.parse("content://sms/sent"), values)
+      } catch (_: Exception) {
+        // Refused by the OEM; the text itself went out regardless.
+      }
+      return row
+    }
+
+    private fun sentIntentFor(context: Context, rowId: Long, part: Int): PendingIntent {
+      val intent = Intent(context, SmsSentReceiver::class.java).apply {
+        action = SmsSentReceiver.ACTION
+        // The data URI makes every part's intent distinct to the system, so
+        // the PendingIntents of different messages never replace each other.
+        data = Uri.parse("voxosms://sent/$rowId/$part")
+        putExtra(SmsSentReceiver.EXTRA_ROW_ID, rowId)
+      }
+      return PendingIntent.getBroadcast(
+        context,
+        0,
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+    }
+
+    /** Stores a text VOXO is sending as SENDING and tells a listening UI. Null if the store is unavailable; the send still goes ahead. */
+    private fun recordOutgoing(context: Context, phone: String, body: String): StoredSms? =
       try {
         val now = System.currentTimeMillis()
         val subId = SmsManager.getDefaultSmsSubscriptionId()
@@ -183,19 +206,19 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
             timestamp = now,
             receivedAt = now,
             direction = "OUT",
-            status = "SENT",
+            status = VoxoSmsDatabase.STATUS_SENDING,
             subscriptionId = subId,
             simSlot = VoxoSmsStoreModule.slotFor(subId),
-            source = "voxo",
+            source = VoxoSmsDatabase.SOURCE_VOXO,
             providerId = null,
             read = true,
           ),
         )
         if (row != null) VoxoSmsEvents.publish(listOf(row))
+        row
       } catch (_: Exception) {
-        // See above.
+        null
       }
-    }
 
     /** One per sender, forever — never reply twice to the same number. */
     fun repliedKeyFor(sender: String): String = "replied_to:$sender"
@@ -221,11 +244,27 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
       if (defaultSubId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
         return SmsManager.getSmsManagerForSubscriptionId(defaultSubId)
       }
+      // No default SIM for SMS (dual-SIM phone set to "ask every time"): a
+      // plain API call has nobody to ask, so pick the first active SIM. Needs
+      // the phone-state permission to list SIMs; without it, the bare lookup.
+      firstActiveSubscriptionId(context)?.let { return SmsManager.getSmsManagerForSubscriptionId(it) }
       return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         context.getSystemService(SmsManager::class.java)
       } else {
         @Suppress("DEPRECATION")
         SmsManager.getDefault()
+      }
+    }
+
+    private fun firstActiveSubscriptionId(context: Context): Int? {
+      if (context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return null
+      return try {
+        context.getSystemService(SubscriptionManager::class.java)
+          ?.activeSubscriptionInfoList
+          ?.minByOrNull { it.simSlotIndex }
+          ?.subscriptionId
+      } catch (_: SecurityException) {
+        null
       }
     }
   }

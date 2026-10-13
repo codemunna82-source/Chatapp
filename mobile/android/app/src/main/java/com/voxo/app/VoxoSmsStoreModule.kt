@@ -62,6 +62,7 @@ class VoxoSmsStoreModule(reactContext: ReactApplicationContext) :
     map.putBoolean("receiveSms", granted(ctx, Manifest.permission.RECEIVE_SMS))
     map.putBoolean("readSms", granted(ctx, Manifest.permission.READ_SMS))
     map.putBoolean("sendSms", granted(ctx, Manifest.permission.SEND_SMS))
+    map.putBoolean("readPhoneState", granted(ctx, Manifest.permission.READ_PHONE_STATE))
     map.putBoolean("isDefaultSmsApp", Telephony.Sms.getDefaultSmsPackage(ctx) == ctx.packageName)
     val power = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
     map.putBoolean("ignoringBatteryOptimizations", power.isIgnoringBatteryOptimizations(ctx.packageName))
@@ -91,6 +92,11 @@ class VoxoSmsStoreModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun markThreadRead(address: String, promise: Promise) = run(promise) {
     db().markThreadRead(VoxoSmsDatabase.threadKeyFor(address))
+  }
+
+  @ReactMethod
+  fun deleteMessage(id: Double, promise: Promise) = run(promise) {
+    db().deleteMessage(id.toLong())
   }
 
   @ReactMethod

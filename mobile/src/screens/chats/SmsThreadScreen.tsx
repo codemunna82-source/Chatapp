@@ -20,6 +20,7 @@ import { formatPhoneForDisplay } from '../../utils/formatPhone';
 import { dayKey } from '../../utils/formatTime';
 import { LOCAL_SMS_ID_PREFIX, useLocalSmsMessages, useMarkSmsThreadRead, useSendLocalSms } from '../../queries/useLocalSms';
 import { getSmsInviteLink } from '../../api/endpoints/sms';
+import { deleteSmsMessage } from '../../native/smsStore';
 import { getApiErrorMessage } from '../../api/client';
 import { buildInvitationSmsText, getInvitationSmsTemplate } from '../../storage/invitationSmsTemplate';
 import type { ChatsStackParamList } from '../../navigation/types';
@@ -105,9 +106,17 @@ export function SmsThreadScreen({ route, navigation }: Props) {
 
   const handleRetry = useCallback(
     (message: Message) => {
-      if (!message.id.startsWith('temp-sms-')) return;
-      setPending((prev) => prev.filter((m) => m.id !== message.id));
-      handleSendText(message.text ?? '');
+      if (message.id.startsWith('temp-sms-')) {
+        setPending((prev) => prev.filter((m) => m.id !== message.id));
+        handleSendText(message.text ?? '');
+        return;
+      }
+      // A stored message the network refused: drop the failed copy and send the text again.
+      const storedId = Number(message.id.slice(LOCAL_SMS_ID_PREFIX.length));
+      if (!Number.isFinite(storedId)) return;
+      void deleteSmsMessage(storedId)
+        .catch(() => {})
+        .then(() => handleSendText(message.text ?? ''));
     },
     [handleSendText],
   );

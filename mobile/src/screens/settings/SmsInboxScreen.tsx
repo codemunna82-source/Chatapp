@@ -45,6 +45,8 @@ function SmsSyncStatusCard({
       <Text style={[typography.bodyMedium, { color: colors.textPrimary, marginBottom: 4 }]}>SMS sync status</Text>
       {line('Receive SMS permission', status.receiveSms ? 'Allowed' : 'Not allowed', status.receiveSms)}
       {line('Read SMS permission', status.readSms ? 'Allowed' : 'Not allowed', status.readSms)}
+      {line('Send SMS permission', status.sendSms ? 'Allowed' : 'Not allowed', status.sendSms)}
+      {line('Phone state (two SIMs)', status.readPhoneState ? 'Allowed' : 'Not allowed (only needed on two-SIM phones)')}
       {line('Battery optimisation', status.ignoringBatteryOptimizations ? 'Off for VOXO' : 'On (may delay SMS)')}
       {line('SMS stored on this phone', String(diagnostics.storedMessages))}
       {line('Receiver last ran', formatWhen(diagnostics.lastBroadcastAt))}

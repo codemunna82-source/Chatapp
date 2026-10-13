@@ -184,4 +184,57 @@ class SmsStoreTest {
     assertEquals(0, VoxoSmsDatabase.parkedCount(context))
     assertTrue(db.messages("9876543210", 10, 0).any { it.body == "parked" })
   }
+
+  private fun voxoSend(address: String, body: String, timestamp: Long) =
+    NewSms(address, body, timestamp, timestamp, "OUT", VoxoSmsDatabase.STATUS_SENDING, 1, 0, VoxoSmsDatabase.SOURCE_VOXO, null, true)
+
+  @Test
+  fun aSendStartsAsSendingAndSettlesAsSentWhenTheRadioAcceptsIt() {
+    val t = utc(2026, 10, 12, 9, 0, 0)
+    val row = db.insertIfNew(voxoSend("+919876543210", "hello", t))!!
+    assertEquals("SENDING", db.findById(row.id)!!.status)
+
+    SmsSentReceiver.handle(context, row.id, android.app.Activity.RESULT_OK)
+
+    assertEquals("SENT", db.findById(row.id)!!.status)
+    assertEquals(listOf(row.id), db.undelivered(10).map { it.id })
+  }
+
+  @Test
+  fun aFailedSendIsMarkedFailedAndAnOkFromAnotherPartDoesNotUndoIt() {
+    val t = utc(2026, 10, 12, 9, 0, 0)
+    val row = db.insertIfNew(voxoSend("+919876543210", "a long message in two parts", t))!!
+
+    SmsSentReceiver.handle(context, row.id, android.telephony.SmsManager.RESULT_ERROR_NO_SERVICE)
+    SmsSentReceiver.handle(context, row.id, android.app.Activity.RESULT_OK)
+
+    assertEquals("FAILED", db.findById(row.id)!!.status)
+    assertTrue(VoxoSmsDiagnostics.snapshot(context).lastError!!.contains("No network signal"))
+  }
+
+  @Test
+  fun resendingTheSameTextRightAfterAFailureIsKept() {
+    val t = utc(2026, 10, 12, 9, 0, 0)
+    val first = db.insertIfNew(voxoSend("+919876543210", "retry me", t))!!
+    SmsSentReceiver.handle(context, first.id, android.telephony.SmsManager.RESULT_ERROR_GENERIC_FAILURE)
+
+    assertNotNull(db.insertIfNew(voxoSend("+919876543210", "retry me", t + 20_000)))
+    assertEquals(2, db.messages("9876543210", 10, 0).size)
+  }
+
+  @Test
+  fun theHistoryImportOfASendVoxoAlreadyStoredIsSkipped() {
+    val t = utc(2026, 10, 12, 9, 0, 0)
+    db.insertIfNew(voxoSend("+919876543210", "invoice link", t))
+    val imported = NewSms("09876543210", "invoice link", t + 2_000, t + 2_000, "OUT", "SENT", -1, -1, "import", 77L, true)
+    assertNull(db.insertIfNew(imported))
+  }
+
+  @Test
+  fun aMessageCanBeDeletedOnItsOwn() {
+    val t = utc(2026, 10, 12, 9, 0, 0)
+    val row = db.insertIfNew(voxoSend("+919876543210", "gone", t))!!
+    assertEquals(1, db.deleteMessage(row.id))
+    assertNull(db.findById(row.id))
+  }
 }

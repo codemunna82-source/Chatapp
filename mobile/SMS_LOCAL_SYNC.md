@@ -81,6 +81,29 @@ Removed
 No new runtime dependency. Test-only (`testImplementation`, not in the APK):
 `junit:junit:4.13.2`, `org.robolectric:robolectric:4.14.1`, `androidx.test:core:1.6.1`.
 
+## Permissions and settings VOXO needs (all listed in Settings > Permissions)
+
+| For | Item | Why |
+|---|---|---|
+| Incoming | Receive SMS (`RECEIVE_SMS`) | The OS delivers each new SMS to `SmsStoreReceiver` |
+| Incoming | Read SMS (`READ_SMS`) | Imports history, and recovers messages the receiver missed |
+| Incoming | Notifications (`POST_NOTIFICATIONS`) | Alert for a new SMS |
+| Incoming | Battery: Unrestricted | Otherwise the phone may stop VOXO before it handles the SMS |
+| Incoming | Autostart / background activity (Realme, Xiaomi, Vivo, Oppo) | Lets VOXO start for an SMS while closed. Android cannot report it, so the screen says "Check" |
+| Outgoing | Send SMS (`SEND_SMS`) | Sends from the phone's SIM |
+| Outgoing, two SIMs | Phone state (`READ_PHONE_STATE`) | If the phone asks "which SIM?" for every SMS, VOXO picks the first active SIM instead of failing |
+| Setup | "Allow restricted settings" (App info > ⋮) | Android 13+ blocks SMS permissions for an APK installed outside a store until this is allowed |
+
+Settings > Permissions shows each one with a live status and "X of Y allowed"; Settings > SMS shows when the receiver last ran, SMS stored, and the last error.
+
+## Outgoing: how a send is tracked
+
+`sendTracked` stores the text as **SENDING**, hands it to the radio with a sent-intent per part, and `SmsSentReceiver` settles it: **SENT** when the network accepted it, **FAILED** (with the reason in Settings > SMS: no signal, airplane mode, refused, ...) otherwise. A failed bubble has a retry that removes the failed copy and sends again. Before this, every send showed as sent the moment it was pressed.
+
+## Not adopted: react-native-android-sms-listener
+
+Reviewed and deliberately not added. It registers its receiver on the Activity and unregisters it in `onHostPause`, so it only hears SMS while the app is on screen; it stores nothing, sends nothing, and handles multipart by concatenating parts. VOXO's manifest receiver + SQLite store already cover all of that, and also work with the app closed.
+
 ## Behaviour
 
 | Situation | What happens |

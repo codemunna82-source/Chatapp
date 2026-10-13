@@ -11,6 +11,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Screen } from '../../components/Screen';
 import { useTheme } from '../../theme/ThemeProvider';
 import { triggerLocalSmsSync } from '../../utils/LocalSmsRunner';
+import { getSmsStoreDiagnostics, type SmsStoreDiagnostics } from '../../native/smsStore';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -37,7 +38,7 @@ const smsRationale = (message: string) => ({
 const PERMISSION_ITEMS: PermissionItem[] = [
   {
     key: 'read_sms',
-    label: 'Read SMS inbox',
+    label: 'Read SMS — incoming',
     description: 'Shows the SMS already on this phone in Chats. They stay on this phone.',
     icon: 'chatbox-outline',
     androidOnly: true,
@@ -50,7 +51,7 @@ const PERMISSION_ITEMS: PermissionItem[] = [
   },
   {
     key: 'send_sms',
-    label: 'Send SMS',
+    label: 'Send SMS — outgoing',
     description: '"Send invitation via SMS" and the composer\'s SMS box send straight off your SIM with this.',
     icon: 'paper-plane-outline',
     androidOnly: true,
@@ -63,7 +64,7 @@ const PERMISSION_ITEMS: PermissionItem[] = [
   },
   {
     key: 'receive_sms',
-    label: 'Receive SMS',
+    label: 'Receive SMS — incoming',
     description: 'New SMS appear in Chats as they arrive, and "Auto-reply to lead SMS" can notice them.',
     icon: 'mail-unread-outline',
     androidOnly: true,
@@ -73,6 +74,21 @@ const PERMISSION_ITEMS: PermissionItem[] = [
         PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
         smsRationale('VOXO needs this to show a new SMS in Chats as it arrives.'),
       )) === PermissionsAndroid.RESULTS.GRANTED,
+  },
+  {
+    key: 'read_phone_state',
+    label: 'Phone state — two-SIM phones',
+    description:
+      'If your phone asks "which SIM?" for every SMS, VOXO needs this to pick a SIM to send from. Single SIM: not needed.',
+    icon: 'phone-portrait-outline',
+    androidOnly: true,
+    check: () => PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE),
+    request: async () =>
+      (await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE, {
+        title: 'Phone state',
+        message: 'VOXO uses this only to choose which SIM sends an SMS on a two-SIM phone.',
+        buttonPositive: 'Allow',
+      })) === PermissionsAndroid.RESULTS.GRANTED,
   },
   {
     key: 'camera',
@@ -167,6 +183,7 @@ export function PermissionsScreen() {
   const [statuses, setStatuses] = useState<Record<string, boolean | null>>({});
   const [checking, setChecking] = useState(true);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [smsDiagnostics, setSmsDiagnostics] = useState<SmsStoreDiagnostics | null>(null);
 
   const refresh = useCallback(async () => {
     setChecking(true);
@@ -174,6 +191,7 @@ export function PermissionsScreen() {
       VISIBLE_ITEMS.map(async (item) => [item.key, await item.check().catch(() => false)] as const),
     );
     setStatuses(Object.fromEntries(entries));
+    setSmsDiagnostics(await getSmsStoreDiagnostics().catch(() => null));
     setChecking(false);
   }, []);
 
@@ -215,6 +233,40 @@ export function PermissionsScreen() {
           Everything VOXO can ask your phone for, and what each one is actually used for. Nothing here is required —
           a feature that needs one simply can&apos;t do its job until it&apos;s granted.
         </Text>
+
+        {Platform.OS === 'android' ? (
+          <View
+            style={{
+              backgroundColor: colors.surfaceAlt,
+              borderRadius: radius.md,
+              padding: spacing.md,
+              marginBottom: spacing.md,
+              gap: 6,
+            }}
+          >
+            <Text style={[typography.bodyMedium, { color: colors.textPrimary }]}>What SMS needs</Text>
+            <Text style={[typography.caption, { color: colors.textSecondary, lineHeight: 17 }]}>
+              Incoming SMS: Receive SMS, Read SMS, Notifications, Battery Unrestricted, and Autostart.
+            </Text>
+            <Text style={[typography.caption, { color: colors.textSecondary, lineHeight: 17 }]}>
+              Outgoing SMS: Send SMS, plus Phone state if your phone has two SIMs and asks which one to use.
+            </Text>
+            {smsDiagnostics ? (
+              <>
+                <Text style={[typography.caption, { color: colors.textSecondary, lineHeight: 17 }]}>
+                  {`Last incoming SMS caught by VOXO: ${
+                    smsDiagnostics.lastBroadcastAt > 0 ? new Date(smsDiagnostics.lastBroadcastAt).toLocaleString() : 'none yet'
+                  }. SMS stored on this phone: ${smsDiagnostics.storedMessages}.`}
+                </Text>
+                {smsDiagnostics.lastError ? (
+                  <Text style={[typography.caption, { color: colors.danger, lineHeight: 17 }]}>
+                    {`Last problem: ${smsDiagnostics.lastError}`}
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
+          </View>
+        ) : null}
 
         {checking ? null : (
           <Text

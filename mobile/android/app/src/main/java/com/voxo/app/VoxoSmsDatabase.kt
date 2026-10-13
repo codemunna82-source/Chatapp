@@ -110,7 +110,11 @@ class VoxoSmsDatabase private constructor(context: Context) :
     db.beginTransaction()
     try {
       if (isDeleted(db, threadKey, sms.timestamp)) return null
-      if (hasNearDuplicate(db, threadKey, sms)) return null
+      // A text VOXO itself just sent is never a near-duplicate of an earlier
+      // one: resending after a failure, or the same invitation to two
+      // customers' threads, is deliberate. The later history import of that
+      // send is what the near-duplicate check is there to drop.
+      if (sms.source != SOURCE_VOXO && hasNearDuplicate(db, threadKey, sms)) return null
 
       val values = ContentValues().apply {
         put("dedup_key", dedupKeyFor(sms.direction, threadKey, sms.timestamp, sms.body))
@@ -139,6 +143,31 @@ class VoxoSmsDatabase private constructor(context: Context) :
       db.endTransaction()
     }
   }
+
+  fun findById(id: Long): StoredSms? {
+    readableDatabase.rawQuery("SELECT * FROM sms_messages WHERE id = ?", arrayOf(id.toString())).use { c ->
+      return if (c.moveToFirst()) rowFrom(c) else null
+    }
+  }
+
+  /**
+   * Moves a message VOXO sent through SENDING → SENT or FAILED, and marks it
+   * for JS to pick up again. A FAILED row is never turned back into SENT: a
+   * multipart send reports once per part, and one failed part means the
+   * message did not arrive whole whatever the other parts did.
+   */
+  fun updateSendStatus(id: Long, status: String): StoredSms? {
+    val values = ContentValues().apply {
+      put("status", status)
+      put("delivered_to_js", 0)
+    }
+    val where = if (status == STATUS_FAILED) "id = ?" else "id = ? AND status != '$STATUS_FAILED'"
+    val changed = writableDatabase.update("sms_messages", values, where, arrayOf(id.toString()))
+    return if (changed > 0) findById(id) else null
+  }
+
+  fun deleteMessage(id: Long): Int =
+    writableDatabase.delete("sms_messages", "id = ?", arrayOf(id.toString()))
 
   private fun isDeleted(db: SQLiteDatabase, threadKey: String, timestamp: Long): Boolean {
     db.rawQuery(
@@ -277,6 +306,10 @@ class VoxoSmsDatabase private constructor(context: Context) :
     private const val DB_NAME = "voxo_sms.db"
     private const val DB_VERSION = 1
     const val DEDUP_WINDOW_MS = 120_000L
+    const val SOURCE_VOXO = "voxo"
+    const val STATUS_SENDING = "SENDING"
+    const val STATUS_SENT = "SENT"
+    const val STATUS_FAILED = "FAILED"
 
     private const val FALLBACK_PREFS = "voxo_sms_store_fallback"
     private const val FALLBACK_KEY = "pending"

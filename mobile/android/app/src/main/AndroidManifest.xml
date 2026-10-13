@@ -33,6 +33,9 @@
        below — entirely native, so it fires even if VOXO isn't running.
        Off by default; the agent switches it on themselves. -->
   <uses-permission android:name="android.permission.RECEIVE_SMS"/>
+  <!-- Dual-SIM phones set to "ask every time" for SMS: lets VOXO list the
+       SIMs so it can send from the first one instead of failing. -->
+  <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <!-- "Send invitation via SMS" on a conversation: sends the private-chat
        link straight from the device's own SIM (react-native-get-sms-android
@@ -89,6 +92,9 @@
         <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
       </intent-filter>
     </receiver>
+    <!-- See SmsSentReceiver.kt: the radio's answer to every text VOXO sends
+         (sent / failed). Not exported: only VOXO's own PendingIntents reach it. -->
+    <receiver android:name=".SmsSentReceiver" android:exported="false"/>
     <!-- See SmsAutoReplySendReceiver.kt — the delayed half of the same
          feature. Not exported: the only thing that ever triggers it is
          the PendingIntent SmsAutoReplyReceiver schedules, from inside
