@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from 'react';
-import { Linking, PermissionsAndroid, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AppState, Linking, PermissionsAndroid, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import notifee from '@notifee/react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Contacts from 'expo-contacts';
@@ -20,8 +21,11 @@ interface PermissionItem {
   icon: IoniconName;
   /** Android-only items (the three SMS ones) have no iOS counterpart at all — see SmsInboxScreen. */
   androidOnly?: boolean;
-  check: () => Promise<boolean>;
+  /** null: Android gives no way to read this one, so it can only be opened and confirmed by eye. */
+  check: () => Promise<boolean | null>;
   request: () => Promise<boolean>;
+  /** A phone setting rather than a runtime permission: the button opens the screen where it is changed. */
+  opensSettings?: boolean;
 }
 
 const smsRationale = (message: string) => ({
@@ -110,6 +114,35 @@ const PERMISSION_ITEMS: PermissionItem[] = [
     check: async () => (await Notifications.getPermissionsAsync()).granted,
     request: async () => (await Notifications.requestPermissionsAsync()).granted,
   },
+  {
+    key: 'battery',
+    label: 'Battery: Unrestricted',
+    description: 'Without this the phone can stop VOXO in the background, so new SMS, messages and calls arrive late or not at all.',
+    icon: 'battery-charging-outline',
+    androidOnly: true,
+    opensSettings: true,
+    check: async () => !(await notifee.isBatteryOptimizationEnabled()),
+    request: async () => {
+      await notifee.openBatteryOptimizationSettings();
+      return false;
+    },
+  },
+  {
+    key: 'autostart',
+    label: 'Autostart / background activity',
+    description:
+      'Realme, Xiaomi, Vivo and Oppo close background apps unless this is on for VOXO. Android does not let an app read it, so check it yourself.',
+    icon: 'rocket-outline',
+    androidOnly: true,
+    opensSettings: true,
+    check: async () => null,
+    request: async () => {
+      const power = await notifee.getPowerManagerInfo().catch(() => null);
+      if (power?.activity) await notifee.openPowerManagerSettings();
+      else await Linking.openSettings();
+      return false;
+    },
+  },
 ];
 
 const VISIBLE_ITEMS = PERMISSION_ITEMS.filter((item) => !item.androidOnly || Platform.OS === 'android');
@@ -131,7 +164,7 @@ const VISIBLE_ITEMS = PERMISSION_ITEMS.filter((item) => !item.androidOnly || Pla
  */
 export function PermissionsScreen() {
   const { colors, spacing, radius, typography } = useTheme();
-  const [statuses, setStatuses] = useState<Record<string, boolean>>({});
+  const [statuses, setStatuses] = useState<Record<string, boolean | null>>({});
   const [checking, setChecking] = useState(true);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
 
@@ -149,6 +182,17 @@ export function PermissionsScreen() {
       void refresh();
     }, [refresh]),
   );
+
+  // Coming back from the phone's own Settings does not refocus this screen.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refresh();
+    });
+    return () => sub.remove();
+  }, [refresh]);
+
+  const checkable = VISIBLE_ITEMS.filter((item) => statuses[item.key] !== null);
+  const allowedCount = checkable.filter((item) => statuses[item.key] === true).length;
 
   const grant = useCallback(
     async (item: PermissionItem) => {
@@ -172,8 +216,25 @@ export function PermissionsScreen() {
           a feature that needs one simply can&apos;t do its job until it&apos;s granted.
         </Text>
 
+        {checking ? null : (
+          <Text
+            style={[
+              typography.bodyMedium,
+              {
+                color: allowedCount === checkable.length ? colors.success : colors.danger,
+                marginBottom: spacing.md,
+              },
+            ]}
+          >
+            {allowedCount === checkable.length
+              ? `All ${checkable.length} allowed`
+              : `${allowedCount} of ${checkable.length} allowed — tap the buttons below`}
+          </Text>
+        )}
+
         {VISIBLE_ITEMS.map((item) => {
-          const granted = statuses[item.key] ?? false;
+          const status = statuses[item.key];
+          const granted = status === true;
           return (
             <View
               key={item.key}
@@ -197,25 +258,32 @@ export function PermissionsScreen() {
               {checking ? null : granted ? (
                 <Ionicons name="checkmark-circle" size={22} color={colors.success} />
               ) : (
-                <Pressable
-                  onPress={() => void grant(item)}
-                  disabled={pendingKey === item.key}
-                  style={({ pressed }) => [
-                    {
-                      backgroundColor: colors.primary,
-                      borderRadius: radius.full,
-                      paddingVertical: 6,
-                      paddingHorizontal: 14,
-                      opacity: pendingKey === item.key || pressed ? 0.6 : 1,
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Grant ${item.label}`}
-                >
-                  <Text style={[typography.caption, { color: colors.textOnPrimary, fontWeight: '600' }]}>
-                    {pendingKey === item.key ? 'Asking…' : 'Grant'}
-                  </Text>
-                </Pressable>
+                <View style={{ alignItems: 'center', gap: 4 }}>
+                  {status === null ? (
+                    <Text style={[typography.caption, { color: colors.textTertiary }]}>Check</Text>
+                  ) : (
+                    <Ionicons name="close-circle" size={18} color={colors.danger} />
+                  )}
+                  <Pressable
+                    onPress={() => void grant(item)}
+                    disabled={pendingKey === item.key}
+                    style={({ pressed }) => [
+                      {
+                        backgroundColor: colors.primary,
+                        borderRadius: radius.full,
+                        paddingVertical: 6,
+                        paddingHorizontal: 14,
+                        opacity: pendingKey === item.key || pressed ? 0.6 : 1,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Grant ${item.label}`}
+                  >
+                    <Text style={[typography.caption, { color: colors.textOnPrimary, fontWeight: '600' }]}>
+                      {pendingKey === item.key ? 'Asking…' : item.opensSettings ? 'Open' : 'Grant'}
+                    </Text>
+                  </Pressable>
+                </View>
               )}
             </View>
           );
