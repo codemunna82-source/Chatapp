@@ -9,6 +9,7 @@ import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from '
 import { useFocusEffect } from '@react-navigation/native';
 import { Screen } from '../../components/Screen';
 import { useTheme } from '../../theme/ThemeProvider';
+import { triggerLocalSmsSync } from '../../utils/LocalSmsRunner';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -33,14 +34,14 @@ const PERMISSION_ITEMS: PermissionItem[] = [
   {
     key: 'read_sms',
     label: 'Read SMS inbox',
-    description: 'So Settings > SMS can show incoming texts that mention your leads.',
+    description: 'Shows the SMS already on this phone in Chats. They stay on this phone.',
     icon: 'chatbox-outline',
     androidOnly: true,
     check: () => PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS),
     request: async () =>
       (await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.READ_SMS,
-        smsRationale('VOXO reads your SMS inbox on the SMS screen only, to find messages mentioning your leads.'),
+        smsRationale('VOXO shows your SMS in Chats. They are kept on this phone and never uploaded.'),
       )) === PermissionsAndroid.RESULTS.GRANTED,
   },
   {
@@ -59,14 +60,14 @@ const PERMISSION_ITEMS: PermissionItem[] = [
   {
     key: 'receive_sms',
     label: 'Receive SMS',
-    description: '"Auto-reply to lead SMS" needs this to notice an incoming text at all.',
+    description: 'New SMS appear in Chats as they arrive, and "Auto-reply to lead SMS" can notice them.',
     icon: 'mail-unread-outline',
     androidOnly: true,
     check: () => PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS),
     request: async () =>
       (await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
-        smsRationale('VOXO needs this to notice an incoming SMS and reply to it automatically.'),
+        smsRationale('VOXO needs this to show a new SMS in Chats as it arrives.'),
       )) === PermissionsAndroid.RESULTS.GRANTED,
   },
   {
@@ -153,7 +154,8 @@ export function PermissionsScreen() {
     async (item: PermissionItem) => {
       setPendingKey(item.key);
       try {
-        await item.request().catch(() => false);
+        const granted = await item.request().catch(() => false);
+        if (granted && (item.key === 'read_sms' || item.key === 'receive_sms')) triggerLocalSmsSync();
       } finally {
         setPendingKey(null);
         await refresh();

@@ -48,7 +48,6 @@ import {
   useMessages,
   flattenMessages,
   useSendMessage,
-  useSendSmsMessage,
   useDeleteMessage,
   useStarMessage,
   useFilteredMessages,
@@ -245,7 +244,13 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
    * is switched off for it below instead.
    */
   const isSmsConversation = Boolean(conversationQuery.data) && !conversationQuery.data?.whatsappPhoneNumberId;
-  const sendSmsMessage = useSendSmsMessage(conversationId, conversationQuery.data?.contact?.phone);
+  // SMS now lives only on this phone (see LocalSmsRunner). An SMS-only
+  // conversation left on the server from before that opens the phone's own
+  // thread for the same number instead.
+  const legacySmsPhone = isSmsConversation ? conversationQuery.data?.contact?.phone : undefined;
+  useEffect(() => {
+    if (legacySmsPhone) navigation.replace('SmsThread', { phone: legacySmsPhone });
+  }, [legacySmsPhone, navigation]);
 
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
@@ -810,16 +815,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   const handleSendText = useCallback(
     (text: string, nudgeIndex?: number) => {
-      // SMS has no reply-threading, no nudge wording, and sends over a
-      // different wire entirely — a conversation this screen has
-      // already resolved to be SMS-only routes here instead of into
-      // submitSend's WhatsApp path.
-      if (isSmsConversation) {
-        sendSmsMessage.mutate({ text });
-        setReplyingTo(null);
-        return;
-      }
-
       // One path for both channels. The server decides which one this
       // leaves on, so the composer no longer has to — and cannot get it
       // wrong, which it did: choosing WhatsApp while the window was open
@@ -836,18 +831,13 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         ...(nudgeIndex !== undefined ? { nudgeIndex } : {}),
       });
     },
-    [isSmsConversation, sendSmsMessage, submitSend, replyingTo],
+    [submitSend, replyingTo],
   );
 
   const handleRetry = useCallback(
     (message: Message) => {
       removeMessageFromCache(queryClient, conversationId, message.id);
-      if (message.type === 'text' && isSmsConversation) {
-        // Only ever reaches here on a genuine native-send failure (see
-        // useSendSmsMessage) — nothing physically went out yet, so
-        // re-attempting from scratch is safe.
-        sendSmsMessage.mutate({ text: message.text ?? '' });
-      } else if (message.type === 'text') {
+      if (message.type === 'text') {
         submitSend({ type: 'text', text: message.text ?? '', replyToMessageId: message.replyToMessageId });
       } else if (
         (message.type === 'image' || message.type === 'video' || message.type === 'audio' || message.type === 'document') &&
@@ -860,7 +850,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       // just re-send those from scratch, which is a minor UX gap, not a
       // silent failure (the FAILED bubble stays visible either way).
     },
-    [conversationId, queryClient, submitSend, isSmsConversation, sendSmsMessage],
+    [conversationId, queryClient, submitSend],
   );
 
   const canReactTo = (message: Message) => !message.id.startsWith('temp-') && message.status !== 'FAILED';
@@ -1318,7 +1308,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               // into at all (that's a WhatsApp Cloud API rule), so an
               // SMS-only conversation always gets the free-text composer.
               withinWindow={isSmsConversation || withinWhatsAppWindow || guestActive}
-              sending={isSmsConversation ? sendSmsMessage.isPending : sendMessage.isPending}
+              sending={sendMessage.isPending}
               onSendText={handleSendText}
               onAttach={() => setAttachSheetOpen(true)}
               onUseTemplate={() => setTemplateSheetOpen(true)}

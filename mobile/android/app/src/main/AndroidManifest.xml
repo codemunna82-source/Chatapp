@@ -78,6 +78,17 @@
         <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
       </intent-filter>
     </receiver>
+    <!-- See SmsStoreReceiver.kt: saves every incoming SMS to VOXO's on-device
+         SQLite store, with or without the JS runtime running. Same
+         BROADCAST_SMS guard as above. -->
+    <receiver
+      android:name=".SmsStoreReceiver"
+      android:exported="true"
+      android:permission="android.permission.BROADCAST_SMS">
+      <intent-filter>
+        <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
+      </intent-filter>
+    </receiver>
     <!-- See SmsAutoReplySendReceiver.kt — the delayed half of the same
          feature. Not exported: the only thing that ever triggers it is
          the PendingIntent SmsAutoReplyReceiver schedules, from inside

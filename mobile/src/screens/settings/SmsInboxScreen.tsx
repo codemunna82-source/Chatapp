@@ -8,6 +8,55 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { formatChatListTime } from '../../utils/formatTime';
 import { isIndianMobileSender } from '../../utils/smsLeadMatch';
 import { listInboxSms } from '../../utils/localSmsInbox';
+import {
+  getSmsPermissionStatus,
+  getSmsStoreDiagnostics,
+  type SmsPermissionStatus,
+  type SmsStoreDiagnostics,
+} from '../../native/smsStore';
+
+function formatWhen(ms: number): string {
+  return ms > 0 ? new Date(ms).toLocaleString() : 'never';
+}
+
+/**
+ * Whether VOXO's own SMS capture is working on this handset — the facts a
+ * tester needs when a message does not show up: permissions, battery
+ * optimisation, how many messages the on-device store holds, and when the
+ * native receiver last actually ran.
+ */
+function SmsSyncStatusCard({
+  status,
+  diagnostics,
+}: {
+  status: SmsPermissionStatus | null;
+  diagnostics: SmsStoreDiagnostics | null;
+}) {
+  const { colors, spacing, radius, typography } = useTheme();
+  if (!status || !diagnostics) return null;
+  const line = (label: string, value: string, ok?: boolean) => (
+    <View style={styles.rowHeader} key={label}>
+      <Text style={[typography.caption, { color: colors.textSecondary }]}>{label}</Text>
+      <Text style={[typography.caption, { color: ok === false ? colors.danger : colors.textPrimary }]}>{value}</Text>
+    </View>
+  );
+  return (
+    <View style={{ backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md, gap: 4 }}>
+      <Text style={[typography.bodyMedium, { color: colors.textPrimary, marginBottom: 4 }]}>SMS sync status</Text>
+      {line('Receive SMS permission', status.receiveSms ? 'Allowed' : 'Not allowed', status.receiveSms)}
+      {line('Read SMS permission', status.readSms ? 'Allowed' : 'Not allowed', status.readSms)}
+      {line('Battery optimisation', status.ignoringBatteryOptimizations ? 'Off for VOXO' : 'On (may delay SMS)')}
+      {line('SMS stored on this phone', String(diagnostics.storedMessages))}
+      {line('Receiver last ran', formatWhen(diagnostics.lastBroadcastAt))}
+      {line('Last history import', formatWhen(diagnostics.lastImportAt))}
+      {diagnostics.parkedMessages > 0 ? line('Waiting to be saved', String(diagnostics.parkedMessages), false) : null}
+      {diagnostics.lastError ? line('Last error', diagnostics.lastError, false) : null}
+      <Text style={[typography.caption, { color: colors.textTertiary, marginTop: 4 }]}>
+        {`${status.manufacturer} ${status.model}, Android API ${status.sdkInt}`}
+      </Text>
+    </View>
+  );
+}
 
 interface MatchedSms {
   id: number;
@@ -34,6 +83,8 @@ export function SmsInboxScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SmsPermissionStatus | null>(null);
+  const [diagnostics, setDiagnostics] = useState<SmsStoreDiagnostics | null>(null);
 
   const load = useCallback(async (isRefresh: boolean) => {
     if (isRefresh) setRefreshing(true);
@@ -74,6 +125,12 @@ export function SmsInboxScreen() {
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS !== 'android') return;
+      void Promise.all([getSmsPermissionStatus(), getSmsStoreDiagnostics()])
+        .then(([nextStatus, nextDiagnostics]) => {
+          setSyncStatus(nextStatus);
+          setDiagnostics(nextDiagnostics);
+        })
+        .catch(() => {});
       PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS).then((already) => {
         if (already) {
           setPermission('granted');
@@ -135,6 +192,7 @@ export function SmsInboxScreen() {
         keyExtractor={(item) => String(item.id)}
         contentContainerStyle={{ padding: spacing.md, flexGrow: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />}
+        ListHeaderComponent={<SmsSyncStatusCard status={syncStatus} diagnostics={diagnostics} />}
         ListEmptyComponent={error ? (
           <View style={styles.centered}>
             <Text style={[typography.body, { color: colors.danger, textAlign: 'center' }]}>{error}</Text>

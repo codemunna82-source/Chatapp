@@ -83,6 +83,8 @@ interface ComposerProps {
   customerPhone?: string;
   /** Sends free text by SMS, off the agent's own SIM — see sendSms.ts. */
   onSendSms: (text: string) => void;
+  /** A chat that exists only on this phone (an SMS thread): nothing, not even typing, is sent to the server. */
+  localOnly?: boolean;
 }
 
 const TYPING_STOP_DELAY_MS = 2500;
@@ -270,6 +272,7 @@ export function Composer({
   whatsappRepliesLeft,
   customerPhone,
   onSendSms,
+  localOnly = false,
 }: ComposerProps) {
   const { colors, spacing, radius, typography } = useTheme();
   // The bottom inset is owned by the screen's keyboard-tracking wrapper
@@ -299,6 +302,7 @@ export function Composer({
   const handleChangeText = (value: string) => {
     setText(value);
     draft.save(value);
+    if (localOnly) return;
     emitTypingStart(conversationId);
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => emitTypingStop(conversationId), TYPING_STOP_DELAY_MS);
@@ -453,7 +457,7 @@ export function Composer({
     draft.clear();
     setInputHeight(INPUT_MIN_HEIGHT);
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
-    emitTypingStop(conversationId);
+    if (!localOnly) emitTypingStop(conversationId);
   };
 
   // ----------------------------------------------------------- voice notes

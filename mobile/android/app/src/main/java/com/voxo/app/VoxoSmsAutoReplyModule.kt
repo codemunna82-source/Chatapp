@@ -96,6 +96,7 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
         // entry is missing.
       }
 
+      recordOutgoing(reactApplicationContext, phone, body)
       promise.resolve(true)
     } catch (e: Exception) {
       promise.reject("SEND_FAILED", e.message ?: "Could not send", e)
@@ -163,6 +164,38 @@ class VoxoSmsAutoReplyModule(reactContext: ReactApplicationContext) :
      */
     const val MIN_REPLY_DELAY_MS = 10_000L
     const val MAX_REPLY_DELAY_MS = 90_000L
+
+    /**
+     * Puts a text VOXO itself just sent into the on-device store, so it shows
+     * in the SMS thread at once, and tells a listening UI about it. Never
+     * throws: the SMS already went out, and a storage failure must not turn
+     * that into a reported send failure.
+     */
+    fun recordOutgoing(context: Context, phone: String, body: String) {
+      try {
+        val now = System.currentTimeMillis()
+        val subId = SmsManager.getDefaultSmsSubscriptionId()
+        val row = VoxoSmsDatabase.storeOrPark(
+          context,
+          NewSms(
+            address = phone,
+            body = body,
+            timestamp = now,
+            receivedAt = now,
+            direction = "OUT",
+            status = "SENT",
+            subscriptionId = subId,
+            simSlot = VoxoSmsStoreModule.slotFor(subId),
+            source = "voxo",
+            providerId = null,
+            read = true,
+          ),
+        )
+        if (row != null) VoxoSmsEvents.publish(listOf(row))
+      } catch (_: Exception) {
+        // See above.
+      }
+    }
 
     /** One per sender, forever — never reply twice to the same number. */
     fun repliedKeyFor(sender: String): String = "replied_to:$sender"

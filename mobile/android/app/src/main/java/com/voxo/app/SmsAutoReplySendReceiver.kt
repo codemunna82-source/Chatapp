@@ -38,6 +38,7 @@ class SmsAutoReplySendReceiver : BroadcastReceiver() {
       } catch (_: Exception) {
         // Best-effort, same as sendSms — the reply itself already went out above.
       }
+      VoxoSmsAutoReplyModule.recordOutgoing(context, sender, body)
 
       val prefs = context.getSharedPreferences(VoxoSmsAutoReplyModule.PREFS_NAME, Context.MODE_PRIVATE)
       prefs.edit()
