@@ -69,15 +69,15 @@ export async function findActiveSessionForConversation(
   return GuestSession.findOne({
     conversationId,
     tenantId,
-    revokedAt: { $exists: false },
+    // revokedAt is ignored: links are permanent, including ones revoked before that rule.
     ...notExpired(),
   }).sort({ expiresAt: -1 });
 }
 
 /**
- * Resolves a presented token. Returns null for unknown, revoked and
- * expired alike — a caller that could tell those apart would let anyone
- * probe which tokens once existed.
+ * Resolves a presented token. Returns null for an unknown token (and, when
+ * a link lifetime is configured, an expired one) — a caller that could tell
+ * those apart would let anyone probe which tokens once existed.
  */
 export async function findSessionByToken(token: string): Promise<GuestSessionDoc | null> {
   if (!token) return null;
@@ -88,7 +88,7 @@ export async function findSessionByToken(token: string): Promise<GuestSessionDoc
     // dropping it would invalidate every link already in a customer's
     // thread, which is the exact failure this change exists to fix.
     $or: [{ tokenHashes: hash }, { tokenHash: hash }],
-    revokedAt: { $exists: false },
+    // revokedAt is ignored: links are permanent, including ones revoked before that rule.
     ...notExpired(),
   });
 }
@@ -152,7 +152,7 @@ export async function isConversationBlockedByGuest(
 
 /** Points a session at a new conversation and contact — see guest.service.ts ensureSessionConversation. */
 export async function retargetGuestSession(sessionId: string, conversationId: string, contactId: string): Promise<void> {
-  await GuestSession.updateOne({ _id: sessionId }, { $set: { conversationId, contactId } });
+  await GuestSession.updateOne({ _id: sessionId }, { $set: { conversationId, contactId }, $unset: { revokedAt: '' } });
 }
 
 /**
@@ -177,7 +177,7 @@ export async function reissueGuestSessionToken(
   const token = generateGuestToken();
   const hash = hashGuestToken(token);
   const updated = await GuestSession.findOneAndUpdate(
-    { _id: sessionId, tenantId, revokedAt: { $exists: false } },
+    { _id: sessionId, tenantId },
     {
       // The new token is ADDED, not swapped in. $set on tokenHash alone
       // is what killed every link already sitting in the customer's
