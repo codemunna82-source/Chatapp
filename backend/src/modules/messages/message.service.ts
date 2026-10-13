@@ -1,4 +1,5 @@
 import { ApiError } from '../../lib/ApiError';
+import { env } from '../../config/env';
 import { recordAudit } from '../audit/auditLog.service';
 import {
   findConversationByIdAndTenant,
@@ -394,10 +395,14 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * credentials and the 24-hour window are all untouched. This only
    * decides which way an outbound message leaves.
    */
+  if (env.META_ON_HOLD && input.type === 'template' && !isDemoContact) {
+    throw new ApiError(422, 'WHATSAPP_ON_HOLD', 'WhatsApp is on hold, so templates cannot be sent. Reply in the private chat instead.');
+  }
   const channel = resolveReplyChannel({
     messageType: input.type,
     isDemoContact,
-    isWebOnlyContact: contact.webOnly === true,
+    // With WhatsApp on hold the private chat is the only way to reach anyone.
+    isWebOnlyContact: contact.webOnly === true || (env.META_ON_HOLD && !isDemoContact),
     session,
   });
 

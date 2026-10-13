@@ -70,6 +70,16 @@ const envSchema = z.object({
     .string()
     .default('true')
     .transform((v) => v === 'true'),
+  /**
+   * WhatsApp (Meta) switched off without disconnecting anything. Every reply
+   * goes to the customer's private web chat, media is never uploaded to
+   * Meta, the 24-hour window and nudge rules do not apply, and number health
+   * is not polled. Set back to false to resume WhatsApp.
+   */
+  META_ON_HOLD: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
 
   // Optional — object storage for avatars and a persistent cache of
   // WhatsApp media (which Meta's own media ids/links expire after ~30

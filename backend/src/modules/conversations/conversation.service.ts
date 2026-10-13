@@ -1,4 +1,5 @@
 import { ApiError } from '../../lib/ApiError';
+import { env } from '../../config/env';
 import { visibleWhatsAppPhoneNumberId } from './conversation.access';
 import type { AuthContext } from '../../types/express';
 import { recordAudit } from '../audit/auditLog.service';
@@ -98,7 +99,8 @@ function toPublicConversation(doc: ConversationLean, contact?: ContactLean): Pub
     lastMessageStatus: doc.lastMessageStatus ?? undefined,
     lastCustomerMessageAt: doc.lastCustomerMessageAt ?? undefined,
     conversationWindowExpiresAt: doc.conversationWindowExpiresAt ?? undefined,
-    withinCustomerServiceWindow: repo.isWithinCustomerServiceWindow(doc),
+    // On hold, replies go to the private chat, which has no 24-hour window.
+    withinCustomerServiceWindow: env.META_ON_HOLD || repo.isWithinCustomerServiceWindow(doc),
     // Absent contact (a conversation listed before its contact loads)
     // defaults to NOT demo — the safe direction, since it keeps the real
     // window rules on anything we cannot positively identify as sample data.
@@ -257,7 +259,7 @@ async function whatsappRepliesLeftFor(
   session: Awaited<ReturnType<typeof findActiveSessionForConversation>>,
   withinCustomerServiceWindow: boolean,
 ): Promise<{ left: number | null; nextNudge: NextNudge | null }> {
-  if (contact?.isDemo || contact?.webOnly) return { left: null, nextNudge: null };
+  if (env.META_ON_HOLD || contact?.isDemo || contact?.webOnly) return { left: null, nextNudge: null };
   if (hasMovedToWebChat(session)) return { left: null, nextNudge: null };
 
   const [used, policy] = await Promise.all([

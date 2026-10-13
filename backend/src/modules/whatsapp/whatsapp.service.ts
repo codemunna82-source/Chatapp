@@ -323,7 +323,9 @@ export function toPublicWhatsAppNumber(
     messagingLimitTier: n.messagingLimitTier ?? undefined,
     healthCheckedAt: n.healthCheckedAt ? n.healthCheckedAt.toISOString() : undefined,
     canSendMessage: n.canSendMessage ?? undefined,
-    health: describeNumberHealth({
+    health: env.META_ON_HOLD
+      ? { level: 'ok', headline: 'WhatsApp on hold', detail: 'Replies go to the private chat.', stale: false }
+      : describeNumberHealth({
       qualityRating: n.qualityRating ?? undefined,
       messagingLimitTier: n.messagingLimitTier ?? undefined,
       nameStatus: n.nameStatus ?? undefined,
@@ -352,6 +354,7 @@ const HEALTH_STALE_AFTER_MS = 15 * 60 * 1000;
  * the stored values are still shown, just older.
  */
 export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promise<void> {
+  if (env.META_ON_HOLD) return;
   try {
     const credentials = await resolveMetaCredentialsForPhoneNumber(
       String(number.tenantId),

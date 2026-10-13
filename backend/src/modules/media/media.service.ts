@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { env } from '../../config/env';
 import { ApiError } from '../../lib/ApiError';
 import { logger } from '../../lib/logger';
 import { recordAudit } from '../audit/auditLog.service';
@@ -120,6 +121,22 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
    * ensureMetaMediaId.
    */
   const ownCopy = await storeOwnCopy(input.tenantId, file.buffer);
+
+  if (env.META_ON_HOLD && ownCopy) {
+    const media = await createMedia({
+      tenantId: input.tenantId,
+      whatsappPhoneNumberId: input.whatsappPhoneNumberId,
+      mimeType: file.mimeType,
+      sizeBytes: file.buffer.length,
+      sha256,
+      storageRef: ownCopy.storageRef,
+      ...(ownCopy.cloudinaryPublicId ? { cloudinaryPublicId: ownCopy.cloudinaryPublicId } : {}),
+      ...(ownCopy.bytes ? { bytes: ownCopy.bytes } : {}),
+      status: 'READY',
+    });
+    await auditUpload(input, media, file);
+    return media;
+  }
 
   const media = await createMedia({
     tenantId: input.tenantId,

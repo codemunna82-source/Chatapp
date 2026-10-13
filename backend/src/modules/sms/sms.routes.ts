@@ -4,6 +4,9 @@ import { requirePermission } from '../../middleware/rbac.middleware';
 import { validate } from '../../middleware/validate.middleware';
 import { smsSyncSchema, smsSendSchema, smsConversationQuerySchema } from './sms.validation';
 import { syncSmsHandler, sendSmsHandler, resolveSmsConversationHandler } from './sms.controller';
+import { asyncHandler } from '../../lib/asyncHandler';
+import { getTenantContext } from '../../middleware/tenantContext.middleware';
+import { issueSmsInviteLink } from '../guest/guest.service';
 
 export const smsRouter = Router();
 
@@ -45,4 +48,21 @@ smsRouter.get(
   requirePermission('CHAT_READ'),
   validate({ query: smsConversationQuerySchema }),
   resolveSmsConversationHandler,
+);
+
+/**
+ * POST /api/sms/invite-link {phone} — the private chat link for this number,
+ * which the app then texts from the agent's own SIM. Only the phone number
+ * is sent here, never SMS content.
+ */
+smsRouter.post(
+  '/invite-link',
+  requireAuth,
+  requirePermission('CHAT_SEND'),
+  validate({ body: smsConversationQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { phone } = req.body as { phone: string };
+    const link = await issueSmsInviteLink(getTenantContext(req), phone);
+    res.status(200).json({ success: true, data: link });
+  }),
 );

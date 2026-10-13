@@ -558,6 +558,20 @@ export async function issuePublicGuestLink(
 }
 
 /**
+ * The private chat link for one phone number, for an agent to text it from
+ * their own SIM. The conversation is the customer's own (found or created by
+ * their number), so the chat that opens is theirs by name, not an anonymous
+ * visitor. Issuing again rotates the token: the newest link sent works.
+ */
+export async function issueSmsInviteLink(auth: AuthContext, phone: string): Promise<{ url: string; expiresAt: string }> {
+  const sendingNumberId = await resolveSendingPhoneNumberId(auth.tenantId, auth.userId);
+  if (!sendingNumberId) {
+    throw ApiError.serviceUnavailable('NO_PHONE_NUMBER', 'This workspace has no number to attach a chat to yet.');
+  }
+  return issuePublicGuestLink(auth.tenantId, sendingNumberId, phone);
+}
+
+/**
  * Who a personal chat link ("My personal chat link" in Settings) actually
  * belongs to, and the number any chat started through it will go out on.
  *
