@@ -55,11 +55,19 @@ async function sendToGuest(
 
   try {
     const rows = await listGuestPushTokens(tenantId, conversationId);
+    // Info-level on purpose: "the customer never turned notifications on"
+    // (no tokens) and "FCM refused it" look identical from the customer's
+    // side, and this line is how they are told apart.
+    logger.info({ conversationId, type: payload.data.type, tokens: rows.length }, 'Guest push');
     if (rows.length === 0) return;
 
     const result = await gateway.send(
       rows.map((r) => r.token),
       payload,
+    );
+    logger.info(
+      { conversationId, sent: result.successCount, failed: result.failureCount },
+      'Guest push result',
     );
 
     if (result.invalidTokens.length > 0) {
