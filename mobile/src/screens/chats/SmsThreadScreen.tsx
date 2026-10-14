@@ -19,6 +19,8 @@ import { touchTarget } from '../../theme/spacing';
 import { formatPhoneForDisplay, smsAddressToE164 } from '../../utils/formatPhone';
 import { dayKey } from '../../utils/formatTime';
 import { LOCAL_SMS_ID_PREFIX, useLocalSmsMessages, useMarkSmsThreadRead, useSendLocalSms } from '../../queries/useLocalSms';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../queries/keys';
 import { getSmsInviteLink } from '../../api/endpoints/sms';
 import { deleteSmsMessage } from '../../native/smsStore';
 import { getApiErrorMessage } from '../../api/client';
@@ -123,6 +125,7 @@ export function SmsThreadScreen({ route, navigation }: Props) {
 
   const [linkBusy, setLinkBusy] = useState(false);
   /** Texts this number the invitation template with their own private chat link. */
+  const queryClient = useQueryClient();
   const handleSendLink = useCallback(() => {
     if (linkBusy) return;
     Alert.alert('Send private chat link?', `Your invitation message and a chat link go to ${phone} by SMS.`, [
@@ -132,13 +135,19 @@ export function SmsThreadScreen({ route, navigation }: Props) {
         onPress: () => {
           setLinkBusy(true);
           getSmsInviteLink(smsAddressToE164(phone))
-            .then(({ url }) => handleSendText(buildInvitationSmsText(getInvitationSmsTemplate(), 'there', url)))
+            .then(({ url }) => {
+              handleSendText(buildInvitationSmsText(getInvitationSmsTemplate(), 'there', url));
+              // Minting the link also created this customer's private chat
+              // on the server. Refreshing the list turns this SMS-only row
+              // into the one merged row, with photos and voice available.
+              void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsAll });
+            })
             .catch((err: unknown) => Alert.alert('Could not create link', getApiErrorMessage(err)))
             .finally(() => setLinkBusy(false));
         },
       },
     ]);
-  }, [linkBusy, phone, handleSendText]);
+  }, [linkBusy, phone, handleSendText, queryClient]);
 
   const handleLongPress = useCallback((message: Message) => {
     if (!message.text) return;

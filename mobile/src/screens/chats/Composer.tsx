@@ -981,11 +981,19 @@ export function Composer({
       {errorText ? <Text style={[typography.caption, { color: colors.danger, marginBottom: 4 }]}>{errorText}</Text> : null}
 
       <View style={styles.row}>
-        <Pressable onPress={onAttach} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Add attachment">
-          {({ pressed }) => (
-            <Ionicons name="add-circle-outline" size={26} color={colors.textSecondary} style={{ opacity: pressed ? 0.5 : 1 }} />
-          )}
-        </Pressable>
+        {/* An SMS-only thread has no private chat to carry a photo, file or
+            voice note, so none of those controls are offered: media goes to
+            the customer once they have opened their private chat link, and
+            this thread is replaced by the private chat at that point. */}
+        {localOnly ? (
+          <View style={{ width: spacing.sm }} />
+        ) : (
+          <Pressable onPress={onAttach} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Add attachment">
+            {({ pressed }) => (
+              <Ionicons name="add-circle-outline" size={26} color={colors.textSecondary} style={{ opacity: pressed ? 0.5 : 1 }} />
+            )}
+          </Pressable>
+        )}
 
         <View style={[styles.pill, { backgroundColor: colors.surfaceAlt, borderRadius: radius.xl, borderColor: colors.border }]}>
           <TextInput
@@ -1020,23 +1028,25 @@ export function Composer({
           </Pressable>
         </View>
 
-        <Pressable
-          onPress={() => setMediaSheetOpen(true)}
-          style={styles.iconButton}
-          accessibilityRole="button"
-          accessibilityLabel="Take a photo or choose from gallery"
-        >
-          {({ pressed }) => (
-            <Ionicons
-              name="camera-outline"
-              size={24}
-              color={colors.textSecondary}
-              style={{ opacity: pressed ? 0.5 : 1 }}
-            />
-          )}
-        </Pressable>
+        {!localOnly && (
+          <Pressable
+            onPress={() => setMediaSheetOpen(true)}
+            style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Take a photo or choose from gallery"
+          >
+            {({ pressed }) => (
+              <Ionicons
+                name="camera-outline"
+                size={24}
+                color={colors.textSecondary}
+                style={{ opacity: pressed ? 0.5 : 1 }}
+              />
+            )}
+          </Pressable>
+        )}
 
-        {canSend ? (
+        {canSend || localOnly ? (
           <Pressable
             onPress={handleSend}
             style={styles.actionTouch}
@@ -1044,7 +1054,7 @@ export function Composer({
             accessibilityLabel="Send message"
           >
             {({ pressed }) => (
-              <View style={[styles.actionCircle, { backgroundColor: colors.primary, opacity: pressed ? 0.6 : 1 }]}>
+              <View style={[styles.actionCircle, { backgroundColor: colors.primary, opacity: pressed || !canSend ? 0.5 : 1 }]}>
                 <Ionicons name="send" size={17} color={colors.textOnPrimary} style={styles.sendGlyph} />
               </View>
             )}

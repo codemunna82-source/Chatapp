@@ -15,6 +15,7 @@ SMS design and tests: `mobile/SMS_LOCAL_SYNC.md`
 
 - **No SMS inbox in Settings.** SMS chats live in Chats only. Settings > Permissions lists every permission with live status.
 - **Links never expire** and are never revoked (`GUEST_SESSION_TTL_DAYS=0`; deleting a chat/contact does not break the link; no "new link"/revoke option in the app).
+- **An SMS-only chat is text only**: no attach, camera or voice buttons (they used to show "no connected WhatsApp number"). Photos/voice appear once the customer has a private chat; sending the invite creates it, and the list then shows one merged row.
 - **WhatsApp/Meta is on hold**: Render env `META_ON_HOLD=true` (replies go to the private chat, media is not uploaded to Meta, templates refused). Nothing is disconnected; `false` resumes it.
 - **SMS permissions to list in the app**: incoming = Receive SMS, Read SMS, Notifications, Battery Unrestricted, Autostart; outgoing = Send SMS (+ Phone state on two-SIM phones). Plus "Allow restricted settings" on Android 13+ for sideloaded APKs.
 - Do not adopt `react-native-android-sms-listener`: its receiver only runs while the app is on screen.
