@@ -96,6 +96,8 @@ const envSchema = z.object({
    * surrounding whitespace.
    */
   FCM_SERVICE_ACCOUNT_JSON: z.string().optional().default(''),
+  /** Service account of the Firebase project that owns the customer web chat's config, when it differs from the app's. */
+  FCM_WEB_SERVICE_ACCOUNT_JSON: z.string().optional().default(''),
 
   /**
    * Sentry DSN. Everything Sentry-related is a no-op while this is unset,

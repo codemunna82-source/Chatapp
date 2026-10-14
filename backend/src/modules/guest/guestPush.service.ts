@@ -1,12 +1,12 @@
-import { logger } from '../../lib/logger';
-import { getPushGateway } from '../../integrations/fcm';
-import { previewForMessage } from '../notifications/push.service';
-import { guestChatUrl } from '../tenants/guestDomain';
-import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
+import { logger } from "../../lib/logger";
+import { getWebPushGateway } from "../../integrations/fcm";
+import { previewForMessage } from "../notifications/push.service";
+import { guestChatUrl } from "../tenants/guestDomain";
+import { guestLinkBaseUrlFor } from "../tenants/guestDomain.service";
 import {
   deleteGuestPushTokens,
   listGuestPushTokens,
-} from './guestPushToken.repository';
+} from "./guestPushToken.repository";
 
 /**
  * Notifications to the CUSTOMER's browser, not to the workspace.
@@ -31,7 +31,10 @@ import {
  * scopes a push subscription — and the open tab the notification would
  * otherwise focus — to one origin.
  */
-async function chatLink(tenantId: string, token?: string): Promise<string | undefined> {
+async function chatLink(
+  tenantId: string,
+  token?: string,
+): Promise<string | undefined> {
   if (!token) return undefined;
   const baseUrl = await guestLinkBaseUrlFor(tenantId);
   if (!baseUrl) return undefined;
@@ -50,7 +53,7 @@ async function sendToGuest(
     requireInteraction?: boolean;
   },
 ): Promise<void> {
-  const gateway = getPushGateway();
+  const gateway = getWebPushGateway();
   if (!gateway.isConfigured()) return;
 
   try {
@@ -58,7 +61,10 @@ async function sendToGuest(
     // Info-level on purpose: "the customer never turned notifications on"
     // (no tokens) and "FCM refused it" look identical from the customer's
     // side, and this line is how they are told apart.
-    logger.info({ conversationId, type: payload.data.type, tokens: rows.length }, 'Guest push');
+    logger.info(
+      { conversationId, type: payload.data.type, tokens: rows.length },
+      "Guest push",
+    );
     if (rows.length === 0) return;
 
     const result = await gateway.send(
@@ -66,15 +72,22 @@ async function sendToGuest(
       payload,
     );
     logger.info(
-      { conversationId, sent: result.successCount, failed: result.failureCount },
-      'Guest push result',
+      {
+        conversationId,
+        sent: result.successCount,
+        failed: result.failureCount,
+      },
+      "Guest push result",
     );
 
     if (result.invalidTokens.length > 0) {
       await deleteGuestPushTokens(result.invalidTokens);
     }
   } catch (err) {
-    logger.error({ err, conversationId }, 'Guest push failed — the message itself was unaffected');
+    logger.error(
+      { err, conversationId },
+      "Guest push failed — the message itself was unaffected",
+    );
   }
 }
 
@@ -97,7 +110,9 @@ export interface GuestMessagePushInput {
 }
 
 /** The business replied in the web window. */
-export async function pushGuestMessage(input: GuestMessagePushInput): Promise<void> {
+export async function pushGuestMessage(
+  input: GuestMessagePushInput,
+): Promise<void> {
   await sendToGuest(input.tenantId, input.conversationId, {
     title: input.businessName,
     body: previewForMessage(input.messageType, input.text),
@@ -105,7 +120,7 @@ export async function pushGuestMessage(input: GuestMessagePushInput): Promise<vo
     // itself rather than filling the shade.
     collapseKey: `guest:${input.conversationId}`,
     data: {
-      type: 'message',
+      type: "message",
       conversationId: input.conversationId,
     },
     link: await chatLink(input.tenantId, input.linkToken),
@@ -132,14 +147,16 @@ export interface GuestCallPushInput {
  * the chat, where the actual ring is waiting on the socket. A browser
  * notification cannot answer a call and should not pretend to.
  */
-export async function pushGuestIncomingCall(input: GuestCallPushInput): Promise<void> {
+export async function pushGuestIncomingCall(
+  input: GuestCallPushInput,
+): Promise<void> {
   await sendToGuest(input.tenantId, input.conversationId, {
     title: input.businessName,
-    body: '📞 Incoming voice call — tap to answer',
+    body: "📞 Incoming voice call — tap to answer",
     collapseKey: `guest:${input.conversationId}:call`,
     requireInteraction: true,
     data: {
-      type: 'call',
+      type: "call",
       conversationId: input.conversationId,
       callId: input.callId,
     },

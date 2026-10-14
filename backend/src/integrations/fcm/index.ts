@@ -1,6 +1,6 @@
-import { logger } from '../../lib/logger';
-import { fcmGateway } from './client';
-import type { PushGateway } from './types';
+import { logger } from "../../lib/logger";
+import { fcmGateway, fcmWebGateway } from "./client";
+import type { PushGateway } from "./types";
 
 /**
  * A gateway that does nothing, used when no service account is configured.
@@ -24,10 +24,15 @@ export function getPushGateway(): PushGateway {
   if (!warned) {
     warned = true;
     logger.warn(
-      'FCM_SERVICE_ACCOUNT_JSON not set — push notifications are disabled; the app still receives messages live over Socket.IO while it is open',
+      "FCM_SERVICE_ACCOUNT_JSON not set — push notifications are disabled; the app still receives messages live over Socket.IO while it is open",
     );
   }
   return disabledGateway;
 }
 
-export type { PushPayload, PushGateway, SendResult } from './types';
+/** Push to the customer's browser chat (may be a different Firebase project from the app). */
+export function getWebPushGateway(): PushGateway {
+  return fcmWebGateway.isConfigured() ? fcmWebGateway : disabledGateway;
+}
+
+export type { PushPayload, PushGateway, SendResult } from "./types";
