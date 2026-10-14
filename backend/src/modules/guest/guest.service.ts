@@ -1016,6 +1016,7 @@ export async function postGuestMessage(
   // a round trip to Google is time the customer spends watching a pending
   // tick for a message that has arrived.
   void pushIncomingMessage({
+    tray: true,
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
@@ -1241,6 +1242,7 @@ export async function postGuestMediaMessage(
   }
 
   void pushIncomingMessage({
+    tray: true,
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
@@ -1314,6 +1316,7 @@ export async function postGuestLocationMessage(
   }
 
   void pushIncomingMessage({
+    tray: true,
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,

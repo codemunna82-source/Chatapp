@@ -105,6 +105,10 @@ async function sendToTenant(
         ? await listTokensForTenantExcludingUser(tenantId, opts.excludeUserId)
         : await listTokensForTenant(tenantId);
     }
+    logger.info(
+      { tenantId, type: payload.data?.type, devices: devices.length, dataOnly: !!payload.dataOnly },
+      'Sending push',
+    );
     if (devices.length === 0) return;
 
     /**
@@ -146,6 +150,7 @@ async function sendToTenant(
       await deleteTokens(result.invalidTokens);
       logger.debug({ pruned: result.invalidTokens.length }, 'Pruned dead FCM tokens');
     }
+    logger.info({ tenantId, sent: result.successCount, failed: result.failureCount }, 'Push result');
     if (result.failureCount > 0) {
       logger.warn(
         { tenantId, sent: result.successCount, failed: result.failureCount },
@@ -171,6 +176,14 @@ export interface MessagePushInput {
   avatarVersion?: string;
   /** When it was sent, so a delayed notification does not claim to be new. */
   sentAt?: Date;
+  /**
+   * Send with a notification block too, so the system tray draws it even
+   * when the app was force-stopped or the OEM froze it — a data-only push
+   * is silently dropped there. Costs the photo/stacking/Reply extras, so
+   * it is only used for website private-chat messages, where "the agent
+   * saw it at all" matters more.
+   */
+  tray?: boolean;
 }
 
 /**
@@ -200,7 +213,7 @@ export async function pushIncomingMessage(input: MessagePushInput): Promise<void
     body: previewForMessage(input.messageType, input.text),
     collapseKey: input.conversationId,
     channelId: CHAT_CHANNEL_ID,
-    dataOnly: true,
+    dataOnly: !input.tray,
     data: {
       type: 'message',
       conversationId: input.conversationId,
