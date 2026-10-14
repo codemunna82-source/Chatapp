@@ -9,7 +9,7 @@ SMS design and tests: `mobile/SMS_LOCAL_SYNC.md`
 2. VOXO shows **every incoming SMS** in the Chats list (no keyword/sender filter), stored **only on the phone** (SQLite). SMS text is never uploaded; the server only ever receives the customer's phone number, to mint a link.
 3. The agent **replies from VOXO**. The reply is the **invitation template + that customer's private chat link**, sent as a normal SMS from the agent's SIM (thread header link button and the "Send private chat invite" button; endpoint `POST /api/sms/invite-link`).
 4. The customer taps the link and lands in the **private chat on VOXO's own server** (web, `waprivate.dev/c/<token>`). No Meta / WhatsApp involved.
-5. From then on messages, images, voice and calls go through the private chat; the agent sees it in the same Chats list.
+5. From then on messages, images, voice and calls go through the private chat; the agent sees it in the same Chats list. **A customer with both an SMS chat and a private chat is ONE row** (matched on the last 10 digits of the number); opening it shows the private chat with that customer's SMS inside it, read-only, in time order.
 
 ## Rules the owner has fixed
 

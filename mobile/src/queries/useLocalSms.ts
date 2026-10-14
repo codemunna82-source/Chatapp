@@ -11,6 +11,8 @@ import {
 } from '../native/smsStore';
 import { sendSmsAutomatically } from '../utils/sendSms';
 import type { Conversation, Message } from '../api/types';
+import { outgoingStatus } from '../utils/smsMerge';
+export { mergeSmsIntoConversation, phoneThreadKey } from '../utils/smsMerge';
 
 /** Prefix that marks a chat-list row or message as coming from the local SMS store, not the API. */
 export const LOCAL_SMS_ID_PREFIX = 'sms:';
@@ -21,11 +23,6 @@ export function isLocalSmsId(id: string): boolean {
 
 const THREAD_LIMIT = 500;
 const MESSAGE_LIMIT = 500;
-
-/** SENDING shows the clock, FAILED the red retry; everything else is one tick. */
-function outgoingStatus(status: StoredSms['status']): Message['status'] {
-  return status === 'FAILED' ? 'FAILED' : status === 'SENDING' ? 'QUEUED' : 'SENT';
-}
 
 /**
  * A local SMS thread in the shape ChatListItem already renders, so the list

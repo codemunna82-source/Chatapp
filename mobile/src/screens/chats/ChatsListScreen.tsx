@@ -35,6 +35,8 @@ import type { Conversation } from '../../api/types';
 import {
   addressOfLocalConversation,
   isLocalSmsId,
+  mergeSmsIntoConversation,
+  phoneThreadKey,
   threadToConversation,
   useDeleteSmsThread,
   useLocalSmsThreads,
@@ -121,14 +123,29 @@ function ChatsListScreenInner({ navigation }: Props) {
     // device-only would duplicate the local threads.
     const server = serverConversations.filter((c) => c.whatsappPhoneNumberId !== null);
     if (showArchived) return server;
+    const threads = smsThreadsQuery.data ?? [];
+    if (threads.length === 0) return server;
+
+    // A customer who has a private chat AND an SMS thread is one row: the
+    // private chat's, carrying the SMS thread's unread count and latest
+    // message. Its screen shows both histories together.
+    const claimed = new Set<string>();
+    const mergedServer = server.map((c) => {
+      const key = phoneThreadKey(c.contact?.phone);
+      const thread = key && !claimed.has(key) ? threads.find((t) => t.threadKey === key) : undefined;
+      if (!key || !thread) return c;
+      claimed.add(key);
+      return mergeSmsIntoConversation(c, thread);
+    });
+
     const needle = debouncedSearch.trim().toLowerCase();
-    const sms = (smsThreadsQuery.data ?? [])
+    const smsOnly = threads
+      .filter((t) => !claimed.has(t.threadKey))
       .filter((t) => !needle || t.address.toLowerCase().includes(needle) || t.body.toLowerCase().includes(needle))
       .filter((t) => (filter === 'unread' ? t.unreadCount > 0 : filter === 'read' ? t.unreadCount === 0 : true))
       .map(threadToConversation);
-    if (sms.length === 0) return server;
-    const pinned = server.filter((c) => c.pinned);
-    const rest = [...server.filter((c) => !c.pinned), ...sms].sort(
+    const pinned = mergedServer.filter((c) => c.pinned);
+    const rest = [...mergedServer.filter((c) => !c.pinned), ...smsOnly].sort(
       (a, b) => Date.parse(b.lastMessageAt ?? b.updatedAt) - Date.parse(a.lastMessageAt ?? a.updatedAt),
     );
     return [...pinned, ...rest];

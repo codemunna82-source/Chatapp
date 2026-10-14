@@ -39,6 +39,8 @@ import { canDeleteForEveryone } from './messageRevoke';
 import { contactDisplayName, formatPhoneForDisplay } from '../../utils/formatPhone';
 import { clearMessageNotification } from '../../notifications/messageNotification';
 import { deriveConversationView } from './deriveConversationView';
+import { LOCAL_SMS_ID_PREFIX, isLocalSmsId, useLocalSmsMessages, useMarkSmsThreadRead } from '../../queries/useLocalSms';
+import { deleteSmsMessage } from '../../native/smsStore';
 import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
 import { useGuestLinkStatus, useIssueGuestLink } from '../../queries/useGuestChat';
@@ -52,7 +54,6 @@ import {
   useStarMessage,
   useFilteredMessages,
   removeMessageFromCache,
-  upsertMessageInCache,
 } from '../../queries/useMessages';
 import { useConversationRoom } from '../../sockets/useConversationRoom';
 import { useSocketEvent } from '../../sockets/useSocketEvent';
@@ -530,7 +531,23 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     emitConversationRead(conversationId);
   }, [conversationId, connected, generation, lastIncomingId]);
   const view = useMemo(() => deriveConversationView(messages), [messages]);
-  const renderItems = useMemo(() => buildRenderItems(view.renderable), [view.renderable]);
+  // This customer's SMS, kept on the phone, shown in the same thread by time:
+  // one row in Chats, one history. They are read-only here — the server knows
+  // nothing about them, so reply/star/delete/forward do not apply.
+  const contactPhone = conversationQuery.data?.contact?.phone;
+  const smsMessages = useLocalSmsMessages(contactPhone ?? '').data;
+  const { mutate: markSmsRead } = useMarkSmsThreadRead();
+  useEffect(() => {
+    if (contactPhone && smsMessages && smsMessages.length > 0) markSmsRead(contactPhone);
+  }, [contactPhone, smsMessages, markSmsRead]);
+  const mergedRenderable = useMemo(
+    () =>
+      smsMessages && smsMessages.length > 0
+        ? [...view.renderable, ...smsMessages].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        : view.renderable,
+    [view.renderable, smsMessages],
+  );
+  const renderItems = useMemo(() => buildRenderItems(mergedRenderable), [mergedRenderable]);
 
   const showToast = useCallback((text: string) => {
     setToast(text);
@@ -690,19 +707,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       const phone = conversationQuery.data?.contact?.phone;
       const trimmed = text.trim();
       if (!phone || !trimmed) return;
+      // The text is stored on the phone as it is sent, and shows in this
+      // thread from there (see the merged list above).
       void sendSmsAutomatically(phone, trimmed);
-      upsertMessageInCache(queryClient, conversationId, {
-        id: `local-sms-${Date.now()}`,
-        conversationId,
-        direction: 'OUT',
-        type: 'text',
-        text: `📱 Sent via SMS\n${trimmed}`,
-        status: 'SENT',
-        sentAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      });
     },
-    [conversationQuery.data, conversationId, queryClient],
+    [conversationQuery.data],
   );
 
   /**
@@ -807,6 +816,17 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   const handleRetry = useCallback(
     (message: Message) => {
+      if (isLocalSmsId(message.id)) {
+        // An SMS the network refused: drop the failed copy and text it again.
+        const phone = conversationQuery.data?.contact?.phone;
+        const storedId = Number(message.id.slice(LOCAL_SMS_ID_PREFIX.length));
+        if (phone && message.text && Number.isFinite(storedId)) {
+          void deleteSmsMessage(storedId)
+            .catch(() => {})
+            .then(() => sendSmsAutomatically(phone, message.text ?? ''));
+        }
+        return;
+      }
       removeMessageFromCache(queryClient, conversationId, message.id);
       if (message.type === 'text') {
         submitSend({ type: 'text', text: message.text ?? '', replyToMessageId: message.replyToMessageId });
@@ -821,7 +841,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       // just re-send those from scratch, which is a minor UX gap, not a
       // silent failure (the FAILED bubble stays visible either way).
     },
-    [conversationId, queryClient, submitSend],
+    [conversationId, queryClient, submitSend, conversationQuery.data],
   );
 
   const canReactTo = (message: Message) => !message.id.startsWith('temp-') && message.status !== 'FAILED';
@@ -846,6 +866,16 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // from the sheet's own "Select more" row.
   const handleLongPress = useCallback(
     (message: Message) => {
+      if (isLocalSmsId(message.id)) {
+        // Only Copy applies to an SMS shown here.
+        if (message.text) {
+          Alert.alert('Message', undefined, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Copy', onPress: () => void Clipboard.setStringAsync(message.text ?? '') },
+          ]);
+        }
+        return;
+      }
       if (selectionMode) {
         toggleSelected(message);
         return;
@@ -857,7 +887,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   const handleSelectTap = useCallback(
     (message: Message) => {
-      if (selectionMode) toggleSelected(message);
+      if (selectionMode && !isLocalSmsId(message.id)) toggleSelected(message);
     },
     [selectionMode, toggleSelected],
   );
@@ -867,11 +897,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // one. The gesture is simply inert rather than showing an error: there
   // is nothing the agent did wrong.
   const handleReply = useCallback((message: Message) => {
-    if (message.revokedAt) return;
+    if (message.revokedAt || isLocalSmsId(message.id)) return;
     setReplyingTo(message);
   }, []);
   const handleForwardOne = useCallback((message: Message) => {
-    if (message.revokedAt) return;
+    if (message.revokedAt || isLocalSmsId(message.id)) return;
     setForwardTargets([message]);
   }, []);
 
