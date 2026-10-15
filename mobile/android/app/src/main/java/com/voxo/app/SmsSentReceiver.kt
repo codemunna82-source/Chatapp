@@ -23,10 +23,14 @@ class SmsSentReceiver : BroadcastReceiver() {
     val rowId = intent.getLongExtra(EXTRA_ROW_ID, -1L)
     if (rowId < 0) return
     val code = resultCode
+    // The radio's own error number, when it gives one: says why a
+    // GENERIC_FAILURE happened (SIM, balance, network refusal) in the
+    // Settings > Permissions "Last problem" line.
+    val radioCode = intent.getIntExtra("errorCode", -1)
     val pending = goAsync()
     executor.execute {
       try {
-        handle(context.applicationContext, rowId, code)
+        handle(context.applicationContext, rowId, code, radioCode)
       } catch (e: Exception) {
         Log.e(TAG, "Could not record SMS send result", e)
       } finally {
@@ -55,12 +59,13 @@ class SmsSentReceiver : BroadcastReceiver() {
       }
 
     /** Applies one part's result to the stored message and tells a listening UI. Separate from onReceive so it can be tested. */
-    fun handle(context: Context, rowId: Long, resultCode: Int) {
+    fun handle(context: Context, rowId: Long, resultCode: Int, radioCode: Int = -1) {
       val db = VoxoSmsDatabase.get(context)
       val updated = if (resultCode == Activity.RESULT_OK) {
         db.updateSendStatus(rowId, VoxoSmsDatabase.STATUS_SENT)
       } else {
-        VoxoSmsDiagnostics.recordError(context, "send failed: ${reasonFor(resultCode)}")
+        val detail = if (radioCode >= 0) " (radio error $radioCode)" else ""
+        VoxoSmsDiagnostics.recordError(context, "send failed: ${reasonFor(resultCode)}$detail")
         db.updateSendStatus(rowId, VoxoSmsDatabase.STATUS_FAILED)
       }
       if (updated != null) VoxoSmsEvents.publish(listOf(updated))

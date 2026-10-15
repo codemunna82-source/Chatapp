@@ -22,7 +22,7 @@ import { LOCAL_SMS_ID_PREFIX, useLocalSmsMessages, useMarkSmsThreadRead, useSend
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../../queries/keys';
 import { getSmsInviteLink } from '../../api/endpoints/sms';
-import { deleteSmsMessage } from '../../native/smsStore';
+import { deleteSmsMessage, getSmsStoreDiagnostics } from '../../native/smsStore';
 import { getApiErrorMessage } from '../../api/client';
 import { buildInvitationSmsText, getInvitationSmsTemplate } from '../../storage/invitationSmsTemplate';
 import type { ChatsStackParamList } from '../../navigation/types';
@@ -116,9 +116,21 @@ export function SmsThreadScreen({ route, navigation }: Props) {
       // A stored message the network refused: drop the failed copy and send the text again.
       const storedId = Number(message.id.slice(LOCAL_SMS_ID_PREFIX.length));
       if (!Number.isFinite(storedId)) return;
-      void deleteSmsMessage(storedId)
-        .catch(() => {})
-        .then(() => handleSendText(message.text ?? ''));
+      const retry = () =>
+        void deleteSmsMessage(storedId)
+          .catch(() => {})
+          .then(() => handleSendText(message.text ?? ''));
+      // Say WHY it failed before trying again, so "Failed" is never a
+      // mystery: the phone reported a reason when the send was refused.
+      void getSmsStoreDiagnostics()
+        .catch(() => null)
+        .then((d) => {
+          const reason = d?.lastError?.replace(/^send failed: /, '') ?? 'The phone did not say why.';
+          Alert.alert('SMS not sent', reason, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Retry', onPress: retry },
+          ]);
+        });
     },
     [handleSendText],
   );
