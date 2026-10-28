@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { env } from '../../config/env';
 import { ApiError } from '../../lib/ApiError';
 import { logger } from '../../lib/logger';
 import { recordAudit } from '../audit/auditLog.service';
@@ -17,6 +16,7 @@ import {
   setMediaCloudinaryRef,
 } from './media.repository';
 import { resolveMetaCredentialsForPhoneNumber } from '../whatsapp/whatsapp.service';
+import { isMetaOnHold } from '../tenants/metaHold';
 import { getMetaGateway } from '../../integrations/meta';
 import {
   cloudinaryAsJpeg,
@@ -122,7 +122,7 @@ export async function uploadMediaForTenant(input: UploadMediaInput): Promise<Med
    */
   const ownCopy = await storeOwnCopy(input.tenantId, file.buffer);
 
-  if (env.META_ON_HOLD && ownCopy) {
+  if ((await isMetaOnHold(input.tenantId)) && ownCopy) {
     const media = await createMedia({
       tenantId: input.tenantId,
       whatsappPhoneNumberId: input.whatsappPhoneNumberId,

@@ -130,6 +130,13 @@ const PAGE = `<!doctype html>
   .acts { display: flex; gap: 7px; flex-wrap: wrap; }
   button.quiet { background: transparent; color: inherit; border: 1px solid var(--line); }
   .warnline { font-size: 12.5px; color: var(--danger); font-weight: 600; margin-top: 3px; }
+
+  .mode { display: block; padding: 13px 15px; margin-bottom: 9px; cursor: pointer;
+          border: 1px solid var(--line); border-radius: 11px; background: rgba(128,128,128,.05); }
+  .mode.on { border-color: var(--accent); background: rgba(99,102,241,.1); }
+  .mode input { width: auto; margin-right: 9px; vertical-align: -1px; }
+  .mode .name { font-weight: 600; }
+  .mode .meta { font-size: 12.5px; opacity: .72; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -163,6 +170,14 @@ const PAGE = `<!doctype html>
         <span class="note">Quality is Meta's own rating. Removal is refused once a number has chats.</span>
       </div>
       <div id="numbers"></div>
+    </section>
+
+    <section>
+      <div class="head">
+        <h2>How customers are replied to</h2>
+        <span class="note" id="channelSource"></span>
+      </div>
+      <div id="channel"></div>
     </section>
 
     <section>
@@ -657,13 +672,76 @@ const SCRIPT = `(function () {
     if (e.key === 'Enter') { e.preventDefault(); sendReply(); }
   });
 
+  /**
+   * The two ways of running the inbox, described by what the customer
+   * gets rather than by the name of the setting. Choosing between
+   * "META_ON_HOLD true" and "false" needs someone who already knows what
+   * it does; choosing between these two paragraphs does not.
+   */
+  var CHANNELS = [
+    {
+      value: 'PRIVATE_CHAT',
+      name: 'Private chat (what is running now)',
+      meta: 'Replies go to the customer\u2019s private chat window, and the link reaches them by SMS. ' +
+            'WhatsApp is not used to send: no templates, no 24-hour window, no number-health checks. ' +
+            'Nothing is disconnected \u2014 switching back resumes WhatsApp straight away.'
+    },
+    {
+      value: 'WHATSAPP',
+      name: 'WhatsApp',
+      meta: 'Replies go out over WhatsApp, with approved templates where WhatsApp requires one. ' +
+            'Its 24-hour rule applies again: outside it, only a template can be sent. Use this once ' +
+            'the number is sending normally.'
+    }
+  ];
+
+  var replyChannel = null;
+
+  function renderChannel() {
+    var box = el('channel');
+    box.innerHTML = '';
+    CHANNELS.forEach(function (c) {
+      var label = node('label', 'mode' + (replyChannel === c.value ? ' on' : ''));
+      var radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'replyChannel';
+      radio.checked = replyChannel === c.value;
+      radio.addEventListener('change', function () { setChannel(c.value); });
+      var head = node('div', null);
+      head.appendChild(radio);
+      head.appendChild(node('span', 'name', c.name));
+      label.appendChild(head);
+      label.appendChild(node('div', 'meta', c.meta));
+      box.appendChild(label);
+    });
+  }
+
+  async function setChannel(value) {
+    if (value === replyChannel) return;
+    var previous = replyChannel;
+    replyChannel = value;
+    renderChannel();
+    try {
+      await call('PATCH', '/api/tenant/settings/reply-channel', { channel: value });
+      el('channelSource').textContent = 'Set for this workspace.';
+      say('Saved. The next message follows this.', false);
+    } catch (err) {
+      // Put the radio back: leaving it on a value the server rejected
+      // would show a setting that is not in force.
+      replyChannel = previous;
+      renderChannel();
+      say(err.message, true);
+    }
+  }
+
   async function refresh() {
     // One failing list must not blank the other two: a workspace with no
     // Business Managers still needs its numbers and members on screen.
     var results = await Promise.allSettled([
       call('GET', '/api/meta-apps'),
       call('GET', '/api/whatsapp/numbers'),
-      call('GET', '/api/users')
+      call('GET', '/api/users'),
+      call('GET', '/api/tenant/settings/reply-channel')
     ]);
     if (results[0].status === 'fulfilled') renderApps(results[0].value || []);
     if (results[1].status === 'fulfilled') {
@@ -671,6 +749,13 @@ const SCRIPT = `(function () {
       fillNumberPicker(results[1].value || []);
     }
     if (results[2].status === 'fulfilled') renderUsers(results[2].value || []);
+    if (results[3].status === 'fulfilled' && results[3].value) {
+      replyChannel = results[3].value.channel;
+      el('channelSource').textContent = results[3].value.source === 'workspace'
+        ? 'Set for this workspace.'
+        : 'Following the server default \u2014 pick one to set it for this workspace.';
+      renderChannel();
+    }
 
     var failed = results.filter(function (r) { return r.status === 'rejected'; });
     if (failed.length) say(failed[0].reason.message, true);

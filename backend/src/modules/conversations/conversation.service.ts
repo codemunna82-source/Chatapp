@@ -1,5 +1,4 @@
 import { ApiError } from '../../lib/ApiError';
-import { env } from '../../config/env';
 import { visibleWhatsAppPhoneNumberId } from './conversation.access';
 import type { AuthContext } from '../../types/express';
 import { recordAudit } from '../audit/auditLog.service';
@@ -16,6 +15,7 @@ import { toPublicContact, type PublicContact } from '../contacts/contact.service
 import type { ConversationLean, ConversationStatus } from './conversation.model';
 import type { ContactLean } from '../contacts/contact.model';
 import { nudgePolicyFor } from '../messages/nudgePolicy';
+import { isMetaOnHold } from '../tenants/metaHold';
 import { nudgeAt } from '../messages/nudgeTemplates';
 
 export interface PublicConversation {
@@ -86,7 +86,15 @@ export interface NextNudge {
   text: string;
 }
 
-function toPublicConversation(doc: ConversationLean, contact?: ContactLean): PublicConversation {
+function toPublicConversation(
+  doc: ConversationLean,
+  contact?: ContactLean,
+  // Resolved per workspace rather than read from env here: this is a
+  // synchronous serializer, and the setting is a database read. Every
+  // caller already knows the tenant, so it is cheaper and more honest to
+  // resolve once above and hand the answer down.
+  metaOnHold = false,
+): PublicConversation {
   return {
     id: String(doc._id),
     tenantId: String(doc.tenantId),
@@ -100,7 +108,7 @@ function toPublicConversation(doc: ConversationLean, contact?: ContactLean): Pub
     lastCustomerMessageAt: doc.lastCustomerMessageAt ?? undefined,
     conversationWindowExpiresAt: doc.conversationWindowExpiresAt ?? undefined,
     // On hold, replies go to the private chat, which has no 24-hour window.
-    withinCustomerServiceWindow: env.META_ON_HOLD || repo.isWithinCustomerServiceWindow(doc),
+    withinCustomerServiceWindow: metaOnHold || repo.isWithinCustomerServiceWindow(doc),
     // Absent contact (a conversation listed before its contact loads)
     // defaults to NOT demo — the safe direction, since it keeps the real
     // window rules on anything we cannot positively identify as sample data.
@@ -124,9 +132,12 @@ function toPublicConversation(doc: ConversationLean, contact?: ContactLean): Pub
 /** Batch-fetches contacts for a page of conversations — one query, not N. */
 async function enrichWithContacts(tenantId: string, conversations: ConversationLean[]): Promise<PublicConversation[]> {
   const contactIds = [...new Set(conversations.map((c) => String(c.contactId)))];
-  const contacts = await contactRepo.findContactsByIdsAndTenant(contactIds, tenantId);
+  const [contacts, metaOnHold] = await Promise.all([
+    contactRepo.findContactsByIdsAndTenant(contactIds, tenantId),
+    isMetaOnHold(tenantId),
+  ]);
   const byId = new Map(contacts.map((c) => [String(c._id), c]));
-  return conversations.map((c) => toPublicConversation(c, byId.get(String(c.contactId))));
+  return conversations.map((c) => toPublicConversation(c, byId.get(String(c.contactId)), metaOnHold));
 }
 
 export interface ListConversationsQuery {
@@ -215,7 +226,7 @@ export async function getConversationForTenant(auth: AuthContext, id: string): P
     findActiveSessionForConversation(id, tenantId),
   ]);
 
-  const view = toPublicConversation(conversation, contact ?? undefined);
+  const view = toPublicConversation(conversation, contact ?? undefined, await isMetaOnHold(tenantId));
   const nudge = await whatsappRepliesLeftFor(
     tenantId,
     id,
@@ -259,7 +270,9 @@ async function whatsappRepliesLeftFor(
   session: Awaited<ReturnType<typeof findActiveSessionForConversation>>,
   withinCustomerServiceWindow: boolean,
 ): Promise<{ left: number | null; nextNudge: NextNudge | null }> {
-  if (env.META_ON_HOLD || contact?.isDemo || contact?.webOnly) return { left: null, nextNudge: null };
+  if ((await isMetaOnHold(tenantId)) || contact?.isDemo || contact?.webOnly) {
+    return { left: null, nextNudge: null };
+  }
   if (hasMovedToWebChat(session)) return { left: null, nextNudge: null };
 
   const [used, policy] = await Promise.all([
@@ -360,7 +373,7 @@ export async function startConversationForTenant(
     );
   }
 
-  return toPublicConversation(conversation, contact);
+  return toPublicConversation(conversation, contact, await isMetaOnHold(tenantId));
 }
 
 /**
@@ -490,5 +503,5 @@ export async function updateConversationForTenant(
   });
 
   const contact = await contactRepo.findContactByIdAndTenant(String(conversation.contactId), tenantId);
-  return toPublicConversation(conversation, contact ?? undefined);
+  return toPublicConversation(conversation, contact ?? undefined, await isMetaOnHold(tenantId));
 }

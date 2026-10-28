@@ -7,6 +7,7 @@ import { validate } from '../../middleware/validate.middleware';
 import { asyncHandler } from '../../lib/asyncHandler';
 import { getTenantContext } from '../../middleware/tenantContext.middleware';
 import { ApiError } from '../../lib/ApiError';
+import { env } from '../../config/env';
 import { Tenant, DEFAULT_AUTO_GUEST_LINK_TEXT, DEFAULT_AUTO_GUEST_WELCOME } from './tenant.model';
 import { resolveBusinessName, resolveBusinessNameForConversation } from '../guest/businessName';
 import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
@@ -17,6 +18,7 @@ import { recordAudit } from '../audit/auditLog.service';
 import { forgetNudgePolicy, nudgePolicyFor } from '../messages/nudgePolicy';
 import { DEFAULT_WHATSAPP_NUDGES, NUDGE_MAX_LENGTH } from '../messages/nudgeTemplates';
 import { guestLinkUrlPattern } from './guestDomain';
+import { forgetMetaHold, resolveMetaHold } from './metaHold';
 import {
   assignPoolDomain,
   claimCustomDomain,
@@ -544,5 +546,61 @@ tenantRouter.patch(
     });
 
     res.status(200).json({ success: true, data: await nudgePolicyFor(auth.tenantId) });
+  }),
+);
+
+/**
+ * Which channel this workspace replies on: WhatsApp, or the customer's
+ * private chat.
+ *
+ * This was META_ON_HOLD — one environment variable deciding it for every
+ * workspace on the server, changeable only by whoever holds the deploy
+ * dashboard, and only with a restart. The choice belongs to the business,
+ * so it lives here now; the environment variable is what a workspace that
+ * has never touched the switch still falls back to.
+ */
+tenantRouter.get(
+  '/settings/reply-channel',
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const tenant = await Tenant.findById(auth.tenantId, { metaOnHold: 1 }).lean();
+    const stored = tenant?.metaOnHold;
+    res.status(200).json({
+      success: true,
+      data: {
+        channel: resolveMetaHold(stored, env.META_ON_HOLD) ? 'PRIVATE_CHAT' : 'WHATSAPP',
+        // Says whether this workspace has actually chosen, or is still
+        // following the server. An admin looking at a switch they have
+        // never moved should be able to tell which.
+        source: typeof stored === 'boolean' ? 'workspace' : 'server',
+      },
+    });
+  }),
+);
+
+tenantRouter.patch(
+  '/settings/reply-channel',
+  validate({ body: z.object({ channel: z.enum(['WHATSAPP', 'PRIVATE_CHAT']) }) }),
+  asyncHandler(async (req, res) => {
+    const auth = getTenantContext(req);
+    const { channel } = req.body as { channel: 'WHATSAPP' | 'PRIVATE_CHAT' };
+    const metaOnHold = channel === 'PRIVATE_CHAT';
+
+    await Tenant.updateOne({ _id: auth.tenantId }, { $set: { metaOnHold } });
+    // Cached for thirty seconds and read on every send, so without this
+    // the switch would appear to do nothing for half a minute — long
+    // enough for an admin to move it back and report it broken.
+    forgetMetaHold(auth.tenantId);
+
+    await recordAudit({
+      tenantId: auth.tenantId,
+      actorUserId: auth.userId,
+      action: 'tenant.reply_channel.update',
+      targetType: 'Tenant',
+      targetId: auth.tenantId,
+      metadata: { channel },
+    });
+
+    res.status(200).json({ success: true, data: { channel, source: 'workspace' } });
   }),
 );

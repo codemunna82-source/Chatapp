@@ -153,6 +153,16 @@ const tenantSchema = new Schema(
      * restriction are different things, and the second is said with the
      * switch.
      */
+    /**
+     * This workspace's own answer to "WhatsApp, or the private chat?".
+     *
+     * Deliberately three-state. Unset means follow the server's
+     * META_ON_HOLD, which is where every workspace starts and where most
+     * stay. An explicit false is a workspace that has turned WhatsApp
+     * back ON even though the server holds it by default — a decision,
+     * not a blank, and it has to survive as one. See metaHold.ts.
+     */
+    metaOnHold: { type: Boolean },
     whatsappNudges: {
       enforced: { type: Boolean, default: true },
       messages: { type: [String], default: undefined },
