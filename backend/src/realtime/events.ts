@@ -144,6 +144,16 @@ export interface RealtimeEmitter {
   emitConversationUpdated(tenantId: string, conversation: RealtimeConversationPayload): void;
   emitConversationRead(tenantId: string, conversationId: string, byUserId: string, whatsappPhoneNumberId: string): void;
   emitNotificationNew(tenantId: string, userId: string, notification: RealtimeNotificationPayload): void;
+  /**
+   * The private-chat invitation just went out to this customer — auto or
+   * manual, whichever actually reached them (see guestAutoReply.service.ts).
+   * The invitation itself is `internal` and never appears as a message
+   * bubble, so without this an agent has no live signal that it happened
+   * at all; the composer uses it to show a brief "invitation sent" banner
+   * in its own place rather than the agent discovering it only once a
+   * reply attempt explains the nudge count.
+   */
+  emitInvitationSent(tenantId: string, conversationId: string, whatsappPhoneNumberId: string): void;
 }
 
 const noopEmitter: RealtimeEmitter = {
@@ -156,6 +166,7 @@ const noopEmitter: RealtimeEmitter = {
   emitConversationUpdated: () => {},
   emitConversationRead: () => {},
   emitNotificationNew: () => {},
+  emitInvitationSent: () => {},
 };
 
 let current: RealtimeEmitter = noopEmitter;

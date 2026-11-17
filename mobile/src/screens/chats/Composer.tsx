@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming, SlideInDown, SlideOutUp } from 'react-native-reanimated';
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
@@ -41,6 +41,7 @@ import { MediaSourceSheet } from './MediaSourceSheet';
 import { QuickReplySheet } from './QuickReplySheet';
 import { EmojiSheet } from './EmojiSheet';
 import { recordQuickReplyUse } from '../../queries/useQuickReplies';
+import { useInvitationSentStore } from '../../store/invitationSentStore';
 
 interface ComposerProps {
   conversationId: string;
@@ -57,6 +58,16 @@ interface ComposerProps {
    * refuse is worse than no field at all.
    */
   nextNudge?: { index: number; position: number; total: number; text: string } | null;
+  /**
+   * How many WhatsApp nudges the agent still has before the customer
+   * opens their private chat. `null`/`undefined` means the allowance
+   * doesn't apply here (demo contact, or the customer already moved to
+   * the private chat) — only `0` means "spent".
+   *
+   * Read only to decide whether typing should even be offered — the
+   * server is still the one that enforces it.
+   */
+  whatsappRepliesLeft?: number | null;
   onAttach: () => void;
   onUseTemplate: () => void;
   sending: boolean;
@@ -68,6 +79,7 @@ interface ComposerProps {
 const TYPING_STOP_DELAY_MS = 2500;
 const RECORDER_POLL_MS = 100;
 const MAX_IMAGES_PER_SEND = 10;
+const INVITATION_BANNER_MS = 4500;
 const INPUT_MIN_HEIGHT = 22;
 const INPUT_MAX_HEIGHT = 120;
 /**
@@ -173,6 +185,7 @@ export function Composer({
   replyToMessageId,
   onSent,
   nextNudge,
+  whatsappRepliesLeft,
 }: ComposerProps) {
   const { colors, spacing, radius, typography } = useTheme();
   // The bottom inset is owned by the screen's keyboard-tracking wrapper
@@ -571,6 +584,24 @@ export function Composer({
     }
   };
 
+  // The private-chat invitation is `internal` and never appears as a
+  // message bubble (guestAutoReply.service.ts), so this socket-driven
+  // flag (invitationSentStore.ts) is the only live sign an agent gets
+  // that one just went out — shown here, in the composer's own place,
+  // for a few seconds before the composer reverts to whatever state
+  // actually applies (idle, the nudge card, or the window-closed notice).
+  const invitationSentAt = useInvitationSentStore((s) => s.sentAt[conversationId]);
+  // Which sent-event the banner has already been shown and timed out for —
+  // not a plain boolean, so showing it needs no setState of its own: the
+  // comparison below is already true the instant invitationSentAt changes.
+  const [dismissedSentAt, setDismissedSentAt] = useState<number | undefined>(undefined);
+  const showInvitationBanner = Boolean(invitationSentAt) && invitationSentAt !== dismissedSentAt;
+  useEffect(() => {
+    if (!invitationSentAt) return;
+    const timer = setTimeout(() => setDismissedSentAt(invitationSentAt), INVITATION_BANNER_MS);
+    return () => clearTimeout(timer);
+  }, [invitationSentAt]);
+
   // ------------------------------------------------------------ rendering
   const shellStyle = [
     styles.shell,
@@ -582,6 +613,39 @@ export function Composer({
       paddingBottom: bottomPad,
     },
   ];
+
+  if (showInvitationBanner) {
+    return (
+      <Animated.View
+        entering={SlideInDown.duration(220)}
+        exiting={SlideOutUp.duration(220)}
+        style={[shellStyle, styles.invitationBanner, { backgroundColor: colors.successMuted }]}
+      >
+        <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+        <Text style={[typography.bodyMedium, { color: colors.textPrimary, flexShrink: 1 }]}>
+          Invitation sent — you can send more once they open the link
+        </Text>
+      </Animated.View>
+    );
+  }
+
+  // Every WhatsApp send — a template included, since picking one is
+  // still spending a nudge (whatsappQuota.ts) — is refused once the
+  // allowance hits zero. Checked ahead of the window/template branch
+  // below too, so a workspace that ran out can't be offered a template
+  // button that's just as guaranteed to be rejected.
+  const nudgesExhausted = whatsappRepliesLeft === 0;
+
+  if (nudgesExhausted) {
+    return (
+      <View style={[shellStyle, { paddingBottom: bottomPad + spacing.sm }]}>
+        <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: spacing.sm }]}>
+          You&apos;ve used up the WhatsApp replies allowed until this contact opens their private chat.
+          Send them the private chat link — once they open it you can message them without any limit.
+        </Text>
+      </View>
+    );
+  }
 
   // Spec §18: outside the 24h window, only an approved template may be
   // sent — enforced server-side regardless, but the composer shouldn't
@@ -844,12 +908,13 @@ export function Composer({
           />
           {/* Inside the pill rather than as a fifth button in the row: at
               four icons the row is already at the width where touch targets
-              start being squeezed on a small phone.
-
-              Emoji, where the saved-replies bolt used to be. Saved
-              replies did not go anywhere — they moved to a long press on
-              this same spot, which is where a second, rarer action
-              belongs when the first one is reached constantly. */}
+              start being squeezed on a small phone. Trailing edge of the
+              input — the private-chat web composer's own layout (see
+              waprivate.dev), matched exactly rather than the native
+              WhatsApp app's leading placement. Saved replies live on a
+              long press here instead of their own button, which is where
+              a second, rarer action belongs when the first one is
+              reached constantly. */}
           <Pressable
             onPress={() => setEmojiOpen(true)}
             onLongPress={() => setQuickReplyOpen(true)}
@@ -961,11 +1026,16 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   shell: { borderTopWidth: StyleSheet.hairlineWidth },
+  invitationBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: touchTarget.min, borderRadius: 10 },
   row: { flexDirection: 'row', alignItems: 'flex-end' },
   // Every control is a real 48dp touch square regardless of its icon size —
   // see touchTarget in theme/spacing.ts.
   iconButton: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
-  pillAction: { paddingHorizontal: 4, alignSelf: 'flex-end', paddingBottom: 6 },
+  // No alignSelf override: the pill's own alignItems: 'center' already
+  // centers this against the input vertically, which 'flex-end' here used
+  // to fight — correct for a single line, but it left the emoji sitting
+  // noticeably below centre at the composer's normal resting height.
+  pillAction: { paddingHorizontal: 4 },
   pill: {
     flex: 1,
     flexDirection: 'row',

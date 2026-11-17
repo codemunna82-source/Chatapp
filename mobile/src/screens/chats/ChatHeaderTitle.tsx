@@ -48,6 +48,10 @@ interface ChatHeaderTitleProps {
   avatarUpdatedAt?: string;
   /** Tapping the photo sets a new one. Omitted makes it a plain image. */
   onPressAvatar?: () => void;
+  /** Tapping the name/subtitle opens the contact-info screen — the
+   *  messenger's own pattern: the photo changes what's shown, the name
+   *  opens who it's about. Omitted makes the name plain, unpressable text. */
+  onPressInfo?: () => void;
   /** The header's text colour for the current scheme — see chatTheme. */
   foreground?: string;
 }
@@ -79,6 +83,7 @@ export function ChatHeaderTitle({
   contactId,
   avatarUpdatedAt,
   onPressAvatar,
+  onPressInfo,
   foreground,
 }: ChatHeaderTitleProps) {
   // The header follows the scheme, so the name and the line under it are
@@ -122,7 +127,13 @@ export function ChatHeaderTitle({
         </Pressable>
       ) : null}
 
-      <View style={styles.wrap}>
+      <Pressable
+        onPress={onPressInfo}
+        disabled={!onPressInfo}
+        style={styles.wrap}
+        accessibilityRole={onPressInfo ? 'button' : undefined}
+        accessibilityLabel={onPressInfo ? `${name}'s contact info` : undefined}
+      >
       <Text style={[styles.name, { color: fg }]} numberOfLines={1}>
         {name}
         {phone && phone !== name ? (
@@ -190,7 +201,7 @@ export function ChatHeaderTitle({
           {remaining} to reply freely
         </Text>
       ) : null}
-      </View>
+      </Pressable>
     </View>
   );
 }

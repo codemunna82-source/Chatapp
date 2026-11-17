@@ -26,8 +26,19 @@ export const MESSAGE_RETRY_QUEUE_NAME = 'message-rate-limit-retry';
  * second that caused it. Waiting gives the number's own pacing (and this
  * app's — see outboundPacing.ts) a real chance to have cleared by the
  * time the retry goes out.
+ *
+ * The second attempt waits longer than the first — the same backoff
+ * shape metaClient.ts already uses for a live Graph error, applied here
+ * because this retry is scheduled off a DELAYED webhook refusal instead:
+ * a number still throttled 45 seconds after the first retry is not
+ * about to clear in the next 45, and retrying at the same fixed delay
+ * twice just adds a second crowded second instead of giving it more room.
  */
-const RETRY_DELAY_MS = 45_000;
+const RETRY_BASE_DELAY_MS = 45_000;
+
+function retryDelayFor(attempt: number): number {
+  return RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+}
 
 /** How many times one message may be auto-resent before this gives up and leaves it failed for an agent to retry by hand. */
 const MAX_RATE_LIMIT_RETRIES = 2;
@@ -70,7 +81,7 @@ export async function scheduleRateLimitRetry(input: { tenantId: string; messageI
       'retry',
       { tenantId: input.tenantId, messageId: input.messageId, attempt },
       {
-        delay: RETRY_DELAY_MS,
+        delay: retryDelayFor(attempt),
         // Stable per message+attempt: a redelivered status webhook for the
         // same refusal (Meta's delivery isn't exactly-once either) must not
         // queue the same retry twice.

@@ -25,3 +25,11 @@ export const listContactsQuerySchema = z.object({
 export const contactIdParamSchema = z.object({
   id: z.string().min(1),
 });
+
+export const setContactBlockedSchema = z.object({
+  blocked: z.boolean(),
+});
+
+export const reportContactSchema = z.object({
+  reason: z.string().trim().min(1).max(2000).optional(),
+});

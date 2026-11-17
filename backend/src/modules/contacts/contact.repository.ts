@@ -107,6 +107,23 @@ export async function updateContactByIdAndTenant(
   return Contact.findOneAndUpdate({ _id: id, tenantId }, { $set: patch }, { new: true });
 }
 
+/** See contact.model.ts — this is a flag for agents, not real enforcement. */
+export async function setContactBlocked(
+  id: string,
+  tenantId: string,
+  blocked: boolean,
+  actorUserId: string,
+): Promise<ContactDoc | null> {
+  if (!Types.ObjectId.isValid(id)) return null;
+  return Contact.findOneAndUpdate(
+    { _id: id, tenantId },
+    blocked
+      ? { $set: { blocked: true, blockedAt: new Date(), blockedBy: actorUserId } }
+      : { $set: { blocked: false }, $unset: { blockedAt: '', blockedBy: '' } },
+    { new: true },
+  );
+}
+
 export interface ContactAvatarRef {
   url: string;
   contentType: string;

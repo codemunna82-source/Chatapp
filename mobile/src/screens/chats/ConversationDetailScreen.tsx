@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Keyboard, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Keyboard, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   KeyboardState,
   useAnimatedKeyboard,
@@ -14,12 +14,12 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { Screen } from '../../components/Screen';
 import { MessageListSkeleton } from '../../components/Skeleton';
-import { InlineBanner } from '../../components/InlineBanner';
 import { MessageBubble } from './MessageBubble';
 import { ChatWallpaper } from './ChatWallpaper';
 import { ConnectionBanner } from '../../components/ConnectionBanner';
 import { DateSeparator } from './DateSeparator';
 import { TypingIndicator } from './TypingIndicator';
+import { PrivacyBanner, ContactSummaryCard } from './ContactCard';
 import { Composer } from './Composer';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { MessageActionSheet } from './MessageActionSheet';
@@ -41,12 +41,7 @@ import { clearMessageNotification } from '../../notifications/messageNotificatio
 import { deriveConversationView } from './deriveConversationView';
 import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
-import {
-  useGuestLinkStatus,
-  useIssueGuestLink,
-  useSendGuestLinkInvitation,
-  useRevokeGuestLink,
-} from '../../queries/useGuestChat';
+import { useGuestLinkStatus, useIssueGuestLink, useRevokeGuestLink } from '../../queries/useGuestChat';
 import {
   useMessages,
   flattenMessages,
@@ -63,7 +58,6 @@ import { useSocketConnection } from '../../sockets/useSocketConnected';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { MessageSearchPanel } from './MessageSearchPanel';
 import { useActiveConversationStore } from '../../store/activeConversationStore';
-import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage, isOfflineError } from '../../api/client';
 import * as Clipboard from 'expo-clipboard';
 import { ThemeProvider, useResolvedScheme } from '../../theme/ThemeProvider';
@@ -265,8 +259,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const [isTyping, setIsTyping] = useState(false);
   const typingClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { placeCall, isPending: callPending, apiError: callApiError, linkError: callLinkError } = usePlaceCall();
-  const callError = callApiError ? getApiErrorMessage(callApiError, 'Could not start that call.') : callLinkError;
   const contactId = conversationQuery.data?.contactId;
 
   // Fixed navy+gold look for this screen, in a light and a dark variant —
@@ -406,6 +398,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // toast, a keystroke). Key off the query data itself, whose identity
   // react-query only changes when the messages actually change.
   const messages = useMemo(() => flattenMessages(messagesQuery.data), [messagesQuery.data]);
+  /** Whether the full thread has loaded back to its start — the point at
+   *  which ListFooterComponent should show the thread-start card. */
+  const atThreadStart = !messagesQuery.isLoading && !messagesQuery.hasNextPage;
 
   // --- in-chat search / starred ------------------------------------------
   const [infoTarget, setInfoTarget] = useState<Message | null>(null);
@@ -604,7 +599,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const guestLinkQuery = useGuestLinkStatus(conversationId);
   const uploadContactAvatar = useUploadContactAvatar();
   const issueGuestLink = useIssueGuestLink(conversationId);
-  const sendInvitation = useSendGuestLinkInvitation(conversationId);
   const revokeGuestLink = useRevokeGuestLink(conversationId);
 
   const guestActive = guestLinkQuery.data?.active ?? false;
@@ -630,21 +624,39 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const withinWhatsAppWindow =
     (conversationQuery.data?.isDemo ?? false) ||
     (conversationQuery.data?.withinCustomerServiceWindow ?? false);
-  const shareGuestLink = useCallback(
-    async (url: string) => {
+  /**
+   * Opens the phone's own SMS app, pre-addressed to the customer with the
+   * private-chat link already in the body — sent from the agent's own SIM
+   * when they tap send there, not through any gateway VOXO operates.
+   *
+   * Deliberately not a WhatsApp send: this exists for exactly the moment
+   * WhatsApp itself is the problem (the automatic invitation refused,
+   * rate-limited, or the cap already spent) — routing the recovery
+   * through the same channel that just failed would not recover anything.
+   * SMS is a different wire entirely, so it still reaches the customer
+   * when WhatsApp currently cannot.
+   */
+  const smsGuestLink = useCallback(
+    (url: string) => {
+      const phone = conversationQuery.data?.contact?.phone;
+      if (!phone) return;
       const name = conversationQuery.data?.contact?.name || 'there';
-      await Share.share({
-        message: `Hi ${name}, continue our conversation privately here: ${url}`,
-      });
+      const body = `Hi ${name}, continue our conversation privately here: ${url}`;
+      // iOS and Android disagree on how an sms: URL takes a prefilled body.
+      const separator = Platform.OS === 'ios' ? '&' : '?';
+      void Linking.openURL(`sms:${phone}${separator}body=${encodeURIComponent(body)}`);
     },
     [conversationQuery.data],
   );
 
   /**
    * A live web window means a call that actually connects inside the app.
-   * The WhatsApp path cannot do that — outbound WhatsApp calling is a
-   * hand-off to wa.me, which leaves VOXO entirely — so when both are
-   * possible the web one is plainly better for the agent.
+   * Without one, there is no device on the other end to ring inside
+   * VOXO at all — the old fallback handed off to wa.me, which does not
+   * even place a call, only opens WhatsApp's own chat with the customer
+   * for the agent to find the call button in themselves. A real phone
+   * call, placed on the agent's own SIM, actually rings the customer
+   * right now — which is what tapping this icon is supposed to do.
    */
   const handleCall = useCallback(
     (media: 'audio' | 'video' = 'audio') => {
@@ -659,12 +671,13 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         void useCallStore.getState().placeWebCall(conversationId, name, guestOnline, media);
         return;
       }
-      // Never video: this hands off to wa.me, and Meta's calling API has
-      // no video at all. The video button is not drawn without a live web
-      // window, so this is only ever reached for an audio call.
-      if (contactId) placeCall(contactId);
+      // Never video here: a normal phone call has no video leg. The video
+      // button is not drawn without a live web window, so this is only
+      // ever reached for an audio call.
+      const phone = conversationQuery.data?.contact?.phone;
+      if (phone) void Linking.openURL(`tel:${phone}`);
     },
-    [guestActive, guestOnline, conversationId, contactId, placeCall, conversationQuery.data],
+    [guestActive, guestOnline, conversationId, conversationQuery.data],
   );
 
   /**
@@ -703,14 +716,16 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     );
   }, [contactId, uploadContactAvatar]);
 
-  const handleGuestLink = useCallback(() => {
+  /**
+   * Mints (or replaces) the private-chat link and opens it in the phone's
+   * SMS app — see smsGuestLink above for why SMS specifically.
+   */
+  const handleSendInvitationSms = useCallback(() => {
     if (issueGuestLink.isPending || revokeGuestLink.isPending) return;
 
     const create = () => {
       issueGuestLink.mutate(undefined, {
-        onSuccess: (link) => {
-          void shareGuestLink(link.url);
-        },
+        onSuccess: (link) => smsGuestLink(link.url),
         onError: (err) => Alert.alert('Could not create link', getApiErrorMessage(err)),
       });
     };
@@ -739,50 +754,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         },
       ],
     );
-  }, [guestActive, issueGuestLink, revokeGuestLink, shareGuestLink]);
-
-  /**
-   * Asks the server to send this customer the workspace's invitation on
-   * WhatsApp, now.
-   *
-   * Different from the link row above it, which mints a link and opens the
-   * share sheet for the agent to send from somewhere else. This one goes
-   * out on the business number, as the approved template, with the link
-   * already in it — the same message the automatic reply sends.
-   *
-   * Confirmed first, because it is a message to a customer and the agent
-   * cannot see it afterwards: the invitation is internal, so it never
-   * appears as a bubble in this thread.
-   *
-   * The result says what actually went out. A template that Meta would not
-   * take falls back to plain text server-side, and an agent who is not
-   * told that will believe the customer got a tappable button.
-   */
-  const handleSendInvitation = useCallback(() => {
-    if (sendInvitation.isPending) return;
-    Alert.alert(
-      'Send the invitation?',
-      'This sends the private-chat invitation to the customer on WhatsApp, with their link in it.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send',
-          onPress: () =>
-            sendInvitation.mutate(undefined, {
-              onSuccess: (result) => {
-                showToast(
-                  result.sentVia === 'template'
-                    ? 'Invitation sent.'
-                    : 'Invitation sent as plain text — the approved template could not be used.',
-                );
-              },
-              onError: (err) => Alert.alert('Not sent', getApiErrorMessage(err)),
-            }),
-        },
-      ],
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- showToast is a stable useCallback defined above
-  }, [sendInvitation]);
+  }, [guestActive, issueGuestLink, revokeGuestLink, smsGuestLink]);
 
   const handleSendText = useCallback(
     (text: string, nudgeIndex?: number) => {
@@ -961,6 +933,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           contactId={contactId}
           avatarUpdatedAt={conversationQuery.data?.contact?.avatarUpdatedAt}
           onPressAvatar={pickContactPhoto}
+          onPressInfo={() => navigation.navigate('ContactInfo', { conversationId })}
           windowExpiresAt={conversationQuery.data?.conversationWindowExpiresAt}
           withinWindow={conversationQuery.data?.withinCustomerServiceWindow ?? true}
           isDemo={conversationQuery.data?.isDemo ?? false}
@@ -988,38 +961,24 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           {guestActive ? (
             <Pressable
               onPress={() => handleCall('video')}
-              disabled={callPending}
               style={styles.headerAction}
               accessibilityRole="button"
-              accessibilityState={{ disabled: callPending }}
               accessibilityLabel="Video call this customer in the private chat"
             >
               {({ pressed }) => (
-                <Ionicons
-                  name="videocam"
-                  size={22}
-                  color={callPending ? `${headerFg}80` : headerFg}
-                  style={{ opacity: pressed ? 0.5 : 1 }}
-                />
+                <Ionicons name="videocam" size={22} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />
               )}
             </Pressable>
           ) : null}
           {contactId ? (
             <Pressable
               onPress={() => handleCall('audio')}
-              disabled={callPending}
               style={styles.headerAction}
               accessibilityRole="button"
-              accessibilityState={{ disabled: callPending }}
               accessibilityLabel="Call this customer"
             >
               {({ pressed }) => (
-                <Ionicons
-                  name="call"
-                  size={22}
-                  color={callPending ? `${headerFg}80` : headerFg}
-                  style={{ opacity: pressed ? 0.5 : 1 }}
-                />
+                <Ionicons name="call" size={22} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />
               )}
             </Pressable>
           ) : null}
@@ -1043,9 +1002,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     });
   }, [
     navigation,
+    conversationId,
     conversationQuery.data,
     contactId,
-    callPending,
     selectionMode,
     selectedIds.length,
     clearSelection,
@@ -1057,7 +1016,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     // setOptions only re-runs when this array changes, so the customer
     // could arrive and the subtitle would never say so.
     guestOnline,
-    handleGuestLink,
     handleCall,
     // Without this the header keeps the first callback it was built with,
     // which closes over a stale contactId — so tapping the photo on a
@@ -1208,11 +1166,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           <View style={styles.flex}>
             <ChatWallpaper />
             <ConnectionBanner />
-            {callError ? (
-              <View style={styles.callErrorWrap}>
-                <InlineBanner message={callError} />
-              </View>
-            ) : null}
             {/* No banner for this. It sat across the top of every
                 conversation with an open private window — which is now the
                 normal state, not an exceptional one — and a coloured strip
@@ -1242,6 +1195,19 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               // is what makes a fast scroll look continuous.
               drawDistance={600}
               ListHeaderComponent={isTyping ? <TypingIndicator /> : null}
+              // Inverted, so the footer renders at the visual TOP of the
+              // screen — where the start of the thread is. Gated on
+              // hasNextPage being false so this only appears once older
+              // history has genuinely run out, not on every scroll-up
+              // before it has finished loading.
+              ListFooterComponent={
+                atThreadStart ? (
+                  <View style={styles.threadStartCard}>
+                    <PrivacyBanner name={contactDisplayName(conversationQuery.data?.contact)} />
+                    <ContactSummaryCard conversationId={conversationId} />
+                  </View>
+                ) : null
+              }
               contentContainerStyle={styles.listContent}
             />
 
@@ -1299,6 +1265,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
                * depend on an event arriving.
                */
               nextNudge={guestOpened ? null : conversationQuery.data?.nextNudge}
+              // Same staleness guard as nextNudge above: once the customer
+              // has opened the private chat the allowance no longer
+              // applies, whatever this screen's cached conversation still
+              // says.
+              whatsappRepliesLeft={guestOpened ? null : conversationQuery.data?.whatsappRepliesLeft}
             />
 
             {/* See keyboardGapStyle. */}
@@ -1312,9 +1283,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           visible={headerMenuOpen}
           onClose={() => setHeaderMenuOpen(false)}
           onSearch={() => setSearchOpen(true)}
-          onGuestLink={handleGuestLink}
-          onSendInvitation={handleSendInvitation}
-          guestActive={guestActive}
+          onSendInvitationSms={handleSendInvitationSms}
           // The photo moved in here too: tapping the avatar still sets
           // one, but that was never discoverable — nothing about a
           // picture says "tap me to replace this".
@@ -1501,12 +1470,19 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  callErrorWrap: { paddingHorizontal: 16, paddingTop: 8 },
   // Real 48dp target for the header action — hitSlop was being clipped by
   // the navigator's own tight headerRight container.
   headerActions: { flexDirection: 'row', alignItems: 'center' },
   headerAction: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   toastWrap: { position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center' },
   toast: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth },
-  listContent: { paddingVertical: 8 },
+  // flexGrow + justifyContent: 'flex-end' is what keeps a short thread's
+  // content (and the thread-start card riding its footer) pinned to the
+  // list's natural edge instead of drifting toward its centre or its
+  // other end — the standard fix for an inverted list whose content
+  // doesn't fill the viewport. A list long enough to fill the screen on
+  // its own ignores both: flexGrow has nothing to grow into once content
+  // already exceeds the container, so this is a no-op there.
+  listContent: { paddingVertical: 8, flexGrow: 1, justifyContent: 'flex-end' },
+  threadStartCard: { padding: 16 },
 });

@@ -57,7 +57,20 @@ function CallDuration({ connectedAt }: { connectedAt: number }) {
 }
 
 /** The halo that pulses behind the avatar while the phone is ringing. */
-function PulsingAvatar({ label, pulsing }: { label: string; pulsing: boolean }) {
+function PulsingAvatar({
+  label,
+  pulsing,
+  isVideo,
+}: {
+  label: string;
+  pulsing: boolean;
+  /** Badges a small camera icon on the avatar — the one glance-level cue
+   *  that this particular ring is a video call, not a voice one. Without
+   *  it the ringing screen was identical either way except for a small
+   *  uppercase label at the very top of the screen, easy to miss in the
+   *  second someone has to decide how to answer it. */
+  isVideo: boolean;
+}) {
   // useState's lazy initialiser rather than a ref: the value has to be
   // created exactly once per mount, and reading `ref.current` during render
   // is the pattern React's own lint rule flags.
@@ -83,9 +96,14 @@ function PulsingAvatar({ label, pulsing }: { label: string; pulsing: boolean }) 
   return (
     <View style={styles.avatarWrap}>
       <Animated.View style={[styles.halo, { transform: [{ scale }] }]} />
-      <View style={styles.avatar}>
+      <View style={[styles.avatar, isVideo && styles.avatarVideo]}>
         <Text style={styles.avatarText}>{initialsOf(label)}</Text>
       </View>
+      {isVideo ? (
+        <View style={styles.videoBadge}>
+          <Ionicons name="videocam" size={16} color={CALL_TEXT} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -227,13 +245,17 @@ export function CallOverlay() {
         </View>
 
         <View style={[styles.identity, showRemoteVideo && styles.identityOverVideo]}>
-          {showRemoteVideo ? null : <PulsingAvatar label={displayName} pulsing={phase === 'ringing'} />}
+          {showRemoteVideo ? null : (
+            <PulsingAvatar label={displayName} pulsing={phase === 'ringing'} isVideo={isVideo} />
+          )}
           <Text style={styles.name} numberOfLines={1}>
             {displayName}
           </Text>
           {showNumber ? <Text style={styles.number}>{fromPhone}</Text> : null}
 
-          {phase === 'ringing' ? <Text style={styles.status}>Incoming call…</Text> : null}
+          {phase === 'ringing' ? (
+            <Text style={styles.status}>Incoming {isVideo ? 'video' : 'voice'} call…</Text>
+          ) : null}
           {/* placeWebCall sets this to "Ringing…" or "Calling…" depending
               on whether the customer is actually in the private window.
               A WhatsApp call sets nothing, and falls through to the
@@ -379,6 +401,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#4C3FE0',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // A distinct tint for a video ring — teal rather than the voice call's
+  // violet — so the avatar itself (not just small text up top) reads as
+  // "this one's different" at a glance.
+  avatarVideo: { backgroundColor: '#0E8F7A' },
+  videoBadge: {
+    position: 'absolute',
+    right: 2,
+    bottom: 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#0E8F7A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: CALL_BG,
   },
   avatarText: { color: CALL_TEXT, fontSize: 44, fontWeight: '600' },
   name: { color: CALL_TEXT, fontSize: 26, fontWeight: '600', letterSpacing: -0.4, textAlign: 'center' },

@@ -7,6 +7,8 @@ import {
   updateContactSchema,
   listContactsQuerySchema,
   contactIdParamSchema,
+  setContactBlockedSchema,
+  reportContactSchema,
 } from './contact.validation';
 import multer from 'multer';
 import { AVATAR_MAX_SIZE_BYTES } from '../users/user.service';
@@ -18,6 +20,8 @@ import {
   deleteContactHandler,
   updateContactAvatarHandler,
   getContactAvatarHandler,
+  setContactBlockedHandler,
+  reportContactHandler,
 } from './contact.controller';
 
 export const contactRouter = Router();
@@ -62,6 +66,22 @@ contactRouter.patch(
   requirePermission('CHAT_SEND'),
   validate({ params: contactIdParamSchema, body: updateContactSchema }),
   updateContactHandler,
+);
+
+// Flagging and reporting are an agent's own note, not a Meta-side action —
+// see contact.model.ts — so both sit behind the same CHAT_SEND permission
+// as every other write to a contact, not a separate moderation role.
+contactRouter.post(
+  '/:id/blocked',
+  requirePermission('CHAT_SEND'),
+  validate({ params: contactIdParamSchema, body: setContactBlockedSchema }),
+  setContactBlockedHandler,
+);
+contactRouter.post(
+  '/:id/report',
+  requirePermission('CHAT_SEND'),
+  validate({ params: contactIdParamSchema, body: reportContactSchema }),
+  reportContactHandler,
 );
 
 // Deleting a contact also removes their conversations and messages from
