@@ -32,16 +32,6 @@ import { touchTarget } from '../../theme/spacing';
 import type { ChatsStackParamList } from '../../navigation/types';
 import { impactMedium, selectionFeedback } from '../../utils/haptics';
 import type { Conversation } from '../../api/types';
-import {
-  addressOfLocalConversation,
-  isLocalSmsId,
-  mergeSmsIntoConversation,
-  phoneThreadKey,
-  threadToConversation,
-  useDeleteSmsThread,
-  useLocalSmsThreads,
-  useMarkSmsThreadRead,
-} from '../../queries/useLocalSms';
 
 type Props = NativeStackScreenProps<ChatsStackParamList, 'ChatsList'>;
 
@@ -113,45 +103,7 @@ function ChatsListScreenInner({ navigation }: Props) {
   // Keyed off the query data (stable identity from react-query) rather than
   // the freshly-allocated array flatten returns, so the list only rebuilds
   // when the conversations actually change.
-  const serverConversations = useMemo(() => flattenConversations(query.data), [query.data]);
-  // SMS threads come from the phone's own store, not the server, and are
-  // merged in here as ordinary rows. Not in the archive: archiving is a
-  // server-side state SMS threads do not have.
-  const smsThreadsQuery = useLocalSmsThreads(!showArchived);
-  const conversations = useMemo(() => {
-    // SMS-only conversations the server still holds from before SMS became
-    // device-only would duplicate the local threads.
-    const server = serverConversations.filter((c) => c.whatsappPhoneNumberId !== null);
-    if (showArchived) return server;
-    const threads = smsThreadsQuery.data ?? [];
-    if (threads.length === 0) return server;
-
-    // A customer who has a private chat AND an SMS thread is one row: the
-    // private chat's, carrying the SMS thread's unread count and latest
-    // message. Its screen shows both histories together.
-    const claimed = new Set<string>();
-    const mergedServer = server.map((c) => {
-      const key = phoneThreadKey(c.contact?.phone);
-      const thread = key && !claimed.has(key) ? threads.find((t) => t.threadKey === key) : undefined;
-      if (!key || !thread) return c;
-      claimed.add(key);
-      return mergeSmsIntoConversation(c, thread);
-    });
-
-    const needle = debouncedSearch.trim().toLowerCase();
-    const smsOnly = threads
-      .filter((t) => !claimed.has(t.threadKey))
-      .filter((t) => !needle || t.address.toLowerCase().includes(needle) || t.body.toLowerCase().includes(needle))
-      .filter((t) => (filter === 'unread' ? t.unreadCount > 0 : filter === 'read' ? t.unreadCount === 0 : true))
-      .map(threadToConversation);
-    const pinned = mergedServer.filter((c) => c.pinned);
-    const rest = [...mergedServer.filter((c) => !c.pinned), ...smsOnly].sort(
-      (a, b) => Date.parse(b.lastMessageAt ?? b.updatedAt) - Date.parse(a.lastMessageAt ?? a.updatedAt),
-    );
-    return [...pinned, ...rest];
-  }, [serverConversations, smsThreadsQuery.data, showArchived, debouncedSearch, filter]);
-  const { mutate: markSmsRead } = useMarkSmsThreadRead();
-  const { mutate: deleteSmsThread } = useDeleteSmsThread();
+  const conversations = useMemo(() => flattenConversations(query.data), [query.data]);
   const pinConversation = usePinConversation();
   const archiveConversation = useArchiveConversation();
   const deleteConversation = useDeleteConversation();
@@ -161,8 +113,6 @@ function ChatsListScreenInner({ navigation }: Props) {
   // Stable per-row callbacks — inline arrows would change identity every
   // render and defeat ChatListItem's React.memo.
   const toggleSelected = useCallback((conversation: Conversation) => {
-    // Bulk actions are server operations; SMS threads are not part of them.
-    if (isLocalSmsId(conversation.id)) return;
     selectionFeedback();
     setSelectedIds((prev) =>
       prev.includes(conversation.id) ? prev.filter((id) => id !== conversation.id) : [...prev, conversation.id],
@@ -178,7 +128,7 @@ function ChatsListScreenInner({ navigation }: Props) {
   // them, not every conversation that exists somewhere past the scroll.
   const handleSelectAll = useCallback(() => {
     selectionFeedback();
-    setSelectedIds(conversations.filter((c) => !isLocalSmsId(c.id)).map((c) => c.id));
+    setSelectedIds(conversations.map((c) => c.id));
   }, [conversations]);
 
   const handleOpen = useCallback(
@@ -187,10 +137,6 @@ function ChatsListScreenInner({ navigation }: Props) {
       // screen — the same rule the message list uses.
       if (selectionMode) {
         toggleSelected(conversation);
-        return;
-      }
-      if (isLocalSmsId(conversation.id)) {
-        navigation.navigate('SmsThread', { phone: addressOfLocalConversation(conversation) });
         return;
       }
       navigation.navigate('ConversationDetail', { conversationId: conversation.id });
@@ -209,25 +155,9 @@ function ChatsListScreenInner({ navigation }: Props) {
       // Same reasoning as the message bubble: a long press has no visual
       // feedback of its own until the sheet arrives.
       impactMedium();
-      if (isLocalSmsId(conversation.id)) {
-        // Pin/archive are server states an SMS thread does not have.
-        const address = addressOfLocalConversation(conversation);
-        Alert.alert(address, undefined, [
-          { text: 'Cancel', style: 'cancel' },
-          ...(conversation.unreadCount > 0
-            ? [{ text: 'Mark as read', onPress: () => markSmsRead(address) }]
-            : []),
-          {
-            text: 'Delete from VOXO',
-            style: 'destructive' as const,
-            onPress: () => deleteSmsThread(address),
-          },
-        ]);
-        return;
-      }
       setActionTarget(conversation);
     },
-    [selectionMode, toggleSelected, markSmsRead, deleteSmsThread],
+    [selectionMode, toggleSelected],
   );
 
   const handleMarkUnread = useCallback(
@@ -346,14 +276,11 @@ function ChatsListScreenInner({ navigation }: Props) {
     () => (
       <RefreshControl
         refreshing={query.isRefetching}
-        onRefresh={() => {
-          void query.refetch();
-          void smsThreadsQuery.refetch();
-        }}
+        onRefresh={() => void query.refetch()}
         tintColor={colors.primary}
       />
     ),
-    [query, smsThreadsQuery, colors.primary],
+    [query, colors.primary],
   );
   const listContentStyle = useMemo(() => ({ paddingBottom: spacing.lg }), [spacing.lg]);
 

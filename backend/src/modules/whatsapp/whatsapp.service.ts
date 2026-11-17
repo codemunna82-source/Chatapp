@@ -11,7 +11,6 @@ import { logger } from '../../lib/logger';
 import { getMetaGateway } from '../../integrations/meta';
 import type { MetaCredentials } from '../../integrations/meta';
 import { describeNumberHealth, type NumberHealth } from './numberHealth';
-import { isMetaOnHold } from '../tenants/metaHold';
 import { summariseHealthStatus, summariseWabaHealth } from './healthStatusSummary';
 import { fetchNumberHealthStatus } from '../../integrations/meta/phoneNumbers';
 import { blockNumberRemoval } from './removalGuards';
@@ -305,19 +304,6 @@ export function toPublicWhatsAppNumber(
   n: WhatsAppPhoneNumberDoc,
   app?: { id: string; name: string } | null,
   accountStatus?: string,
-  /**
-   * Whether this workspace has WhatsApp on hold, which changes only the
-   * health line: a number nothing is sent through has no quality to
-   * report, and showing Meta's rating there reads as a problem to fix.
-   *
-   * Passed in rather than resolved here because this is synchronous and
-   * the setting is a database read. It defaults to the server's value,
-   * which is exactly what this did before the setting existed — so the
-   * write paths that return a number they have just saved keep behaving
-   * as they always have, while the two paths an admin actually reads
-   * health on hand down the workspace's own answer.
-   */
-  metaOnHold = env.META_ON_HOLD,
 ): PublicWhatsAppNumber {
   return {
     metaAppId: app?.id ?? null,
@@ -337,9 +323,7 @@ export function toPublicWhatsAppNumber(
     messagingLimitTier: n.messagingLimitTier ?? undefined,
     healthCheckedAt: n.healthCheckedAt ? n.healthCheckedAt.toISOString() : undefined,
     canSendMessage: n.canSendMessage ?? undefined,
-    health: metaOnHold
-      ? { level: 'ok', headline: 'WhatsApp on hold', detail: 'Replies go to the private chat.', stale: false }
-      : describeNumberHealth({
+    health: describeNumberHealth({
       qualityRating: n.qualityRating ?? undefined,
       messagingLimitTier: n.messagingLimitTier ?? undefined,
       nameStatus: n.nameStatus ?? undefined,
@@ -368,7 +352,6 @@ const HEALTH_STALE_AFTER_MS = 15 * 60 * 1000;
  * the stored values are still shown, just older.
  */
 export async function refreshNumberHealth(number: WhatsAppPhoneNumberDoc): Promise<void> {
-  if (await isMetaOnHold(String(number.tenantId))) return;
   try {
     const credentials = await resolveMetaCredentialsForPhoneNumber(
       String(number.tenantId),
@@ -499,13 +482,10 @@ export async function listPhoneNumbersForTenant(tenantId: string): Promise<Publi
   // points at an account and the account names the Business Manager, and
   // doing that per row is a pair of round trips each against a database
   // that is not local.
-  const [accountOfNumber, metaOnHold] = await Promise.all([
-    resolveBusinessManagerOfNumbers(tenantId, numbers),
-    isMetaOnHold(tenantId),
-  ]);
+  const accountOfNumber = await resolveBusinessManagerOfNumbers(tenantId, numbers);
   return numbers.map((n) => {
     const info = accountOfNumber.get(String(n.whatsappAccountId));
-    return toPublicWhatsAppNumber(n, info?.app ?? null, info?.accountStatus, metaOnHold);
+    return toPublicWhatsAppNumber(n, info?.app ?? null, info?.accountStatus);
   });
 }
 
@@ -543,12 +523,7 @@ export async function findOwnNumberHealth(auth: AuthContext): Promise<PublicWhat
   const info = (await resolveBusinessManagerOfNumbers(auth.tenantId, [number])).get(
     String(number.whatsappAccountId),
   );
-  return toPublicWhatsAppNumber(
-    number,
-    info?.app ?? null,
-    info?.accountStatus,
-    await isMetaOnHold(auth.tenantId),
-  );
+  return toPublicWhatsAppNumber(number, info?.app ?? null, info?.accountStatus);
 }
 
 /** account id → the Business Manager it belongs to, for a tenant's numbers. */

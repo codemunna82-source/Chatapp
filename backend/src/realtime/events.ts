@@ -53,7 +53,7 @@ export interface RealtimeMessagePayload {
    * server always refuses. Absent on rows written before the field
    * existed; a client treats that as WhatsApp, which is the safe read.
    */
-  channel?: 'whatsapp' | 'web' | 'sms';
+  channel?: 'whatsapp' | 'web';
   /**
    * Set when the sender took this message back, and the reason every
    * client draws a tombstone instead of a bubble. The content fields
@@ -70,8 +70,7 @@ export interface RealtimeMessagePayload {
 export interface RealtimeConversationPayload {
   id: string;
   contactId: string;
-  /** Absent for an SMS-only conversation — see Conversation.whatsappPhoneNumberId. */
-  whatsappPhoneNumberId: string | null;
+  whatsappPhoneNumberId: string;
   lastMessageAt?: string;
   lastMessagePreview?: string;
   lastMessageDirection?: 'IN' | 'OUT';
@@ -119,22 +118,14 @@ export interface RealtimeCallPayload {
 export interface RealtimeEmitter {
   emitCallIncoming(tenantId: string, call: RealtimeCallPayload, whatsappPhoneNumberId: string): void;
   emitCallEnded(tenantId: string, call: RealtimeCallPayload, whatsappPhoneNumberId: string): void;
-  /**
-   * whatsappPhoneNumberId is `string | null` here (and on the other chat
-   * events below), not simply optional — an SMS-only conversation really
-   * has none, and the type keeps saying so explicitly at every call site
-   * rather than letting a future one quietly omit the argument. Calls and
-   * invitations stay WhatsApp-only (`string`, required): neither exists
-   * on the SMS wire.
-   */
-  emitMessageNew(tenantId: string, message: RealtimeMessagePayload, whatsappPhoneNumberId: string | null): void;
-  emitMessageUpdated(tenantId: string, message: RealtimeMessagePayload, whatsappPhoneNumberId: string | null): void;
+  emitMessageNew(tenantId: string, message: RealtimeMessagePayload, whatsappPhoneNumberId: string): void;
+  emitMessageUpdated(tenantId: string, message: RealtimeMessagePayload, whatsappPhoneNumberId: string): void;
   emitMessageStatus(
     tenantId: string,
     conversationId: string,
     messageId: string,
     status: string,
-    whatsappPhoneNumberId: string | null,
+    whatsappPhoneNumberId: string,
   ): void;
   /**
    * A web call ending, to the customer's own window.
@@ -151,23 +142,8 @@ export interface RealtimeEmitter {
     payload: { callId: string; status: string; durationSeconds: number },
   ): void;
   emitConversationUpdated(tenantId: string, conversation: RealtimeConversationPayload): void;
-  emitConversationRead(
-    tenantId: string,
-    conversationId: string,
-    byUserId: string,
-    whatsappPhoneNumberId: string | null,
-  ): void;
+  emitConversationRead(tenantId: string, conversationId: string, byUserId: string, whatsappPhoneNumberId: string): void;
   emitNotificationNew(tenantId: string, userId: string, notification: RealtimeNotificationPayload): void;
-  /**
-   * The private-chat invitation just went out to this customer — auto or
-   * manual, whichever actually reached them (see guestAutoReply.service.ts).
-   * The invitation itself is `internal` and never appears as a message
-   * bubble, so without this an agent has no live signal that it happened
-   * at all; the composer uses it to show a brief "invitation sent" banner
-   * in its own place rather than the agent discovering it only once a
-   * reply attempt explains the nudge count.
-   */
-  emitInvitationSent(tenantId: string, conversationId: string, whatsappPhoneNumberId: string): void;
 }
 
 const noopEmitter: RealtimeEmitter = {
@@ -180,7 +156,6 @@ const noopEmitter: RealtimeEmitter = {
   emitConversationUpdated: () => {},
   emitConversationRead: () => {},
   emitNotificationNew: () => {},
-  emitInvitationSent: () => {},
 };
 
 let current: RealtimeEmitter = noopEmitter;

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Keyboard, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Keyboard, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   KeyboardState,
   useAnimatedKeyboard,
@@ -14,12 +14,12 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { Screen } from '../../components/Screen';
 import { MessageListSkeleton } from '../../components/Skeleton';
+import { InlineBanner } from '../../components/InlineBanner';
 import { MessageBubble } from './MessageBubble';
 import { ChatWallpaper } from './ChatWallpaper';
 import { ConnectionBanner } from '../../components/ConnectionBanner';
 import { DateSeparator } from './DateSeparator';
 import { TypingIndicator } from './TypingIndicator';
-import { PrivacyBanner, ContactSummaryCard } from './ContactCard';
 import { Composer } from './Composer';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { MessageActionSheet } from './MessageActionSheet';
@@ -39,13 +39,14 @@ import { canDeleteForEveryone } from './messageRevoke';
 import { contactDisplayName, formatPhoneForDisplay } from '../../utils/formatPhone';
 import { clearMessageNotification } from '../../notifications/messageNotification';
 import { deriveConversationView } from './deriveConversationView';
-import { LOCAL_SMS_ID_PREFIX, isLocalSmsId, useLocalSmsMessages, useMarkSmsThreadRead } from '../../queries/useLocalSms';
-import { deleteSmsMessage } from '../../native/smsStore';
 import { useConversation } from '../../queries/useConversations';
 import { useCallStore } from '../../calling/callStore';
-import { useGuestLinkStatus, useIssueGuestLink } from '../../queries/useGuestChat';
-import { sendSmsAutomatically } from '../../utils/sendSms';
-import { buildInvitationSmsText, getInvitationSmsTemplate } from '../../storage/invitationSmsTemplate';
+import {
+  useGuestLinkStatus,
+  useIssueGuestLink,
+  useSendGuestLinkInvitation,
+  useRevokeGuestLink,
+} from '../../queries/useGuestChat';
 import {
   useMessages,
   flattenMessages,
@@ -62,6 +63,7 @@ import { useSocketConnection } from '../../sockets/useSocketConnected';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
 import { MessageSearchPanel } from './MessageSearchPanel';
 import { useActiveConversationStore } from '../../store/activeConversationStore';
+import { usePlaceCall } from '../../queries/useCalls';
 import { getApiErrorMessage, isOfflineError } from '../../api/client';
 import * as Clipboard from 'expo-clipboard';
 import { ThemeProvider, useResolvedScheme } from '../../theme/ThemeProvider';
@@ -233,25 +235,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const sendMessage = useSendMessage(conversationId);
   const deleteMessage = useDeleteMessage(conversationId);
   const starMessage = useStarMessage(conversationId);
-  /**
-   * True once the backend has resolved this to a real SMS-channel
-   * conversation (conversation.model.ts's whatsappPhoneNumberId left
-   * unset — see findOrCreateSmsConversation). Not the same thing as
-   * smsGuestLink/handleSendSms below: those fire a one-off SMS
-   * alongside an otherwise-WhatsApp conversation (the nudge/invite
-   * escape hatch, local-only); this is the conversation's ONLY
-   * channel, so every send and every composer affordance that doesn't
-   * apply to SMS (media, voice notes, the WhatsApp window/nudge rules)
-   * is switched off for it below instead.
-   */
-  const isSmsConversation = Boolean(conversationQuery.data) && !conversationQuery.data?.whatsappPhoneNumberId;
-  // SMS now lives only on this phone (see LocalSmsRunner). An SMS-only
-  // conversation left on the server from before that opens the phone's own
-  // thread for the same number instead.
-  const legacySmsPhone = isSmsConversation ? conversationQuery.data?.contact?.phone : undefined;
-  useEffect(() => {
-    if (legacySmsPhone) navigation.replace('SmsThread', { phone: legacySmsPhone });
-  }, [legacySmsPhone, navigation]);
 
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
@@ -282,6 +265,8 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const [isTyping, setIsTyping] = useState(false);
   const typingClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const { placeCall, isPending: callPending, apiError: callApiError, linkError: callLinkError } = usePlaceCall();
+  const callError = callApiError ? getApiErrorMessage(callApiError, 'Could not start that call.') : callLinkError;
   const contactId = conversationQuery.data?.contactId;
 
   // Fixed navy+gold look for this screen, in a light and a dark variant —
@@ -421,9 +406,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // toast, a keystroke). Key off the query data itself, whose identity
   // react-query only changes when the messages actually change.
   const messages = useMemo(() => flattenMessages(messagesQuery.data), [messagesQuery.data]);
-  /** Whether the full thread has loaded back to its start — the point at
-   *  which ListFooterComponent should show the thread-start card. */
-  const atThreadStart = !messagesQuery.isLoading && !messagesQuery.hasNextPage;
 
   // --- in-chat search / starred ------------------------------------------
   const [infoTarget, setInfoTarget] = useState<Message | null>(null);
@@ -531,23 +513,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     emitConversationRead(conversationId);
   }, [conversationId, connected, generation, lastIncomingId]);
   const view = useMemo(() => deriveConversationView(messages), [messages]);
-  // This customer's SMS, kept on the phone, shown in the same thread by time:
-  // one row in Chats, one history. They are read-only here — the server knows
-  // nothing about them, so reply/star/delete/forward do not apply.
-  const contactPhone = conversationQuery.data?.contact?.phone;
-  const smsMessages = useLocalSmsMessages(contactPhone ?? '').data;
-  const { mutate: markSmsRead } = useMarkSmsThreadRead();
-  useEffect(() => {
-    if (contactPhone && smsMessages && smsMessages.length > 0) markSmsRead(contactPhone);
-  }, [contactPhone, smsMessages, markSmsRead]);
-  const mergedRenderable = useMemo(
-    () =>
-      smsMessages && smsMessages.length > 0
-        ? [...view.renderable, ...smsMessages].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-        : view.renderable,
-    [view.renderable, smsMessages],
-  );
-  const renderItems = useMemo(() => buildRenderItems(mergedRenderable), [mergedRenderable]);
+  const renderItems = useMemo(() => buildRenderItems(view.renderable), [view.renderable]);
 
   const showToast = useCallback((text: string) => {
     setToast(text);
@@ -638,6 +604,8 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const guestLinkQuery = useGuestLinkStatus(conversationId);
   const uploadContactAvatar = useUploadContactAvatar();
   const issueGuestLink = useIssueGuestLink(conversationId);
+  const sendInvitation = useSendGuestLinkInvitation(conversationId);
+  const revokeGuestLink = useRevokeGuestLink(conversationId);
 
   const guestActive = guestLinkQuery.data?.active ?? false;
   /**
@@ -662,66 +630,21 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   const withinWhatsAppWindow =
     (conversationQuery.data?.isDemo ?? false) ||
     (conversationQuery.data?.withinCustomerServiceWindow ?? false);
-  /**
-   * Sends the private-chat link to the customer by SMS, from the agent's
-   * own SIM, not through any gateway VOXO operates.
-   *
-   * Deliberately not a WhatsApp send: this exists for exactly the moment
-   * WhatsApp itself is the problem (the automatic invitation refused,
-   * rate-limited, or the cap already spent) — routing the recovery
-   * through the same channel that just failed would not recover anything.
-   * SMS is a different wire entirely, so it still reaches the customer
-   * when WhatsApp currently cannot.
-   */
-  const smsGuestLink = useCallback(
-    (url: string) => {
-      const phone = conversationQuery.data?.contact?.phone;
-      if (!phone) return;
+  const shareGuestLink = useCallback(
+    async (url: string) => {
       const name = conversationQuery.data?.contact?.name || 'there';
-      const text = buildInvitationSmsText(getInvitationSmsTemplate(), name, url);
-      void sendSmsAutomatically(phone, text);
-    },
-    [conversationQuery.data],
-  );
-
-  /**
-   * The composer's SMS escape hatch, offered alongside the fixed nudge
-   * text / template button while the customer hasn't opened their private
-   * chat yet: that wording is fixed because it goes out over WhatsApp,
-   * which rejects free-form text outside the window — but whatever is
-   * typed here goes out over SMS instead, a wire WhatsApp's own rules
-   * have no say over, so there's nothing to fix.
-   *
-   * A send here has no backend message behind it at all — it goes
-   * straight off the agent's own SIM, so there was nothing to show it
-   * ever happened, nothing to scroll back to. Dropped into the same
-   * message cache the real thread renders from (upsertMessageInCache,
-   * the same primitive a pending photo upload uses) rather than building
-   * a second, parallel way to draw a bubble — this is a real-looking row
-   * in the actual thread, just one the server never sees or stores,
-   * which is also why it's gone the moment the app is closed or this
-   * screen reloads from the server.
-   */
-  const handleSendSms = useCallback(
-    (text: string) => {
-      const phone = conversationQuery.data?.contact?.phone;
-      const trimmed = text.trim();
-      if (!phone || !trimmed) return;
-      // The text is stored on the phone as it is sent, and shows in this
-      // thread from there (see the merged list above).
-      void sendSmsAutomatically(phone, trimmed);
+      await Share.share({
+        message: `Hi ${name}, continue our conversation privately here: ${url}`,
+      });
     },
     [conversationQuery.data],
   );
 
   /**
    * A live web window means a call that actually connects inside the app.
-   * Without one, there is no device on the other end to ring inside
-   * VOXO at all — the old fallback handed off to wa.me, which does not
-   * even place a call, only opens WhatsApp's own chat with the customer
-   * for the agent to find the call button in themselves. A real phone
-   * call, placed on the agent's own SIM, actually rings the customer
-   * right now — which is what tapping this icon is supposed to do.
+   * The WhatsApp path cannot do that — outbound WhatsApp calling is a
+   * hand-off to wa.me, which leaves VOXO entirely — so when both are
+   * possible the web one is plainly better for the agent.
    */
   const handleCall = useCallback(
     (media: 'audio' | 'video' = 'audio') => {
@@ -736,13 +659,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
         void useCallStore.getState().placeWebCall(conversationId, name, guestOnline, media);
         return;
       }
-      // Never video here: a normal phone call has no video leg. The video
-      // button is not drawn without a live web window, so this is only
-      // ever reached for an audio call.
-      const phone = conversationQuery.data?.contact?.phone;
-      if (phone) void Linking.openURL(`tel:${phone}`);
+      // Never video: this hands off to wa.me, and Meta's calling API has
+      // no video at all. The video button is not drawn without a live web
+      // window, so this is only ever reached for an audio call.
+      if (contactId) placeCall(contactId);
     },
-    [guestActive, guestOnline, conversationId, conversationQuery.data],
+    [guestActive, guestOnline, conversationId, contactId, placeCall, conversationQuery.data],
   );
 
   /**
@@ -781,17 +703,86 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     );
   }, [contactId, uploadContactAvatar]);
 
+  const handleGuestLink = useCallback(() => {
+    if (issueGuestLink.isPending || revokeGuestLink.isPending) return;
+
+    const create = () => {
+      issueGuestLink.mutate(undefined, {
+        onSuccess: (link) => {
+          void shareGuestLink(link.url);
+        },
+        onError: (err) => Alert.alert('Could not create link', getApiErrorMessage(err)),
+      });
+    };
+
+    if (!guestActive) {
+      create();
+      return;
+    }
+
+    // The URL of a live link cannot be shown again — only its hash is
+    // stored — so the honest offer is to replace it, which is also what
+    // makes every copy already sent stop working.
+    Alert.alert(
+      'A link is already active',
+      'The existing link cannot be shown again. Creating a new one will stop the old link working.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'New link',
+          style: 'destructive',
+          onPress: () =>
+            revokeGuestLink.mutate(undefined, {
+              onSuccess: create,
+              onError: (err) => Alert.alert('Could not replace link', getApiErrorMessage(err)),
+            }),
+        },
+      ],
+    );
+  }, [guestActive, issueGuestLink, revokeGuestLink, shareGuestLink]);
+
   /**
-   * Texts the customer their private-chat link from this phone's SIM. A link
-   * already sent keeps working; the server adds a new one alongside it.
+   * Asks the server to send this customer the workspace's invitation on
+   * WhatsApp, now.
+   *
+   * Different from the link row above it, which mints a link and opens the
+   * share sheet for the agent to send from somewhere else. This one goes
+   * out on the business number, as the approved template, with the link
+   * already in it — the same message the automatic reply sends.
+   *
+   * Confirmed first, because it is a message to a customer and the agent
+   * cannot see it afterwards: the invitation is internal, so it never
+   * appears as a bubble in this thread.
+   *
+   * The result says what actually went out. A template that Meta would not
+   * take falls back to plain text server-side, and an agent who is not
+   * told that will believe the customer got a tappable button.
    */
-  const handleSendInvitationSms = useCallback(() => {
-    if (issueGuestLink.isPending) return;
-    issueGuestLink.mutate(undefined, {
-      onSuccess: (link) => smsGuestLink(link.url),
-      onError: (err) => Alert.alert('Could not create link', getApiErrorMessage(err)),
-    });
-  }, [issueGuestLink, smsGuestLink]);
+  const handleSendInvitation = useCallback(() => {
+    if (sendInvitation.isPending) return;
+    Alert.alert(
+      'Send the invitation?',
+      'This sends the private-chat invitation to the customer on WhatsApp, with their link in it.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: () =>
+            sendInvitation.mutate(undefined, {
+              onSuccess: (result) => {
+                showToast(
+                  result.sentVia === 'template'
+                    ? 'Invitation sent.'
+                    : 'Invitation sent as plain text — the approved template could not be used.',
+                );
+              },
+              onError: (err) => Alert.alert('Not sent', getApiErrorMessage(err)),
+            }),
+        },
+      ],
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- showToast is a stable useCallback defined above
+  }, [sendInvitation]);
 
   const handleSendText = useCallback(
     (text: string, nudgeIndex?: number) => {
@@ -816,17 +807,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   const handleRetry = useCallback(
     (message: Message) => {
-      if (isLocalSmsId(message.id)) {
-        // An SMS the network refused: drop the failed copy and text it again.
-        const phone = conversationQuery.data?.contact?.phone;
-        const storedId = Number(message.id.slice(LOCAL_SMS_ID_PREFIX.length));
-        if (phone && message.text && Number.isFinite(storedId)) {
-          void deleteSmsMessage(storedId)
-            .catch(() => {})
-            .then(() => sendSmsAutomatically(phone, message.text ?? ''));
-        }
-        return;
-      }
       removeMessageFromCache(queryClient, conversationId, message.id);
       if (message.type === 'text') {
         submitSend({ type: 'text', text: message.text ?? '', replyToMessageId: message.replyToMessageId });
@@ -841,7 +821,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
       // just re-send those from scratch, which is a minor UX gap, not a
       // silent failure (the FAILED bubble stays visible either way).
     },
-    [conversationId, queryClient, submitSend, conversationQuery.data],
+    [conversationId, queryClient, submitSend],
   );
 
   const canReactTo = (message: Message) => !message.id.startsWith('temp-') && message.status !== 'FAILED';
@@ -866,16 +846,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // from the sheet's own "Select more" row.
   const handleLongPress = useCallback(
     (message: Message) => {
-      if (isLocalSmsId(message.id)) {
-        // Only Copy applies to an SMS shown here.
-        if (message.text) {
-          Alert.alert('Message', undefined, [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Copy', onPress: () => void Clipboard.setStringAsync(message.text ?? '') },
-          ]);
-        }
-        return;
-      }
       if (selectionMode) {
         toggleSelected(message);
         return;
@@ -887,7 +857,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
   const handleSelectTap = useCallback(
     (message: Message) => {
-      if (selectionMode && !isLocalSmsId(message.id)) toggleSelected(message);
+      if (selectionMode) toggleSelected(message);
     },
     [selectionMode, toggleSelected],
   );
@@ -897,11 +867,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
   // one. The gesture is simply inert rather than showing an error: there
   // is nothing the agent did wrong.
   const handleReply = useCallback((message: Message) => {
-    if (message.revokedAt || isLocalSmsId(message.id)) return;
+    if (message.revokedAt) return;
     setReplyingTo(message);
   }, []);
   const handleForwardOne = useCallback((message: Message) => {
-    if (message.revokedAt || isLocalSmsId(message.id)) return;
+    if (message.revokedAt) return;
     setForwardTargets([message]);
   }, []);
 
@@ -991,17 +961,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           contactId={contactId}
           avatarUpdatedAt={conversationQuery.data?.contact?.avatarUpdatedAt}
           onPressAvatar={pickContactPhoto}
-          onPressInfo={() => navigation.navigate('ContactInfo', { conversationId })}
           windowExpiresAt={conversationQuery.data?.conversationWindowExpiresAt}
-          // There is no 24-hour window on SMS at all — conversationWindowExpiresAt
-          // is never set for one (see sms.service.ts), which would
-          // otherwise read here as a permanently CLOSED WhatsApp window
-          // rather than the "doesn't apply" it actually is.
-          withinWindow={isSmsConversation || (conversationQuery.data?.withinCustomerServiceWindow ?? true)}
+          withinWindow={conversationQuery.data?.withinCustomerServiceWindow ?? true}
           isDemo={conversationQuery.data?.isDemo ?? false}
           guestOnline={guestOnline}
           guestActive={guestActive}
-          whatsappRepliesLeft={isSmsConversation ? null : conversationQuery.data?.whatsappRepliesLeft}
+          whatsappRepliesLeft={conversationQuery.data?.whatsappRepliesLeft}
         />
       ),
       // The header itself stays a fixed navy in both schemes (matches both
@@ -1023,24 +988,38 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           {guestActive ? (
             <Pressable
               onPress={() => handleCall('video')}
+              disabled={callPending}
               style={styles.headerAction}
               accessibilityRole="button"
+              accessibilityState={{ disabled: callPending }}
               accessibilityLabel="Video call this customer in the private chat"
             >
               {({ pressed }) => (
-                <Ionicons name="videocam" size={22} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />
+                <Ionicons
+                  name="videocam"
+                  size={22}
+                  color={callPending ? `${headerFg}80` : headerFg}
+                  style={{ opacity: pressed ? 0.5 : 1 }}
+                />
               )}
             </Pressable>
           ) : null}
           {contactId ? (
             <Pressable
               onPress={() => handleCall('audio')}
+              disabled={callPending}
               style={styles.headerAction}
               accessibilityRole="button"
+              accessibilityState={{ disabled: callPending }}
               accessibilityLabel="Call this customer"
             >
               {({ pressed }) => (
-                <Ionicons name="call" size={22} color={headerFg} style={{ opacity: pressed ? 0.5 : 1 }} />
+                <Ionicons
+                  name="call"
+                  size={22}
+                  color={callPending ? `${headerFg}80` : headerFg}
+                  style={{ opacity: pressed ? 0.5 : 1 }}
+                />
               )}
             </Pressable>
           ) : null}
@@ -1064,10 +1043,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     });
   }, [
     navigation,
-    conversationId,
     conversationQuery.data,
-    isSmsConversation,
     contactId,
+    callPending,
     selectionMode,
     selectedIds.length,
     clearSelection,
@@ -1079,6 +1057,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
     // setOptions only re-runs when this array changes, so the customer
     // could arrive and the subtitle would never say so.
     guestOnline,
+    handleGuestLink,
     handleCall,
     // Without this the header keeps the first callback it was built with,
     // which closes over a stale contactId — so tapping the photo on a
@@ -1229,6 +1208,11 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           <View style={styles.flex}>
             <ChatWallpaper />
             <ConnectionBanner />
+            {callError ? (
+              <View style={styles.callErrorWrap}>
+                <InlineBanner message={callError} />
+              </View>
+            ) : null}
             {/* No banner for this. It sat across the top of every
                 conversation with an open private window — which is now the
                 normal state, not an exceptional one — and a coloured strip
@@ -1258,19 +1242,6 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
               // is what makes a fast scroll look continuous.
               drawDistance={600}
               ListHeaderComponent={isTyping ? <TypingIndicator /> : null}
-              // Inverted, so the footer renders at the visual TOP of the
-              // screen — where the start of the thread is. Gated on
-              // hasNextPage being false so this only appears once older
-              // history has genuinely run out, not on every scroll-up
-              // before it has finished loading.
-              ListFooterComponent={
-                atThreadStart ? (
-                  <View style={styles.threadStartCard}>
-                    <PrivacyBanner name={contactDisplayName(conversationQuery.data?.contact)} />
-                    <ContactSummaryCard conversationId={conversationId} />
-                  </View>
-                ) : null
-              }
               contentContainerStyle={styles.listContent}
             />
 
@@ -1298,17 +1269,14 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
             <Composer
               conversationId={conversationId}
-              whatsappPhoneNumberId={conversation?.whatsappPhoneNumberId ?? undefined}
+              whatsappPhoneNumberId={conversation?.whatsappPhoneNumberId}
               // A demo chat always has an open composer: the backend skips
               // the window rule for it too, so this is not the client
               // deciding to ignore a server constraint.
               // A live web window is a real way to reach the customer, so
               // the composer stays open on it — handleSendText routes the
               // message down whichever channel is actually available.
-              // SMS has no 24-hour window or template requirement to run
-              // into at all (that's a WhatsApp Cloud API rule), so an
-              // SMS-only conversation always gets the free-text composer.
-              withinWindow={isSmsConversation || withinWhatsAppWindow || guestActive}
+              withinWindow={withinWhatsAppWindow || guestActive}
               sending={sendMessage.isPending}
               onSendText={handleSendText}
               onAttach={() => setAttachSheetOpen(true)}
@@ -1330,20 +1298,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
                * refetch is wired up now too; this is the half that does not
                * depend on an event arriving.
                */
-              // Neither nudges nor an allowance exist for SMS — null
-              // keeps both branches that read them from ever triggering
-              // for an SMS-only conversation, same as withinWindow above.
-              nextNudge={isSmsConversation || guestOpened ? null : conversationQuery.data?.nextNudge}
-              // Same staleness guard as nextNudge above: once the customer
-              // has opened the private chat the allowance no longer
-              // applies, whatever this screen's cached conversation still
-              // says.
-              whatsappRepliesLeft={isSmsConversation || guestOpened ? null : conversationQuery.data?.whatsappRepliesLeft}
-              // The SMS escape hatch next to the nudge/template card —
-              // only worth offering while that card is even showing, i.e.
-              // before the customer has opened their private chat.
-              customerPhone={guestOpened ? undefined : conversationQuery.data?.contact?.phone}
-              onSendSms={handleSendSms}
+              nextNudge={guestOpened ? null : conversationQuery.data?.nextNudge}
             />
 
             {/* See keyboardGapStyle. */}
@@ -1357,7 +1312,9 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
           visible={headerMenuOpen}
           onClose={() => setHeaderMenuOpen(false)}
           onSearch={() => setSearchOpen(true)}
-          onSendInvitationSms={handleSendInvitationSms}
+          onGuestLink={handleGuestLink}
+          onSendInvitation={handleSendInvitation}
+          guestActive={guestActive}
           // The photo moved in here too: tapping the avatar still sets
           // one, but that was never discoverable — nothing about a
           // picture says "tap me to replace this".
@@ -1486,7 +1443,7 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
         <AttachmentSheet
           visible={attachSheetOpen}
-          whatsappPhoneNumberId={conversation?.whatsappPhoneNumberId ?? undefined}
+          whatsappPhoneNumberId={conversation?.whatsappPhoneNumberId}
           replyToMessageId={replyingTo?.id}
           onClose={() => setAttachSheetOpen(false)}
           onSent={() => setReplyingTo(null)}
@@ -1544,19 +1501,12 @@ export function ConversationDetailScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  callErrorWrap: { paddingHorizontal: 16, paddingTop: 8 },
   // Real 48dp target for the header action — hitSlop was being clipped by
   // the navigator's own tight headerRight container.
   headerActions: { flexDirection: 'row', alignItems: 'center' },
   headerAction: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
   toastWrap: { position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center' },
   toast: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth },
-  // flexGrow + justifyContent: 'flex-end' is what keeps a short thread's
-  // content (and the thread-start card riding its footer) pinned to the
-  // list's natural edge instead of drifting toward its centre or its
-  // other end — the standard fix for an inverted list whose content
-  // doesn't fill the viewport. A list long enough to fill the screen on
-  // its own ignores both: flexGrow has nothing to grow into once content
-  // already exceeds the container, so this is a no-op there.
-  listContent: { paddingVertical: 8, flexGrow: 1, justifyContent: 'flex-end' },
-  threadStartCard: { padding: 16 },
+  listContent: { paddingVertical: 8 },
 });

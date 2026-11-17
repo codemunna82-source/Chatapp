@@ -8,23 +8,20 @@ import { findFirstPhoneNumberForTenant, findPhoneNumberByIdAndTenant } from '../
 import { findAssignedPhoneNumberId } from '../users/user.repository';
 import { countWhatsAppNudges, deleteMessagesByConversation } from '../messages/message.repository';
 import { nudgesLeft, nudgeWindowStart } from '../messages/whatsappQuota';
-import { findActiveSessionForConversation } from '../guest/guestSession.repository';
+import { findActiveSessionForConversation, revokeSessionsForConversation } from '../guest/guestSession.repository';
 import { deleteGuestPushTokensForConversation } from '../guest/guestPushToken.repository';
 import { hasMovedToWebChat } from '../guest/webChatRouting';
 import { toPublicContact, type PublicContact } from '../contacts/contact.service';
 import type { ConversationLean, ConversationStatus } from './conversation.model';
 import type { ContactLean } from '../contacts/contact.model';
 import { nudgePolicyFor } from '../messages/nudgePolicy';
-import { isMetaOnHold } from '../tenants/metaHold';
-import { nudgeAt } from '../messages/nudgeTemplates';
 
 export interface PublicConversation {
   id: string;
   tenantId: string;
   contactId: string;
   contact?: PublicContact;
-  /** Null for an SMS-only conversation — see Conversation.whatsappPhoneNumberId. */
-  whatsappPhoneNumberId: string | null;
+  whatsappPhoneNumberId: string;
   lastMessageAt?: Date;
   lastMessagePreview?: string;
   /** Who sent the last message, and — for our own sends — how far it got.
@@ -42,10 +39,7 @@ export interface PublicConversation {
   isDemo: boolean;
   /**
    * WhatsApp replies left before the private chat link is the only way
-   * through — see messages/whatsappQuota.ts. Governs the whole pre-
-   * private-chat conversation now, whether or not Meta's own 24-hour
-   * window happens to be open — see that file's doc comment on why an
-   * open window is no longer an exemption.
+   * through — see messages/whatsappQuota.ts.
    *
    * Only on the single-conversation read, never on the list: it costs a
    * count per conversation, and a chat list of thirty would pay thirty
@@ -54,8 +48,8 @@ export interface PublicConversation {
    * Absent means "not counted here", which every client reads as "do not
    * show it" — not as zero. Null is the same answer said out loud for a
    * conversation the allowance does not govern at all: one on a demo
-   * contact, or one the customer has already moved to their private
-   * window, where there is no limit to report.
+   * contact, or one the customer is currently reading in their window,
+   * where there is no limit to report.
    */
   whatsappRepliesLeft?: number | null;
   /**
@@ -86,29 +80,20 @@ export interface NextNudge {
   text: string;
 }
 
-function toPublicConversation(
-  doc: ConversationLean,
-  contact?: ContactLean,
-  // Resolved per workspace rather than read from env here: this is a
-  // synchronous serializer, and the setting is a database read. Every
-  // caller already knows the tenant, so it is cheaper and more honest to
-  // resolve once above and hand the answer down.
-  metaOnHold = false,
-): PublicConversation {
+function toPublicConversation(doc: ConversationLean, contact?: ContactLean): PublicConversation {
   return {
     id: String(doc._id),
     tenantId: String(doc.tenantId),
     contactId: String(doc.contactId),
     contact: contact ? toPublicContact(contact) : undefined,
-    whatsappPhoneNumberId: doc.whatsappPhoneNumberId ? String(doc.whatsappPhoneNumberId) : null,
+    whatsappPhoneNumberId: String(doc.whatsappPhoneNumberId),
     lastMessageAt: doc.lastMessageAt ?? undefined,
     lastMessagePreview: doc.lastMessagePreview ?? undefined,
     lastMessageDirection: (doc.lastMessageDirection as 'IN' | 'OUT' | null) ?? undefined,
     lastMessageStatus: doc.lastMessageStatus ?? undefined,
     lastCustomerMessageAt: doc.lastCustomerMessageAt ?? undefined,
     conversationWindowExpiresAt: doc.conversationWindowExpiresAt ?? undefined,
-    // On hold, replies go to the private chat, which has no 24-hour window.
-    withinCustomerServiceWindow: metaOnHold || repo.isWithinCustomerServiceWindow(doc),
+    withinCustomerServiceWindow: repo.isWithinCustomerServiceWindow(doc),
     // Absent contact (a conversation listed before its contact loads)
     // defaults to NOT demo — the safe direction, since it keeps the real
     // window rules on anything we cannot positively identify as sample data.
@@ -132,12 +117,9 @@ function toPublicConversation(
 /** Batch-fetches contacts for a page of conversations — one query, not N. */
 async function enrichWithContacts(tenantId: string, conversations: ConversationLean[]): Promise<PublicConversation[]> {
   const contactIds = [...new Set(conversations.map((c) => String(c.contactId)))];
-  const [contacts, metaOnHold] = await Promise.all([
-    contactRepo.findContactsByIdsAndTenant(contactIds, tenantId),
-    isMetaOnHold(tenantId),
-  ]);
+  const contacts = await contactRepo.findContactsByIdsAndTenant(contactIds, tenantId);
   const byId = new Map(contacts.map((c) => [String(c._id), c]));
-  return conversations.map((c) => toPublicConversation(c, byId.get(String(c.contactId)), metaOnHold));
+  return conversations.map((c) => toPublicConversation(c, byId.get(String(c.contactId))));
 }
 
 export interface ListConversationsQuery {
@@ -226,7 +208,7 @@ export async function getConversationForTenant(auth: AuthContext, id: string): P
     findActiveSessionForConversation(id, tenantId),
   ]);
 
-  const view = toPublicConversation(conversation, contact ?? undefined, await isMetaOnHold(tenantId));
+  const view = toPublicConversation(conversation, contact ?? undefined);
   const nudge = await whatsappRepliesLeftFor(
     tenantId,
     id,
@@ -247,21 +229,17 @@ export async function getConversationForTenant(auth: AuthContext, id: string): P
  * discovering the limit by hitting it — with a message typed and a
  * customer waiting, which is the worst moment to learn a rule.
  *
- * Null rather than a number in the two cases where there is genuinely no
- * limit: a demo contact (not a real WhatsApp number at all), and a
- * customer who has already moved to their private window (replies go
- * there, and there is no cap on that). A customer who merely wrote to us
- * in the last 24 hours is NOT one of these — message.service.ts enforces
- * the allowance there too (see whatsappQuota.ts), so reporting "no limit"
- * for that case would tell the composer to open a free-text box the next
- * send could still be refused from.
+ * Null rather than a number in the three cases where there is no limit: a
+ * demo contact (not a real WhatsApp number at all), a customer who is
+ * currently in their private window (replies go there, and there is no
+ * cap on that), and a customer who wrote to us in the last 24 hours —
+ * inside Meta's window the reply is free-form and uncapped, and the
+ * composer must offer a text box rather than a fixed message.
  *
- * `nextNudge` is additionally null whenever the window is shut, even
- * with replies still left: the fixed wording is ordinary free-form text,
- * which Meta will not deliver outside the window at all — a card
- * offering to send it there would be a button that could only fail. The
- * composer's own `withinWindow` branch is what covers that state,
- * offering a template instead.
+ * `nextNudge` is null whenever the window is shut as well, which leaves
+ * it null in every case: the fixed wording is ordinary free-form text,
+ * and outside the window Meta refuses to deliver that whatever it says.
+ * A card offering to send it was a button that could only fail.
  */
 async function whatsappRepliesLeftFor(
   tenantId: string,
@@ -270,23 +248,19 @@ async function whatsappRepliesLeftFor(
   session: Awaited<ReturnType<typeof findActiveSessionForConversation>>,
   withinCustomerServiceWindow: boolean,
 ): Promise<{ left: number | null; nextNudge: NextNudge | null }> {
-  if ((await isMetaOnHold(tenantId)) || contact?.isDemo || contact?.webOnly) {
-    return { left: null, nextNudge: null };
-  }
+  if (contact?.isDemo) return { left: null, nextNudge: null };
   if (hasMovedToWebChat(session)) return { left: null, nextNudge: null };
+  if (withinCustomerServiceWindow) return { left: null, nextNudge: null };
 
   const [used, policy] = await Promise.all([
     countWhatsAppNudges(tenantId, conversationId, nudgeWindowStart(session)),
     nudgePolicyFor(tenantId),
   ]);
-  const left = nudgesLeft(used, policy.limit);
 
-  const nextNudge: NextNudge | null =
-    withinCustomerServiceWindow && policy.enforced && left > 0
-      ? { index: used, position: used + 1, total: policy.limit, text: nudgeAt(policy.nudges, used) ?? '' }
-      : null;
-
-  return { left, nextNudge };
+  // Only the count survives out here. What may be sent once the window is
+  // shut is an approved template, which the agent picks from the template
+  // sheet — not a wording this would hand them.
+  return { left: nudgesLeft(used, policy.limit), nextNudge: null };
 }
 
 export interface UpdateConversationBody {
@@ -373,7 +347,7 @@ export async function startConversationForTenant(
     );
   }
 
-  return toPublicConversation(conversation, contact, await isMetaOnHold(tenantId));
+  return toPublicConversation(conversation, contact);
 }
 
 /**
@@ -395,6 +369,7 @@ export async function deleteConversationForTenant(auth: AuthContext, id: string)
   await loadVisibleConversation(auth, id);
   await deleteMessagesByConversation(tenantId, id);
   await repo.deleteConversation(id, tenantId);
+  await revokeSessionsForConversation(id, tenantId);
   await deleteGuestPushTokensForConversation(tenantId, id);
   await recordAudit({
     tenantId,
@@ -454,6 +429,7 @@ export async function bulkUpdateConversationsForTenant(
     // actually-revoked one.
     for (const id of deletedIds) {
       await deleteMessagesByConversation(tenantId, id);
+      await revokeSessionsForConversation(id, tenantId);
       await deleteGuestPushTokensForConversation(tenantId, id);
     }
     affected = deletedIds.length;
@@ -503,5 +479,5 @@ export async function updateConversationForTenant(
   });
 
   const contact = await contactRepo.findContactByIdAndTenant(String(conversation.contactId), tenantId);
-  return toPublicConversation(conversation, contact ?? undefined, await isMetaOnHold(tenantId));
+  return toPublicConversation(conversation, contact ?? undefined);
 }

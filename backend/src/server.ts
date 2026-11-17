@@ -17,11 +17,6 @@ import {
   scheduleSubscriptionExpirySweep,
 } from './queues/subscriptionExpiry.queue';
 import { startMessageRetryWorker, stopMessageRetryWorker } from './queues/messageRetry.queue';
-import { startOutboundDispatchWorker, stopOutboundDispatchWorker } from './queues/outboundDispatch.queue';
-import {
-  startAutomaticInviteDispatchWorker,
-  stopAutomaticInviteDispatchWorker,
-} from './queues/automaticInviteDispatch.queue';
 import { startSocketServer, stopSocketServer } from './sockets/socketServer';
 import { migrateWabaIndexAtBoot } from './modules/whatsapp/wabaIndexMigration';
 import { migrateConversationNumberIndexAtBoot } from './modules/conversations/conversationNumberIndexMigration';
@@ -116,8 +111,6 @@ async function main(): Promise<void> {
         stopWebhookWorker(),
         stopSubscriptionExpiryWorker(),
         stopMessageRetryWorker(),
-        stopOutboundDispatchWorker(),
-        stopAutomaticInviteDispatchWorker(),
         closeRedisConnection(),
       ])
         .catch((err) => logger.error({ err }, 'Error during shutdown'))
@@ -165,10 +158,6 @@ function startBackgroundQueues(): void {
       'REDIS_URL not configured — subscription expiry sweep will not run (auth middleware stays authoritative regardless)',
     );
     logger.warn('REDIS_URL not configured — a rate-limited reply will not be auto-retried; an agent must tap retry');
-    logger.warn('REDIS_URL not configured — outbound WhatsApp sends will not be globally paced');
-    logger.warn(
-      'REDIS_URL not configured — an automatic invitation skipped for pacing will be dropped instead of retried',
-    );
     return;
   }
 
@@ -177,10 +166,6 @@ function startBackgroundQueues(): void {
   startSubscriptionExpiryWorker();
   startMessageRetryWorker();
   logger.info('Message rate-limit retry worker started (BullMQ + Redis)');
-  startOutboundDispatchWorker();
-  logger.info('Outbound dispatch (global send pacing) worker started (BullMQ + Redis)');
-  startAutomaticInviteDispatchWorker();
-  logger.info('Automatic invite dispatch (deferred invitation retry) worker started (BullMQ + Redis)');
 
   // The .catch is for a genuine rejection (a malformed REDIS_URL, say).
   // An unreachable Redis does not reject — it stays pending until the

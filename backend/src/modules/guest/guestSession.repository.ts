@@ -1,31 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Types } from 'mongoose';
 import { GuestSession, type GuestSessionDoc } from './guestSession.model';
-import { env } from '../../config/env';
 
 /**
- * With GUEST_SESSION_TTL_DAYS = 0 a link never expires — including links
- * issued while a lifetime was still set, whose stored expiresAt is ignored.
- */
-function notExpired(): Record<string, unknown> {
-  return env.GUEST_SESSION_TTL_DAYS > 0 ? { expiresAt: { $gt: new Date() } } : {};
-}
-
-/**
- * 16 bytes of CSPRNG output (128 bits), base64url-encoded so it survives
- * being a path segment in a link that goes through WhatsApp's own URL
- * handling without any escaping.
- *
- * Shorter than a first pass at this (32 bytes, 256 bits) for a shorter,
- * easier-to-read link — but not shortened past the point that matters:
- * 128 bits is the same order of randomness as a UUID, the usual bar for
- * "not guessable," and every check against this is a database lookup an
- * attacker makes one at a time over the network, not an offline search
- * through billions of guesses a second. A shorter token narrows how much
- * is typed or shown; it must never narrow how hard this is to guess.
+ * 32 bytes of CSPRNG output, base64url-encoded so it survives being a path
+ * segment in a link that goes through WhatsApp's own URL handling without
+ * any escaping.
  */
 export function generateGuestToken(): string {
-  return randomBytes(16).toString('base64url');
+  return randomBytes(32).toString('base64url');
 }
 
 export function hashGuestToken(token: string): string {
@@ -69,15 +52,15 @@ export async function findActiveSessionForConversation(
   return GuestSession.findOne({
     conversationId,
     tenantId,
-    // revokedAt is ignored: links are permanent, including ones revoked before that rule.
-    ...notExpired(),
+    revokedAt: { $exists: false },
+    expiresAt: { $gt: new Date() },
   }).sort({ expiresAt: -1 });
 }
 
 /**
- * Resolves a presented token. Returns null for an unknown token (and, when
- * a link lifetime is configured, an expired one) — a caller that could tell
- * those apart would let anyone probe which tokens once existed.
+ * Resolves a presented token. Returns null for unknown, revoked and
+ * expired alike — a caller that could tell those apart would let anyone
+ * probe which tokens once existed.
  */
 export async function findSessionByToken(token: string): Promise<GuestSessionDoc | null> {
   if (!token) return null;
@@ -88,8 +71,8 @@ export async function findSessionByToken(token: string): Promise<GuestSessionDoc
     // dropping it would invalidate every link already in a customer's
     // thread, which is the exact failure this change exists to fix.
     $or: [{ tokenHashes: hash }, { tokenHash: hash }],
-    // revokedAt is ignored: links are permanent, including ones revoked before that rule.
-    ...notExpired(),
+    revokedAt: { $exists: false },
+    expiresAt: { $gt: new Date() },
   });
 }
 
@@ -150,9 +133,14 @@ export async function isConversationBlockedByGuest(
   return Boolean(session?.blockedAt);
 }
 
-/** Points a session at a new conversation and contact — see guest.service.ts ensureSessionConversation. */
-export async function retargetGuestSession(sessionId: string, conversationId: string, contactId: string): Promise<void> {
-  await GuestSession.updateOne({ _id: sessionId }, { $set: { conversationId, contactId }, $unset: { revokedAt: '' } });
+/** Revokes every live link for a conversation. Returns how many were closed. */
+export async function revokeSessionsForConversation(conversationId: string, tenantId: string): Promise<number> {
+  if (!Types.ObjectId.isValid(conversationId)) return 0;
+  const result = await GuestSession.updateMany(
+    { conversationId, tenantId, revokedAt: { $exists: false } },
+    { $set: { revokedAt: new Date() } },
+  );
+  return result.modifiedCount;
 }
 
 /**
@@ -177,7 +165,7 @@ export async function reissueGuestSessionToken(
   const token = generateGuestToken();
   const hash = hashGuestToken(token);
   const updated = await GuestSession.findOneAndUpdate(
-    { _id: sessionId, tenantId },
+    { _id: sessionId, tenantId, revokedAt: { $exists: false } },
     {
       // The new token is ADDED, not swapped in. $set on tokenHash alone
       // is what killed every link already sitting in the customer's

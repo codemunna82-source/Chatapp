@@ -52,9 +52,7 @@ export function toRealtimeConversation(doc: ConversationLean): RealtimeConversat
   return {
     id: String(doc._id),
     contactId: String(doc.contactId),
-    // Absent for an SMS-only conversation — String(undefined) would
-    // otherwise silently become the literal string "undefined" here.
-    whatsappPhoneNumberId: doc.whatsappPhoneNumberId ? String(doc.whatsappPhoneNumberId) : null,
+    whatsappPhoneNumberId: String(doc.whatsappPhoneNumberId),
     lastMessageAt: doc.lastMessageAt?.toISOString(),
     lastMessagePreview: doc.lastMessagePreview ?? undefined,
     lastMessageDirection: (doc.lastMessageDirection as 'IN' | 'OUT' | null) ?? undefined,

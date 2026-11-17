@@ -57,37 +57,29 @@ describe('guest link lifecycle', () => {
     expect(JSON.stringify(stored)).not.toContain(link.token);
   });
 
-  it('issues another link for a live chat without breaking the first', async () => {
+  it('refuses to issue a second link while one is live', async () => {
     const { auth, conversation } = await fixture();
-    const first = await issueGuestLinkForConversation(auth, String(conversation._id));
-    const second = await issueGuestLinkForConversation(auth, String(conversation._id));
+    await issueGuestLinkForConversation(auth, String(conversation._id));
 
-    expect(second.reused).toBe(true);
-    expect(second.token).not.toBe(first.token);
-    expect(await findSessionByToken(first.token)).not.toBeNull();
-    expect(await findSessionByToken(second.token)).not.toBeNull();
+    await expect(issueGuestLinkForConversation(auth, String(conversation._id))).rejects.toMatchObject({
+      code: 'GUEST_LINK_EXISTS',
+    });
   });
 
-  it('keeps a link working after its chat is deleted, onto a fresh chat', async () => {
+  it('stops resolving a revoked link', async () => {
     const { auth, conversation } = await fixture();
     const link = await issueGuestLinkForConversation(auth, String(conversation._id));
-
-    await Conversation.deleteOne({ _id: conversation._id });
-
-    const guest = await resolveGuestContextFromToken(link.token);
-    expect(guest.conversationId).not.toBe(String(conversation._id));
-    expect(await Conversation.exists({ _id: guest.conversationId })).toBeTruthy();
-  });
-
-  it('keeps a link working when an older app asks to revoke it', async () => {
-    const { auth, conversation } = await fixture();
-    const link = await issueGuestLinkForConversation(auth, String(conversation._id));
-
-    expect(await revokeGuestLinkForConversation(auth, String(conversation._id))).toEqual({ revoked: 0 });
     expect(await findSessionByToken(link.token)).not.toBeNull();
+
+    await revokeGuestLinkForConversation(auth, String(conversation._id));
+
+    expect(await findSessionByToken(link.token)).toBeNull();
+    await expect(resolveGuestContextFromToken(link.token)).rejects.toMatchObject({
+      code: 'GUEST_LINK_INVALID',
+    });
   });
 
-  it('keeps resolving a link past its stored expiry when links never expire', async () => {
+  it('stops resolving an expired link', async () => {
     const { tenantId, conversation, contact, phoneNumber } = await fixture();
     const { token } = await createGuestSession({
       tenantId,
@@ -97,7 +89,9 @@ describe('guest link lifecycle', () => {
       expiresAt: new Date(Date.now() - 1000),
     });
 
-    expect((await resolveGuestContextFromToken(token)).conversationId).toBe(String(conversation._id));
+    await expect(resolveGuestContextFromToken(token)).rejects.toMatchObject({
+      code: 'GUEST_LINK_INVALID',
+    });
   });
 
   it('rejects a token that was never issued', async () => {

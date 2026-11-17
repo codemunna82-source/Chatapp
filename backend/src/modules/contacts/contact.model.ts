@@ -23,12 +23,6 @@ const contactSchema = new Schema(
      */
     isDemo: { type: Boolean, default: false },
     /**
-     * A visitor who started a chat from a personal link without giving a
-     * phone number. `phone` then holds a unique placeholder, not a number,
-     * so every reply goes to the web chat window and nothing reaches Meta.
-     */
-    webOnly: { type: Boolean, default: false },
-    /**
      * A photo the workspace uploaded for this contact.
      *
      * Mirrors the User avatar fields exactly, including select:false — the
@@ -45,22 +39,6 @@ const contactSchema = new Schema(
     avatarCloudinaryPublicId: { type: String, select: false },
     avatarUpdatedAt: { type: Date },
     tags: { type: [String], default: [] },
-    /**
-     * An agent's own note-to-self, not an enforcement mechanism.
-     *
-     * WhatsApp's Cloud API gives a business no way to actually stop a
-     * number from messaging it — blocking is a feature of the personal
-     * app, on the customer's own side, not something the Graph API
-     * exposes to a business account. So this is exactly what a guest's
-     * own "Block" on the private-chat side is not: no messages are
-     * refused, nothing is hidden from the inbox, nothing is sent to
-     * Meta. It only flags the conversation so every agent who opens it
-     * sees why a colleague flagged this contact, instead of relearning
-     * it from scratch.
-     */
-    blocked: { type: Boolean, default: false },
-    blockedAt: { type: Date },
-    blockedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true },
 );

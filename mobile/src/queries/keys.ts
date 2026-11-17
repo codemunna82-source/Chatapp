@@ -29,10 +29,4 @@ export const queryKeys = {
   tenantSettings: ['tenantSettings'] as const,
   /** Whether a conversation has a live web chat window. */
   guestLink: (conversationId: string) => ['guestLink', conversationId] as const,
-  /** The signed-in user's own permanent "chat with me" link. */
-  personalLink: ['personalLink'] as const,
-  /** Everything read from the on-device SMS store — never from the API. */
-  localSmsAll: ['localSms'] as const,
-  localSmsThreads: ['localSms', 'threads'] as const,
-  localSmsMessages: (address: string) => ['localSms', 'messages', address] as const,
 };

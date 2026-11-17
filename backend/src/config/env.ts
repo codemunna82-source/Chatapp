@@ -70,16 +70,6 @@ const envSchema = z.object({
     .string()
     .default('true')
     .transform((v) => v === 'true'),
-  /**
-   * WhatsApp (Meta) switched off without disconnecting anything. Every reply
-   * goes to the customer's private web chat, media is never uploaded to
-   * Meta, the 24-hour window and nudge rules do not apply, and number health
-   * is not polled. Set back to false to resume WhatsApp.
-   */
-  META_ON_HOLD: z
-    .string()
-    .default('false')
-    .transform((v) => v === 'true'),
 
   // Optional — object storage for avatars and a persistent cache of
   // WhatsApp media (which Meta's own media ids/links expire after ~30
@@ -96,8 +86,6 @@ const envSchema = z.object({
    * surrounding whitespace.
    */
   FCM_SERVICE_ACCOUNT_JSON: z.string().optional().default(''),
-  /** Service account of the Firebase project that owns the customer web chat's config, when it differs from the app's. */
-  FCM_WEB_SERVICE_ACCOUNT_JSON: z.string().optional().default(''),
 
   /**
    * Sentry DSN. Everything Sentry-related is a no-op while this is unset,
@@ -201,9 +189,7 @@ const envSchema = z.object({
    * enough to be "practically never" for a business that would still
    * rather have an outer bound.
    */
-  // 0 = private chat links never expire (the default). A positive value
-  // restores a fixed lifetime for newly issued links.
-  GUEST_SESSION_TTL_DAYS: z.coerce.number().int().min(0).max(3650).default(0),
+  GUEST_SESSION_TTL_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),

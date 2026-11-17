@@ -11,22 +11,25 @@ import {
   createMessage,
   findMessageByIdAndTenant,
   findMessageByClientId,
+  attachMetaMessageId,
+  markMessageFailed,
   softDeleteMessage,
   revokeMessage,
   countWhatsAppNudges,
   countTemplatesSinceCustomerMessage,
   setMessageStarred,
 } from './message.repository';
-import { type SendableMediaType } from '../../integrations/meta';
+import { findMediaByIdAndTenant } from '../media/media.repository';
+import { resolveMetaCredentialsForPhoneNumber, type ResolvedMetaCredentials } from '../whatsapp/whatsapp.service';
+import { markConnectionExpired } from '../whatsapp/embeddedSignup.service';
+import { getMetaGateway, toMetaApiError, MetaApiError, type SendableMediaType } from '../../integrations/meta';
+import { mockMetaGateway } from '../../integrations/meta/mock/mockMetaGateway';
 import { getRealtimeEmitter } from '../../realtime/events';
 import { trace, type PerfTrace } from '../../lib/perfTrace';
 import { toRealtimeMessage, toRealtimeConversation } from '../../realtime/serializers';
 import type { MessageDoc, MessageLean } from './message.model';
 import { refusalToRevoke, REVOKE_REFUSAL_MESSAGE } from './messageRevoke';
-import { dispatchAndFinalize } from './metaDispatch';
-import { trySlotForDispatch } from '../whatsapp/sendPacing';
-import { isMetaOnHold } from '../tenants/metaHold';
-import { enqueueOutboundDispatch, randomNudgeDispatchDelayMs } from '../../queues/outboundDispatch.queue';
+import { toWhatsAppId } from '../../lib/phone';
 import { findActiveSessionForConversation } from '../guest/guestSession.repository';
 import { resolveReplyChannel } from '../guest/webChatRouting';
 import {
@@ -45,7 +48,7 @@ import {
   findPolicyViolationInSend,
 } from './contentPolicy';
 import { nudgePolicyFor } from './nudgePolicy';
-import { nudgeAt, nudgeRefusalMessage, sameNudgeText, humanizeNudgeText } from './nudgeTemplates';
+import { nudgeAt, nudgeRefusalMessage, sameNudgeText } from './nudgeTemplates';
 
 /**
  * Message types this service can actually dispatch through the Meta
@@ -73,7 +76,7 @@ export interface SendOutboundMessageInput {
   senderId?: string;
   type: SendableMessageType;
   text?: string;
-  mediaId?: string; // our Media._id — a WhatsApp send uploads it to Meta first if it is not there yet
+  mediaId?: string; // our Media._id — must already be uploaded to Meta (has metaMediaId)
   mediaLink?: string; // alternative to mediaId: a public HTTPS URL
   caption?: string;
   filename?: string;
@@ -395,16 +398,9 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * credentials and the 24-hour window are all untouched. This only
    * decides which way an outbound message leaves.
    */
-  // The workspace's own setting, not the server's — see metaHold.ts.
-  const metaOnHold = await isMetaOnHold(input.tenantId);
-  if (metaOnHold && input.type === 'template' && !isDemoContact) {
-    throw new ApiError(422, 'WHATSAPP_ON_HOLD', 'WhatsApp is on hold, so templates cannot be sent. Reply in the private chat instead.');
-  }
   const channel = resolveReplyChannel({
     messageType: input.type,
     isDemoContact,
-    // With WhatsApp on hold the private chat is the only way to reach anyone.
-    isWebOnlyContact: contact.webOnly === true || (metaOnHold && !isDemoContact),
     session,
   });
 
@@ -517,19 +513,17 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
    * more specific problem and has its own fix (a template), and reporting
    * the allowance first would send someone to the wrong one.
    *
-   * Exempts `internal` sends — the automatic private-chat invitation
-   * (guestAutoReply.service.ts) is the one caller that sets it. Its own
-   * `maxSends` already caps how many times it fires; spending one of the
-   * agent's own `WHATSAPP_NUDGE_LIMIT` slots on a send no agent chose to
-   * make left a workspace that set "2 nudges" with an actual agent
-   * budget of 1 the moment the invitation fired first. See
-   * whatsappQuota.ts for the rest of what counts and why.
+   * Applies to `internal` sends too — the automatic private-chat
+   * invitation (guestAutoReply.service.ts) is the one caller that sets
+   * it, and `internal` here means only "hide this bubble from the
+   * agent's thread" (see message.model.ts), not "exempt from the
+   * allowance". An admin's configured nudge limit is a message BUDGET
+   * for the whole pre-window conversation; a workspace that turned on a
+   * one-message nudge allowance and then watched the automatic
+   * invitation template re-send past it on its own clock was not
+   * getting the budget it set.
    */
-  // Set only on the enforced-wording path below — read at the dispatch
-  // gate further down to decide whether this particular send gets the
-  // randomized jitter a nudge needs. See randomNudgeDispatchDelayMs.
-  let isNudgeSend = false;
-  if (countsAgainstNudgeQuota({ messageType: input.type, isDemoContact, internal: input.internal })) {
+  if (countsAgainstNudgeQuota({ messageType: input.type, isDemoContact })) {
     const [used, policy] = await Promise.all([
       countWhatsAppNudges(input.tenantId, input.conversationId, nudgeWindowStart(session)),
       nudgePolicyFor(input.tenantId),
@@ -585,12 +579,8 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
       }
 
       // The stored wording wins over whatever arrived, so a client that
-      // is one version behind still sends what the admin set today — with
-      // a few of its word-gaps randomly widened (see humanizeNudgeText)
-      // so this exact customer's copy is never byte-identical to the
-      // next one's, without changing a single word of the admin's text.
-      input = { ...input, type: 'text', text: humanizeNudgeText(expected) };
-      isNudgeSend = true;
+      // is one version behind still sends what the admin set today.
+      input = { ...input, type: 'text', text: expected };
     }
   }
 
@@ -631,70 +621,98 @@ export async function sendOutboundMessage(input: SendOutboundMessageInput): Prom
     rateLimitRetryAttempt: input.rateLimitRetryAttempt,
   });
 
-  /**
-   * The global throughput gate, shared by every number's every send —
-   * agent-typed, templated, the automatic invitation, all of it. A slot
-   * taken here is a real send about to happen; see sendPacing.ts for what
-   * it is counted against and why it exists at all (the incident this
-   * whole mechanism is for: a number's real Meta throughput is nothing
-   * like "as fast as this app can fire requests").
-   *
-   * A demo contact skips it outright — those never reach Meta, so pacing
-   * them guards nothing and would just make the sandbox feel broken.
-   *
-   * No slot free does NOT mean refused. The row above already exists as
-   * QUEUED — exactly the state a message sits in for the normal few
-   * hundred milliseconds before Meta answers today — so handing it to the
-   * paced dispatch queue instead of calling Meta inline is invisible to
-   * the caller: same return shape, same eventual SENT/FAILED over the
-   * socket, just a longer stretch of "still queued" while its turn comes.
-   *
-   * A nudge skips the slot check here on purpose and is treated as having
-   * no slot regardless — not because the number is over budget, but so it
-   * always takes the queued path below at a randomized delay instead of
-   * going out the instant its button is tapped. An agent can have several
-   * of these chats open; sending every nudge immediately is the same
-   * clustered-in-time pattern as the automatic invitation's own fix (see
-   * randomNudgeDispatchDelayMs). The real pacing check still runs — just
-   * inside the queue's worker once the delay elapses, the same as any
-   * other deferred send.
-   */
-  const whatsappPhoneNumberId = String(conversation.whatsappPhoneNumberId);
-  const forceNudgeJitter = isNudgeSend && !isDemoContact;
-  const hasDispatchSlot = isDemoContact
-    ? true
-    : forceNudgeJitter
-      ? false
-      : await trySlotForDispatch(whatsappPhoneNumberId, input.tenantId);
-  if (!hasDispatchSlot) {
-    await enqueueOutboundDispatch({
-      tenantId: input.tenantId,
-      messageId: String(localMessage._id),
-      conversationId: input.conversationId,
-      whatsappPhoneNumberId,
-      isDemoContact,
-      replyToMetaMessageId,
-      dispatchInput: {
-        type: input.type,
-        text: input.text,
-        mediaId: input.mediaId,
-        mediaLink: input.mediaLink,
-        caption: input.caption,
-        filename: input.filename,
-        templateName: input.templateName,
-        languageCode: input.languageCode,
-        templateComponents: input.templateComponents,
-        location: input.location,
-        reactToMessageId: input.reactToMessageId,
-        emoji: input.emoji,
-        internal: input.internal,
-      },
-    }, forceNudgeJitter ? randomNudgeDispatchDelayMs() : 0);
-    perf.end({ messageId: String(localMessage._id), channel: 'whatsapp', deferred: true });
-    return localMessage;
-  }
+  // Declared outside the try so the catch can name the connection that
+  // failed; it is still undefined if resolution itself threw.
+  let credentialsUsed: ResolvedMetaCredentials | undefined;
 
-  return dispatchAndFinalize(localMessage, input, conversation, contact, isDemoContact, replyToMetaMessageId, perf);
+  try {
+    const credentials = await resolveMetaCredentialsForPhoneNumber(
+      input.tenantId,
+      String(conversation.whatsappPhoneNumberId),
+    );
+    credentialsUsed = credentials;
+    // Demo sends never leave this server, whatever META_MOCK_MODE is set to.
+    const gateway = isDemoContact ? mockMetaGateway : getMetaGateway();
+
+    // Digits without the plus — the form Meta's own webhook uses for this
+    // customer. Contacts are stored canonically (+E.164), so sending the
+    // stored string verbatim would put a `+` on the wire for every contact
+    // once the duplicate merge has canonicalised them.
+    const metaMessageId = await dispatch(
+      gateway,
+      credentials,
+      toWhatsAppId(contact.phone),
+      input,
+      replyToMetaMessageId,
+    );
+    // The Meta round trip, which is why the WhatsApp path can never be as
+    // quick as the web one: this is a call to someone else's servers, and
+    // the message does not exist for them until it returns.
+    perf.mark('meta_dispatch');
+
+    const sentMessage = await attachMetaMessageId(String(localMessage._id), input.tenantId, metaMessageId);
+
+    const realtime = getRealtimeEmitter();
+    /**
+     * The chat row and the socket both skip a system message.
+     *
+     * Hiding the bubble but leaving the invitation as the row's "last
+     * message" — and pushing it live into an open thread — would show the
+     * agent the very thing the bubble was hidden to spare them, in two
+     * more places. The conversation's own timestamps are unaffected
+     * either way; what is skipped is the preview text and the push.
+     */
+    if (!input.internal) {
+      // Before the conversation row is touched, not after. Nobody is
+      // waiting on a preview string; the people on this thread are
+      // waiting on the message, and putting a write in front of the emit
+      // held it back by a full round trip for no one's benefit.
+      realtime.emitMessageNew(
+        input.tenantId,
+        toRealtimeMessage(sentMessage ?? localMessage),
+        String(conversation.whatsappPhoneNumberId),
+      );
+      // SOCKET_EMIT_RECEIVER. The receiver's device has the message from
+      // here; everything below is bookkeeping, and the trace ends now so
+      // the total is the number that matters.
+      perf.mark('emit');
+      perf.end({ messageId: String(localMessage._id), channel: 'whatsapp' });
+
+      const updatedConversation = await recordOutboundActivity(
+        input.conversationId,
+        input.tenantId,
+        input.text ?? input.caption ?? `[${input.type}]`,
+        new Date(),
+        // SENT, matching the message row attachMetaMessageId just wrote
+        // — a status webhook advances both from here.
+        'SENT',
+        String(localMessage._id),
+      );
+      if (updatedConversation) {
+        realtime.emitConversationUpdated(input.tenantId, toRealtimeConversation(updatedConversation));
+      }
+    }
+
+    return sentMessage ?? localMessage;
+  } catch (err) {
+    const serialized = err instanceof Error ? { name: err.name, message: err.message } : err;
+    await markMessageFailed(String(localMessage._id), input.tenantId, serialized);
+
+    // Meta rejected the credentials — an expired or revoked token. Recorded
+    // on the connection so the app can say "reconnect your WhatsApp"
+    // instead of showing a failed message with no explanation, on this
+    // send and every one after it.
+    if (err instanceof MetaApiError && err.code === 'META_AUTH_ERROR' && credentialsUsed) {
+      await markConnectionExpired(credentialsUsed.whatsappAccountId);
+      throw ApiError.badRequest(
+        'WHATSAPP_RECONNECT_REQUIRED',
+        'Your WhatsApp connection has expired. Open Settings → Connect WhatsApp and connect again.',
+      );
+    }
+
+    if (err instanceof ApiError) throw err;
+    throw toMetaApiError(err);
+  }
 }
 
 /**
@@ -824,4 +842,92 @@ async function deliverToWebChat(
   });
 
   return message;
+}
+
+async function dispatch(
+  gateway: ReturnType<typeof getMetaGateway>,
+  credentials: Awaited<ReturnType<typeof resolveMetaCredentialsForPhoneNumber>>,
+  toPhone: string,
+  input: SendOutboundMessageInput,
+  replyToMetaMessageId: string | undefined,
+): Promise<string> {
+  switch (input.type) {
+    case 'text': {
+      if (!input.text) throw ApiError.badRequest('TEXT_REQUIRED', 'text is required for a text message');
+      const result = await gateway.sendText(credentials, { to: toPhone, text: input.text, replyToMetaMessageId });
+      return result.metaMessageId;
+    }
+    case 'template': {
+      if (!input.templateName || !input.languageCode) {
+        throw ApiError.badRequest('TEMPLATE_REQUIRED', 'templateName and languageCode are required');
+      }
+      const result = await gateway.sendTemplate(credentials, {
+        to: toPhone,
+        templateName: input.templateName,
+        languageCode: input.languageCode,
+        components: input.templateComponents as never,
+      });
+      return result.metaMessageId;
+    }
+    case 'image':
+    case 'video':
+    case 'audio':
+    case 'document': {
+      if (!input.mediaId && !input.mediaLink) {
+        throw ApiError.badRequest('MEDIA_REQUIRED', 'mediaId or mediaLink is required');
+      }
+      let metaMediaId: string | undefined;
+      if (input.mediaId) {
+        const mediaDoc = await findMediaByIdAndTenant(input.mediaId, input.tenantId);
+        if (!mediaDoc?.metaMediaId) {
+          throw ApiError.badRequest('MEDIA_NOT_UPLOADED', 'This media has not finished uploading to Meta yet');
+        }
+        metaMediaId = mediaDoc.metaMediaId;
+      }
+      const result = await gateway.sendMedia(credentials, {
+        to: toPhone,
+        mediaType: input.type,
+        mediaId: metaMediaId,
+        link: input.mediaLink,
+        caption: input.caption,
+        filename: input.filename,
+        replyToMetaMessageId,
+      });
+      return result.metaMessageId;
+    }
+    case 'location': {
+      if (!input.location) {
+        throw ApiError.badRequest('LOCATION_REQUIRED', 'latitude and longitude are required');
+      }
+      const result = await gateway.sendLocation(credentials, {
+        to: toPhone,
+        latitude: input.location.latitude,
+        longitude: input.location.longitude,
+        name: input.location.name,
+        address: input.location.address,
+        replyToMetaMessageId,
+      });
+      return result.metaMessageId;
+    }
+    case 'reaction': {
+      if (!input.reactToMessageId || input.emoji === undefined) {
+        throw ApiError.badRequest('REACTION_REQUIRED', 'reactToMessageId and emoji are required');
+      }
+      const target = await findMessageByIdAndTenant(input.reactToMessageId, input.tenantId);
+      if (!target?.metaMessageId) {
+        throw ApiError.badRequest(
+          'REACTION_TARGET_NOT_SENT',
+          'Cannot react to a message that has not been delivered by Meta yet',
+        );
+      }
+      const result = await gateway.sendReaction(credentials, {
+        to: toPhone,
+        reactToMetaMessageId: target.metaMessageId,
+        emoji: input.emoji,
+      });
+      return result.metaMessageId;
+    }
+    default:
+      throw ApiError.badRequest('UNSUPPORTED_MESSAGE_TYPE', `Cannot send message type "${input.type as string}"`);
+  }
 }

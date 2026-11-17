@@ -4,6 +4,7 @@ import * as repo from './contact.repository';
 import type { ContactLean } from './contact.model';
 import { deleteConversationsByContact } from '../conversations/conversation.repository';
 import { deleteMessagesByConversation } from '../messages/message.repository';
+import { revokeSessionsForConversation } from '../guest/guestSession.repository';
 import { deleteGuestPushTokensForConversation } from '../guest/guestPushToken.repository';
 import {
   isCloudinaryConfigured,
@@ -32,15 +33,6 @@ export interface PublicContact {
   tags: string[];
   /** Seeded sample data — see contact.model.ts. */
   isDemo: boolean;
-  /**
-   * An agent flagged this contact — a note to every other agent, not an
-   * enforcement mechanism. See contact.model.ts for why there is no real
-   * block to fall back on.
-   */
-  blocked: boolean;
-  /** When `blocked` was last set true. Absent when never flagged, or
-   *  cleared again — see contact.repository.ts's setContactBlocked. */
-  blockedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,8 +48,6 @@ export function toPublicContact(doc: ContactLean): PublicContact {
     avatarUpdatedAt: doc.avatarUpdatedAt ?? undefined,
     tags: doc.tags ?? [],
     isDemo: doc.isDemo ?? false,
-    blocked: doc.blocked ?? false,
-    blockedAt: doc.blockedAt ?? undefined,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -131,8 +121,11 @@ export async function deleteContactForTenant(tenantId: string, id: string, actor
   const conversationIds = await deleteConversationsByContact(tenantId, id);
   for (const conversationId of conversationIds) {
     await deleteMessagesByConversation(tenantId, conversationId);
-    // The customer's link stays valid and reopens onto a fresh chat — see
-    // guest.service.ts ensureSessionConversation.
+    // A live private-chat link left behind here fails every send with a
+    // raw not-found instead of the clean "no longer valid" the guest app
+    // already shows for a deliberately revoked one — see
+    // deleteConversationForTenant for the same fix.
+    await revokeSessionsForConversation(conversationId, tenantId);
     await deleteGuestPushTokensForConversation(tenantId, conversationId);
   }
   await repo.deleteContact(id, tenantId);
@@ -165,60 +158,6 @@ export async function updateContactForTenant(
     metadata: patch as Record<string, unknown>,
   });
   return toPublicContact(contact);
-}
-
-/**
- * Flags or unflags a contact for every agent — see contact.model.ts for
- * why this is a note, not a real block. Idempotent: setting the same
- * state twice still records who most recently did it.
- */
-export async function setContactBlockedForTenant(
-  tenantId: string,
-  actorUserId: string,
-  id: string,
-  blocked: boolean,
-): Promise<PublicContact> {
-  const contact = await repo.setContactBlocked(id, tenantId, blocked, actorUserId);
-  if (!contact) {
-    throw ApiError.notFound('CONTACT_NOT_FOUND', 'Contact not found');
-  }
-  await recordAudit({
-    tenantId,
-    actorUserId,
-    action: blocked ? 'contact.blocked' : 'contact.unblocked',
-    targetType: 'Contact',
-    targetId: contact._id,
-  });
-  return toPublicContact(contact);
-}
-
-/**
- * Logs that an agent flagged something about this contact as not right.
- *
- * No destination of its own — unlike a guest's report of the business,
- * there is no safety team on the other end of a business reporting its
- * own customer. This is the audit trail an admin can read later, and
- * nothing more; `blocked` is the part of this that other agents actually
- * see on the contact.
- */
-export async function reportContactForTenant(
-  tenantId: string,
-  actorUserId: string,
-  id: string,
-  reason?: string,
-): Promise<void> {
-  const contact = await repo.findContactByIdAndTenant(id, tenantId);
-  if (!contact) {
-    throw ApiError.notFound('CONTACT_NOT_FOUND', 'Contact not found');
-  }
-  await recordAudit({
-    tenantId,
-    actorUserId,
-    action: 'contact.reported',
-    targetType: 'Contact',
-    targetId: contact._id,
-    metadata: reason ? { reason } : undefined,
-  });
 }
 
 /**

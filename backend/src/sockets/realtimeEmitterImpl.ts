@@ -22,15 +22,8 @@ export function createSocketRealtimeEmitter(io: AppServer): RealtimeEmitter {
    * exactly one — and Socket.IO de-duplicates across `.to()` anyway, so a
    * client in several of these still receives the event once.
    */
-  // null for an SMS-only conversation — no number room to join, so the
-  // event reaches only the tenant room (MASTER_ADMIN and unscoped sub-
-  // users; see conversation.access.ts's visibleWhatsAppPhoneNumberId),
-  // the same audience the REST list already restricts an SMS
-  // conversation to.
-  const chatRooms = (tenantId: string, conversationId: string, whatsappPhoneNumberId: string | null) => {
-    const base = io.to(conversationRoom(conversationId)).to(tenantRoom(tenantId));
-    return whatsappPhoneNumberId ? base.to(phoneNumberRoom(whatsappPhoneNumberId)) : base;
-  };
+  const chatRooms = (tenantId: string, conversationId: string, whatsappPhoneNumberId: string) =>
+    io.to(conversationRoom(conversationId)).to(tenantRoom(tenantId)).to(phoneNumberRoom(whatsappPhoneNumberId));
 
   /** Calls go to the same audience as that number's chats — no conversation
    *  room, because a ringing call has no chat open yet. */
@@ -61,25 +54,18 @@ export function createSocketRealtimeEmitter(io: AppServer): RealtimeEmitter {
       io.to(conversationRoom(conversationId)).emit('web:call:ended', payload);
     },
     emitConversationUpdated(tenantId, conversation) {
-      const target = io.to(tenantRoom(tenantId));
-      (conversation.whatsappPhoneNumberId ? target.to(phoneNumberRoom(conversation.whatsappPhoneNumberId)) : target).emit(
-        'conversation:updated',
-        conversation,
-      );
+      io.to(tenantRoom(tenantId))
+        .to(phoneNumberRoom(conversation.whatsappPhoneNumberId))
+        .emit('conversation:updated', conversation);
     },
     emitConversationRead(tenantId, conversationId, byUserId, whatsappPhoneNumberId) {
-      const target = io.to(tenantRoom(tenantId));
-      (whatsappPhoneNumberId ? target.to(phoneNumberRoom(whatsappPhoneNumberId)) : target).emit('conversation:read', {
-        conversationId,
-        byUserId,
-      });
+      io.to(tenantRoom(tenantId))
+        .to(phoneNumberRoom(whatsappPhoneNumberId))
+        .emit('conversation:read', { conversationId, byUserId });
     },
     emitNotificationNew(_tenantId, userId, notification) {
       // Notifications are per-user, not broadcast tenant-wide.
       io.to(userRoom(userId)).emit('notification:new', notification);
-    },
-    emitInvitationSent(tenantId, conversationId, whatsappPhoneNumberId) {
-      chatRooms(tenantId, conversationId, whatsappPhoneNumberId).emit('invitation:sent', { conversationId });
     },
   };
 }

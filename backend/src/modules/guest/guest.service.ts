@@ -3,8 +3,7 @@ import { logger } from '../../lib/logger';
 import { trace } from '../../lib/perfTrace';
 import type { AuthContext } from '../../types/express';
 import { Tenant } from '../tenants/tenant.model';
-import { randomBytes } from 'crypto';
-import { createContact, findContactByIdAndTenant, findOrCreateContactByPhone } from '../contacts/contact.repository';
+import { findContactByIdAndTenant, findOrCreateContactByPhone } from '../contacts/contact.repository';
 import { contactDisplayName, normalizePhone } from '../../lib/phone';
 import type { GuestMediaKind } from './guestMedia.service';
 import { findPhoneNumberByIdAndTenant } from '../whatsapp/whatsapp.repository';
@@ -39,20 +38,20 @@ import {
   createGuestSession,
   findActiveSessionForConversation,
   findSessionByToken,
+  revokeSessionsForConversation,
   setSessionBlocked,
   touchSession,
   activateGuestSession,
   reissueGuestSessionToken,
-  retargetGuestSession,
 } from './guestSession.repository';
 import { countRecentGuestReports, createGuestReport, listGuestReportsForConversation } from './guestReport.repository';
+import { deleteGuestPushTokensForConversation } from './guestPushToken.repository';
 import { pushGuestMessage } from './guestPush.service';
 import type { GuestReportLean, GuestReportReason } from './guestReport.model';
 import { resolveBusinessName, resolveBusinessNameForConversation } from './businessName';
 import { hasMovedToWebChat } from './webChatRouting';
 import { guestSessionExpiresAt } from './guestSessionExpiry';
-import { findCustomerFacingNameForPhoneNumber, findUserByPersonalGuestLinkToken } from '../users/user.repository';
-import { findFirstPhoneNumberForTenant } from '../whatsapp/whatsapp.repository';
+import { findCustomerFacingNameForPhoneNumber } from '../users/user.repository';
 import { guestChatUrl } from '../tenants/guestDomain';
 import { sendGuestLinkInvitationNow, type InvitationResult } from './guestAutoReply.service';
 import { guestLinkBaseUrlFor } from '../tenants/guestDomain.service';
@@ -137,12 +136,7 @@ export interface GuestMessageView {
    * offer to take it back. A message they sent from WhatsApp shows in
    * this window too, and cannot be withdrawn from it.
    */
-  // 'sms' is in the type for parity with MessageChannel — a guest window
-  // only ever exists on a WhatsApp-origin conversation, so a message here
-  // is never actually that channel, but this stays a straight passthrough
-  // of messageChannel() rather than a narrower type the compiler cannot
-  // actually verify holds.
-  channel?: 'whatsapp' | 'web' | 'sms';
+  channel?: 'whatsapp' | 'web';
   /**
    * Set when this message was taken back by whoever sent it. The window
    * draws a tombstone; `text`, `mediaId` and `location` are absent
@@ -324,45 +318,14 @@ export async function resolveGuestContextFromToken(token: string): Promise<Guest
     throw ApiError.unauthorized('GUEST_LINK_INVALID', 'This chat link is no longer valid');
   }
   touchSession(String(session._id));
-  const { conversationId, contactId } = await ensureSessionConversation(session);
   return {
     sessionId: String(session._id),
     tenantId: String(session.tenantId),
-    conversationId,
-    contactId,
+    conversationId: String(session.conversationId),
+    contactId: String(session.contactId),
     whatsappPhoneNumberId: String(session.whatsappPhoneNumberId),
     blockedAt: session.blockedAt ?? undefined,
   };
-}
-
-/**
- * A link outlives its chat: if the agent deleted the conversation (or the
- * contact), the customer's link still opens, onto a fresh empty chat that
- * reappears in the agent's list. Deleting a chat in VOXO is tidying the
- * inbox, not taking back a link the customer was given.
- */
-async function ensureSessionConversation(
-  session: NonNullable<Awaited<ReturnType<typeof findSessionByToken>>>,
-): Promise<{ conversationId: string; contactId: string }> {
-  const tenantId = String(session.tenantId);
-  const current = await findConversationByIdAndTenant(String(session.conversationId), tenantId);
-  if (current) return { conversationId: String(current._id), contactId: String(session.contactId) };
-
-  const contact =
-    (await findContactByIdAndTenant(String(session.contactId), tenantId)) ??
-    (await createContact({
-      tenantId,
-      phone: `web-${randomBytes(6).toString('hex')}`,
-      name: 'Returning customer',
-      webOnly: true,
-    }));
-  const conversation = await findOrCreateConversation(
-    tenantId,
-    String(contact._id),
-    String(session.whatsappPhoneNumberId),
-  );
-  await retargetGuestSession(String(session._id), String(conversation._id), String(contact._id));
-  return { conversationId: String(conversation._id), contactId: String(contact._id) };
 }
 
 /**
@@ -443,18 +406,14 @@ export async function issueGuestLinkForConversation(
 
   const existing = await findActiveSessionForConversation(conversationId, auth.tenantId);
   if (existing) {
-    // A fresh token for the same chat, added alongside the old ones: every
-    // link the customer was already sent keeps working.
-    const reissued = await reissueGuestSessionToken(String(existing._id), auth.tenantId);
-    if (!reissued) {
-      throw ApiError.serviceUnavailable('GUEST_LINK_UNAVAILABLE', 'Could not prepare a link for this customer.');
-    }
-    return {
-      url: guestChatUrl(linkBaseUrl, reissued),
-      token: reissued,
-      expiresAt: existing.expiresAt.toISOString(),
-      reused: true,
-    };
+    // The plaintext token was only ever returned once, at creation — the
+    // stored hash cannot be reversed back into a URL. So a reused session
+    // can report when it expires but not what its link was; the agent app
+    // keeps the URL from the call that created it.
+    throw ApiError.conflict(
+      'GUEST_LINK_EXISTS',
+      'This conversation already has an active chat link. Revoke it first to issue a new one.',
+    );
   }
 
   const expiresAt = guestSessionExpiresAt();
@@ -592,107 +551,6 @@ export async function issuePublicGuestLink(
 }
 
 /**
- * The private chat link for one phone number, for an agent to text it from
- * their own SIM. The conversation is the customer's own (found or created by
- * their number), so the chat that opens is theirs by name, not an anonymous
- * visitor. Issuing again rotates the token: the newest link sent works.
- */
-export async function issueSmsInviteLink(auth: AuthContext, phone: string): Promise<{ url: string; expiresAt: string }> {
-  const sendingNumberId = await resolveSendingPhoneNumberId(auth.tenantId, auth.userId);
-  if (!sendingNumberId) {
-    throw ApiError.serviceUnavailable('NO_PHONE_NUMBER', 'This workspace has no number to attach a chat to yet.');
-  }
-  return issuePublicGuestLink(auth.tenantId, sendingNumberId, phone);
-}
-
-/**
- * Who a personal chat link ("My personal chat link" in Settings) actually
- * belongs to, and the number any chat started through it will go out on.
- *
- * Public by design — this is what the landing page at /u/:token reads
- * before anyone has entered a phone number, to show whose link this is —
- * so it returns nothing more sensitive than a name. `null` covers both an
- * unrecognised token and one belonging to a user this workspace has since
- * disabled; the landing page shows the same "this link isn't working
- * right now" either way.
- */
-export async function resolvePersonalGuestLink(
-  token: string,
-): Promise<{ tenantId: string; whatsappPhoneNumberId: string; displayName: string | null } | null> {
-  const owner = await findUserByPersonalGuestLinkToken(token);
-  if (!owner) return null;
-
-  // Falls back to the tenant's first connected number the same way the
-  // rest of the app treats a user with no assignment — this repository
-  // has no number of its own to send from otherwise.
-  const whatsappPhoneNumberId =
-    owner.whatsappPhoneNumberId ?? String((await findFirstPhoneNumberForTenant(owner.tenantId))?._id ?? '');
-  if (!whatsappPhoneNumberId) return null;
-
-  return { tenantId: owner.tenantId, whatsappPhoneNumberId, displayName: owner.displayName };
-}
-
-/**
- * Starts (or continues) a chat through someone's personal link.
- *
- * Deliberately the same underlying call as issuePublicGuestLink — a
- * personal link and the automation-facing public API both end at "mint
- * this phone number a guest session on this WhatsApp number," and
- * keeping that one path is what makes the "isolated session per visitor,
- * never anyone else's data" guarantee hold for both the same way.
- */
-export async function startPersonalGuestChat(
-  token: string,
-  phone?: string,
-): Promise<{ url: string; expiresAt: string; displayName: string | null }> {
-  const owner = await resolvePersonalGuestLink(token);
-  if (!owner) {
-    throw ApiError.notFound('PERSONAL_LINK_NOT_FOUND', 'This chat link is not working right now.');
-  }
-  const result = phone
-    ? await issuePublicGuestLink(owner.tenantId, owner.whatsappPhoneNumberId, phone)
-    : await issueWebOnlyGuestLink(owner.tenantId, owner.whatsappPhoneNumberId);
-  return { ...result, displayName: owner.displayName };
-}
-
-/**
- * A chat for a visitor who gave no phone number: a fresh web-only contact
- * every time, since there is nothing to recognise a returning visitor by.
- * The landing page remembers the returned link on the visitor's device so
- * reopening the personal link resumes this chat instead of starting another.
- */
-async function issueWebOnlyGuestLink(
-  tenantId: string,
-  whatsappPhoneNumberId: string,
-): Promise<{ url: string; expiresAt: string }> {
-  const linkBaseUrl = await guestLinkBaseUrlFor(tenantId);
-  if (!linkBaseUrl) {
-    throw ApiError.serviceUnavailable(
-      'GUEST_LINK_NOT_CONFIGURED',
-      'No chat domain is configured on the server, so a chat link cannot be built yet',
-    );
-  }
-
-  const suffix = randomBytes(6).toString('hex');
-  const contact = await createContact({
-    tenantId,
-    phone: `web-${suffix}`,
-    name: `Web visitor ${suffix.slice(0, 4).toUpperCase()}`,
-    webOnly: true,
-  });
-  const conversation = await findOrCreateConversation(tenantId, String(contact._id), whatsappPhoneNumberId);
-  const expiresAt = guestSessionExpiresAt();
-  const created = await createGuestSession({
-    tenantId,
-    conversationId: String(conversation._id),
-    contactId: String(contact._id),
-    whatsappPhoneNumberId,
-    expiresAt,
-  });
-  return { url: guestChatUrl(linkBaseUrl, created.token), expiresAt: expiresAt.toISOString() };
-}
-
-/**
  * Whether this conversation has a live web chat window.
  *
  * The agent app needs this to know whether replying outside Meta's
@@ -784,11 +642,10 @@ export async function revokeGuestLinkForConversation(
   if (!conversation || (scope && String(conversation.whatsappPhoneNumberId) !== scope)) {
     throw ApiError.notFound('CONVERSATION_NOT_FOUND', 'Conversation not found');
   }
-  // Links are never taken back: a customer may tap any link they were ever
-  // sent. Kept as a no-op so older app versions, which call this before
-  // asking for a new link, still get one — the issue call adds a token
-  // alongside the existing ones.
-  return { revoked: 0 };
+  const revoked = await revokeSessionsForConversation(conversationId, auth.tenantId);
+  // The link is gone, so the notifications must go with it.
+  await deleteGuestPushTokensForConversation(auth.tenantId, conversationId);
+  return { revoked };
 }
 
 /**
@@ -1016,7 +873,6 @@ export async function postGuestMessage(
   // a round trip to Google is time the customer spends watching a pending
   // tick for a message that has arrived.
   void pushIncomingMessage({
-    tray: true,
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
@@ -1242,7 +1098,6 @@ export async function postGuestMediaMessage(
   }
 
   void pushIncomingMessage({
-    tray: true,
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,
@@ -1316,7 +1171,6 @@ export async function postGuestLocationMessage(
   }
 
   void pushIncomingMessage({
-    tray: true,
     tenantId: guest.tenantId,
     conversationId: guest.conversationId,
     whatsappPhoneNumberId: guest.whatsappPhoneNumberId,

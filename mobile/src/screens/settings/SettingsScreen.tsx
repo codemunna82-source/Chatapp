@@ -22,7 +22,6 @@ import { Avatar } from '../../components/Avatar';
 import { useAuthStore } from '../../store/authStore';
 import { useWhatsAppConnection } from '../../queries/useWhatsAppConnection';
 import { MyNumberQualityCard } from './MyNumberQualityCard';
-import { PrivateChatLinkSection } from './PrivateChatLinkSection';
 import { useThemePreferenceStore, type ThemePreference } from '../../store/themePreferenceStore';
 import {
   useChatWallpaperStore,
@@ -590,7 +589,6 @@ export function SettingsScreen({ navigation }: Props) {
 
       <AppearanceSection />
       <ChatWallpaperSection />
-      <PrivateChatLinkSection />
       <AlertsSection />
 
       {isMasterAdmin && subscription.data
@@ -630,11 +628,6 @@ export function SettingsScreen({ navigation }: Props) {
           icon="people-circle-outline"
           label="Contacts"
           onPress={() => navigation.navigate('ManageContacts')}
-        />
-        <SettingsRow
-          icon="shield-checkmark-outline"
-          label="Permissions"
-          onPress={() => navigation.navigate('Permissions')}
         />
         {isMasterAdmin ? (
           <SettingsRow icon="wallet-outline" label="Wallet" onPress={() => navigation.navigate('Wallet')} />

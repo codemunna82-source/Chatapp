@@ -8,7 +8,6 @@ import { WhatsAppNumbersScreen } from '../screens/settings/WhatsAppNumbersScreen
 import { ConnectWhatsAppScreen } from '../screens/settings/ConnectWhatsAppScreen';
 import { BusinessProfileScreen } from '../screens/settings/BusinessProfileScreen';
 import { ManageContactsScreen } from '../screens/contacts/ManageContactsScreen';
-import { PermissionsScreen } from '../screens/settings/PermissionsScreen';
 import { useTheme } from '../theme/ThemeProvider';
 
 const Stack = createNativeStackNavigator<SettingsStackParamList>();
@@ -30,7 +29,6 @@ export function SettingsStackNavigator() {
       <Stack.Screen name="WhatsAppNumbers" component={WhatsAppNumbersScreen} options={{ title: 'WhatsApp number' }} />
       <Stack.Screen name="ConnectWhatsApp" component={ConnectWhatsAppScreen} options={{ title: 'Connect WhatsApp' }} />
       <Stack.Screen name="ManageContacts" component={ManageContactsScreen} options={{ title: 'Contacts' }} />
-      <Stack.Screen name="Permissions" component={PermissionsScreen} options={{ title: 'Permissions' }} />
     </Stack.Navigator>
   );
 }

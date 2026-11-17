@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming, SlideInDown, SlideOutUp } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
@@ -41,7 +41,6 @@ import { MediaSourceSheet } from './MediaSourceSheet';
 import { QuickReplySheet } from './QuickReplySheet';
 import { EmojiSheet } from './EmojiSheet';
 import { recordQuickReplyUse } from '../../queries/useQuickReplies';
-import { useInvitationSentStore } from '../../store/invitationSentStore';
 
 interface ComposerProps {
   conversationId: string;
@@ -58,39 +57,17 @@ interface ComposerProps {
    * refuse is worse than no field at all.
    */
   nextNudge?: { index: number; position: number; total: number; text: string } | null;
-  /**
-   * How many WhatsApp nudges the agent still has before the customer
-   * opens their private chat. `null`/`undefined` means the allowance
-   * doesn't apply here (demo contact, or the customer already moved to
-   * the private chat) — only `0` means "spent".
-   *
-   * Read only to decide whether typing should even be offered — the
-   * server is still the one that enforces it.
-   */
-  whatsappRepliesLeft?: number | null;
   onAttach: () => void;
   onUseTemplate: () => void;
   sending: boolean;
   replyToMessageId: string | undefined;
   /** Fired after any send this component performs itself, so the screen can clear the reply target. */
   onSent: () => void;
-  /**
-   * Present only while the restricted (pre-private-chat) composer is
-   * showing — undefined hides the SMS quick-send row entirely, both
-   * before the contact's phone number is known and once the customer has
-   * moved to the private chat and the normal composer takes over.
-   */
-  customerPhone?: string;
-  /** Sends free text by SMS, off the agent's own SIM — see sendSms.ts. */
-  onSendSms: (text: string) => void;
-  /** A chat that exists only on this phone (an SMS thread): nothing, not even typing, is sent to the server. */
-  localOnly?: boolean;
 }
 
 const TYPING_STOP_DELAY_MS = 2500;
 const RECORDER_POLL_MS = 100;
 const MAX_IMAGES_PER_SEND = 10;
-const INVITATION_BANNER_MS = 4500;
 const INPUT_MIN_HEIGHT = 22;
 const INPUT_MAX_HEIGHT = 120;
 /**
@@ -185,79 +162,6 @@ function RecordingReadout({
   );
 }
 
-/**
- * The SMS escape hatch offered alongside the nudge card / template
- * button / exhausted-allowance message — all three only ever show before
- * the customer has opened their private chat, same as this. Unlike that
- * fixed wording, whatever is typed here goes out over SMS rather than
- * WhatsApp, so there is nothing fixed about it: SMS has no 24-hour
- * window or template requirement to run into.
- */
-function SmsQuickSend({
-  colors,
-  spacing,
-  radius,
-  typography,
-  phone,
-  onSend,
-}: {
-  colors: ReturnType<typeof useTheme>['colors'];
-  spacing: ReturnType<typeof useTheme>['spacing'];
-  radius: ReturnType<typeof useTheme>['radius'];
-  typography: ReturnType<typeof useTheme>['typography'];
-  phone: string | undefined;
-  onSend: (text: string) => void;
-}) {
-  const [text, setText] = useState('');
-  if (!phone) return null;
-  const trimmed = text.trim();
-
-  return (
-    <View
-      style={{
-        marginTop: spacing.sm,
-        flexDirection: 'row',
-        alignItems: 'flex-end',
-        gap: 8,
-      }}
-    >
-      <TextInput
-        value={text}
-        onChangeText={setText}
-        placeholder="Or message them by SMS instead…"
-        placeholderTextColor={colors.textTertiary}
-        multiline
-        style={[
-          typography.body,
-          {
-            flex: 1,
-            maxHeight: 100,
-            backgroundColor: colors.surfaceAlt,
-            borderRadius: radius.md,
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-            color: colors.textPrimary,
-          },
-        ]}
-      />
-      <Pressable
-        onPress={() => {
-          if (!trimmed) return;
-          onSend(trimmed);
-          setText('');
-        }}
-        disabled={!trimmed}
-        hitSlop={8}
-        style={{ paddingVertical: 8, opacity: trimmed ? 1 : 0.4 }}
-        accessibilityRole="button"
-        accessibilityLabel="Send by SMS"
-      >
-        <Ionicons name="send" size={22} color={colors.primary} />
-      </Pressable>
-    </View>
-  );
-}
-
 export function Composer({
   conversationId,
   whatsappPhoneNumberId,
@@ -269,10 +173,6 @@ export function Composer({
   replyToMessageId,
   onSent,
   nextNudge,
-  whatsappRepliesLeft,
-  customerPhone,
-  onSendSms,
-  localOnly = false,
 }: ComposerProps) {
   const { colors, spacing, radius, typography } = useTheme();
   // The bottom inset is owned by the screen's keyboard-tracking wrapper
@@ -302,7 +202,6 @@ export function Composer({
   const handleChangeText = (value: string) => {
     setText(value);
     draft.save(value);
-    if (localOnly) return;
     emitTypingStart(conversationId);
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => emitTypingStop(conversationId), TYPING_STOP_DELAY_MS);
@@ -457,7 +356,7 @@ export function Composer({
     draft.clear();
     setInputHeight(INPUT_MIN_HEIGHT);
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
-    if (!localOnly) emitTypingStop(conversationId);
+    emitTypingStop(conversationId);
   };
 
   // ----------------------------------------------------------- voice notes
@@ -672,24 +571,6 @@ export function Composer({
     }
   };
 
-  // The private-chat invitation is `internal` and never appears as a
-  // message bubble (guestAutoReply.service.ts), so this socket-driven
-  // flag (invitationSentStore.ts) is the only live sign an agent gets
-  // that one just went out — shown here, in the composer's own place,
-  // for a few seconds before the composer reverts to whatever state
-  // actually applies (idle, the nudge card, or the window-closed notice).
-  const invitationSentAt = useInvitationSentStore((s) => s.sentAt[conversationId]);
-  // Which sent-event the banner has already been shown and timed out for —
-  // not a plain boolean, so showing it needs no setState of its own: the
-  // comparison below is already true the instant invitationSentAt changes.
-  const [dismissedSentAt, setDismissedSentAt] = useState<number | undefined>(undefined);
-  const showInvitationBanner = Boolean(invitationSentAt) && invitationSentAt !== dismissedSentAt;
-  useEffect(() => {
-    if (!invitationSentAt) return;
-    const timer = setTimeout(() => setDismissedSentAt(invitationSentAt), INVITATION_BANNER_MS);
-    return () => clearTimeout(timer);
-  }, [invitationSentAt]);
-
   // ------------------------------------------------------------ rendering
   const shellStyle = [
     styles.shell,
@@ -701,40 +582,6 @@ export function Composer({
       paddingBottom: bottomPad,
     },
   ];
-
-  if (showInvitationBanner) {
-    return (
-      <Animated.View
-        entering={SlideInDown.duration(220)}
-        exiting={SlideOutUp.duration(220)}
-        style={[shellStyle, styles.invitationBanner, { backgroundColor: colors.successMuted }]}
-      >
-        <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-        <Text style={[typography.bodyMedium, { color: colors.textPrimary, flexShrink: 1 }]}>
-          Invitation sent — you can send more once they open the link
-        </Text>
-      </Animated.View>
-    );
-  }
-
-  // Every WhatsApp send — a template included, since picking one is
-  // still spending a nudge (whatsappQuota.ts) — is refused once the
-  // allowance hits zero. Checked ahead of the window/template branch
-  // below too, so a workspace that ran out can't be offered a template
-  // button that's just as guaranteed to be rejected.
-  const nudgesExhausted = whatsappRepliesLeft === 0;
-
-  if (nudgesExhausted) {
-    return (
-      <View style={[shellStyle, { paddingBottom: bottomPad + spacing.sm }]}>
-        <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: spacing.sm }]}>
-          You&apos;ve used up the WhatsApp replies allowed until this contact opens their private chat.
-          Send them the private chat link — once they open it you can message them without any limit.
-        </Text>
-        <SmsQuickSend colors={colors} spacing={spacing} radius={radius} typography={typography} phone={customerPhone} onSend={onSendSms} />
-      </View>
-    );
-  }
 
   // Spec §18: outside the 24h window, only an approved template may be
   // sent — enforced server-side regardless, but the composer shouldn't
@@ -753,7 +600,6 @@ export function Composer({
         >
           <Text style={[typography.bodyMedium, { color: colors.textOnPrimary, textAlign: 'center' }]}>Use a template</Text>
         </Pressable>
-        <SmsQuickSend colors={colors} spacing={spacing} radius={radius} typography={typography} phone={customerPhone} onSend={onSendSms} />
       </View>
     );
   }
@@ -970,7 +816,6 @@ export function Composer({
             </Text>
           </Pressable>
         </View>
-        <SmsQuickSend colors={colors} spacing={spacing} radius={radius} typography={typography} phone={customerPhone} onSend={onSendSms} />
       </View>
     );
   }
@@ -981,19 +826,11 @@ export function Composer({
       {errorText ? <Text style={[typography.caption, { color: colors.danger, marginBottom: 4 }]}>{errorText}</Text> : null}
 
       <View style={styles.row}>
-        {/* An SMS-only thread has no private chat to carry a photo, file or
-            voice note, so none of those controls are offered: media goes to
-            the customer once they have opened their private chat link, and
-            this thread is replaced by the private chat at that point. */}
-        {localOnly ? (
-          <View style={{ width: spacing.sm }} />
-        ) : (
-          <Pressable onPress={onAttach} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Add attachment">
-            {({ pressed }) => (
-              <Ionicons name="add-circle-outline" size={26} color={colors.textSecondary} style={{ opacity: pressed ? 0.5 : 1 }} />
-            )}
-          </Pressable>
-        )}
+        <Pressable onPress={onAttach} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Add attachment">
+          {({ pressed }) => (
+            <Ionicons name="add-circle-outline" size={26} color={colors.textSecondary} style={{ opacity: pressed ? 0.5 : 1 }} />
+          )}
+        </Pressable>
 
         <View style={[styles.pill, { backgroundColor: colors.surfaceAlt, borderRadius: radius.xl, borderColor: colors.border }]}>
           <TextInput
@@ -1007,13 +844,12 @@ export function Composer({
           />
           {/* Inside the pill rather than as a fifth button in the row: at
               four icons the row is already at the width where touch targets
-              start being squeezed on a small phone. Trailing edge of the
-              input — the private-chat web composer's own layout (see
-              waprivate.dev), matched exactly rather than the native
-              WhatsApp app's leading placement. Saved replies live on a
-              long press here instead of their own button, which is where
-              a second, rarer action belongs when the first one is
-              reached constantly. */}
+              start being squeezed on a small phone.
+
+              Emoji, where the saved-replies bolt used to be. Saved
+              replies did not go anywhere — they moved to a long press on
+              this same spot, which is where a second, rarer action
+              belongs when the first one is reached constantly. */}
           <Pressable
             onPress={() => setEmojiOpen(true)}
             onLongPress={() => setQuickReplyOpen(true)}
@@ -1028,25 +864,23 @@ export function Composer({
           </Pressable>
         </View>
 
-        {!localOnly && (
-          <Pressable
-            onPress={() => setMediaSheetOpen(true)}
-            style={styles.iconButton}
-            accessibilityRole="button"
-            accessibilityLabel="Take a photo or choose from gallery"
-          >
-            {({ pressed }) => (
-              <Ionicons
-                name="camera-outline"
-                size={24}
-                color={colors.textSecondary}
-                style={{ opacity: pressed ? 0.5 : 1 }}
-              />
-            )}
-          </Pressable>
-        )}
+        <Pressable
+          onPress={() => setMediaSheetOpen(true)}
+          style={styles.iconButton}
+          accessibilityRole="button"
+          accessibilityLabel="Take a photo or choose from gallery"
+        >
+          {({ pressed }) => (
+            <Ionicons
+              name="camera-outline"
+              size={24}
+              color={colors.textSecondary}
+              style={{ opacity: pressed ? 0.5 : 1 }}
+            />
+          )}
+        </Pressable>
 
-        {canSend || localOnly ? (
+        {canSend ? (
           <Pressable
             onPress={handleSend}
             style={styles.actionTouch}
@@ -1054,7 +888,7 @@ export function Composer({
             accessibilityLabel="Send message"
           >
             {({ pressed }) => (
-              <View style={[styles.actionCircle, { backgroundColor: colors.primary, opacity: pressed || !canSend ? 0.5 : 1 }]}>
+              <View style={[styles.actionCircle, { backgroundColor: colors.primary, opacity: pressed ? 0.6 : 1 }]}>
                 <Ionicons name="send" size={17} color={colors.textOnPrimary} style={styles.sendGlyph} />
               </View>
             )}
@@ -1127,16 +961,11 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   shell: { borderTopWidth: StyleSheet.hairlineWidth },
-  invitationBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: touchTarget.min, borderRadius: 10 },
   row: { flexDirection: 'row', alignItems: 'flex-end' },
   // Every control is a real 48dp touch square regardless of its icon size —
   // see touchTarget in theme/spacing.ts.
   iconButton: { width: touchTarget.min, height: touchTarget.min, alignItems: 'center', justifyContent: 'center' },
-  // No alignSelf override: the pill's own alignItems: 'center' already
-  // centers this against the input vertically, which 'flex-end' here used
-  // to fight — correct for a single line, but it left the emoji sitting
-  // noticeably below centre at the composer's normal resting height.
-  pillAction: { paddingHorizontal: 4 },
+  pillAction: { paddingHorizontal: 4, alignSelf: 'flex-end', paddingBottom: 6 },
   pill: {
     flex: 1,
     flexDirection: 'row',
