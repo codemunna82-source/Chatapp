@@ -69,6 +69,10 @@ export async function metaRequest<T>(build: (client: AxiosInstance) => Promise<{
           // asset, WHICH of several unrelated causes a single code (like
           // 200, "Permissions error") can mean.
           metaMessage: mapped.message,
+          // Which part of the request (body / header / button) a 132000-style
+          // parameter mismatch is about; the message alone only says "number
+          // of parameters does not match".
+          metaDetails: mapped.details,
         },
         'Meta API request failed',
       );

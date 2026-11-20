@@ -7,6 +7,8 @@ export interface MetaErrorResponseBody {
     code?: number;
     error_subcode?: number;
     fbtrace_id?: string;
+    /** Meta's own detail line, e.g. "body: number of localizable_params (0) does not match the expected number of params (1)". */
+    error_data?: { details?: string };
   };
 }
 
@@ -27,10 +29,19 @@ export class MetaApiError extends Error {
    *  reference to quote back if a block ever needs a Meta support
    *  ticket to clear. */
   readonly fbtraceId?: string;
+  /** Which part of the request Meta objected to, when it says (template parameter mismatches name body/header/button). */
+  readonly details?: string;
 
   constructor(
     message: string,
-    opts: { code: string; metaCode?: number; metaSubcode?: number; retryable?: boolean; fbtraceId?: string },
+    opts: {
+      code: string;
+      metaCode?: number;
+      metaSubcode?: number;
+      retryable?: boolean;
+      fbtraceId?: string;
+      details?: string;
+    },
   ) {
     super(message);
     this.name = 'MetaApiError';
@@ -39,6 +50,7 @@ export class MetaApiError extends Error {
     this.metaSubcode = opts.metaSubcode;
     this.retryable = opts.retryable ?? false;
     this.fbtraceId = opts.fbtraceId;
+    this.details = opts.details;
   }
 }
 
@@ -70,6 +82,7 @@ export function mapMetaError(status: number, body: MetaErrorResponseBody | undef
     metaSubcode: body?.error?.error_subcode,
     retryable,
     fbtraceId: body?.error?.fbtrace_id,
+    details: body?.error?.error_data?.details,
   });
 }
 
