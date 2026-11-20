@@ -111,7 +111,16 @@ const autoGuestLinkSchema = z
      * tenant-wide default that every number without its own override
      * uses — see Tenant.autoGuestLinkByApp in tenant.model.ts.
      */
-    metaAppId: z.string().trim().min(1).optional(),
+    // `null` means "the tenant-wide default", which is how the admin page
+    // says it — JSON.stringify keeps null and drops undefined, so the form
+    // sent null here and a plain .optional() answered every save of the
+    // default with "Expected string, received null".
+    metaAppId: z
+      .string()
+      .trim()
+      .min(1)
+      .nullish()
+      .transform((value) => value ?? undefined),
   })
   // Only template mode needs anything named. Refused here rather than at
   // send time, where the failure happens inside the webhook handler with
