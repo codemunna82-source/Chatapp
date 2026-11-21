@@ -109,7 +109,7 @@ async function resolveAutoGuestLinkConfig(
  *    message would be processed twice. A failed auto-reply must cost the
  *    auto-reply and nothing else.
  */
-export type InvitationSentVia = 'text' | 'template' | 'text-after-template-failed';
+export type InvitationSentVia = 'text' | 'template';
 
 export interface InvitationResult {
   /** What actually went out, which is not always what was configured. */
@@ -252,7 +252,7 @@ async function deliverGuestLinkInvitation(
   }
 
   const url = guestChatUrl(linkBaseUrl, token);
-  let sentVia: InvitationSentVia = mode;
+  const sentVia: InvitationSentVia = mode;
 
   // No senderId on either path: nobody sent this. Recording a human's id
   // would put an agent's name on a message they did not write, and the
@@ -325,25 +325,21 @@ async function deliverGuestLinkInvitation(
         await sendTemplate(false);
       }
     } catch (templateErr) {
-      // A template belongs to a WhatsApp Business Account, not to this
-      // workspace — while this setting is one per workspace. A workspace
-      // running two numbers on two Business Managers has two WABAs, and a
-      // template approved on one simply does not exist on the other: Meta
-      // answers (#132001) and the customer gets NOTHING. The same happens
-      // for a language code that does not match the approved copy, or a
-      // template still in review.
+      // Template-only, by the owner's decision: a template that cannot be
+      // sent is NOT replaced by the same link as plain text. A bare link in
+      // free-form text is what an account-quality review reads as a link
+      // dropped on a stranger, and the owner would rather the customer
+      // receive nothing than that. (Previously this fell back to text.)
       //
-      // So the invitation falls back to text rather than to silence.
-      // Free-form is allowed here for the reason the text mode relies on —
-      // this follows the customer's own message, so the 24-hour window is
-      // open. The link is the same one the template would have carried, on
-      // the same token; it arrives as a bare URL instead of a tappable
-      // button, which is worse than the template and far better than
-      // nothing.
+      // An automatic attempt ends here quietly — logged, not retried, and
+      // not counted, because nothing reached the customer. Throwing would
+      // make the queue retry a refusal that will not change. A manual
+      // attempt (an agent tapped "send the invitation") rethrows, so the
+      // agent is told the template failed instead of seeing nothing.
       //
       // Logged at warn with the name and language, because the fix is an
-      // admin's: create and submit this template on THAT number's WhatsApp
-      // Business Account too.
+      // admin's: the template must exist, in this language, approved, on
+      // THIS number's WhatsApp Business Account.
       logger.warn(
         {
           err: templateErr,
@@ -352,19 +348,12 @@ async function deliverGuestLinkInvitation(
           whatsappPhoneNumberId: input.whatsappPhoneNumberId,
           template: config?.templateName,
           language: config?.templateLanguage,
+          trigger: opts.trigger,
         },
-        "The approved template could not be sent on this number — sending the invitation as plain text instead. Check the template exists, in this language, on this number's WhatsApp Business Account.",
+        'The approved template could not be sent — NOT falling back to plain text (template-only). Check the template exists, in this language, on this number\'s WhatsApp Business Account.',
       );
-
-      await sendOutboundMessage({
-        tenantId: input.tenantId,
-        conversationId: input.conversationId,
-        type: 'text',
-        text: renderAutoGuestLinkText(config?.message ?? undefined, url),
-        internal: true,
-        exemptFromNudgeWording: true,
-      });
-      sentVia = 'text-after-template-failed';
+      if (!auto) throw templateErr;
+      return null;
     }
   }
 
@@ -494,6 +483,15 @@ export async function sendInvitationTextFallback(input: {
   conversationId: string;
   whatsappPhoneNumberId: string;
 }): Promise<boolean> {
+  // Template-only (see deliverGuestLinkInvitation): a refused template is
+  // not re-sent as plain text. `false` makes the caller refund the invite
+  // count, so the customer's next message tries the template again.
+  logger.info(
+    { tenantId: input.tenantId, conversationId: input.conversationId },
+    'Meta refused the invitation template — plain-text recovery is switched off (template-only)',
+  );
+  if (PLAIN_TEXT_FALLBACK_ENABLED === false) return false;
+
   try {
     const linkBaseUrl = await guestLinkBaseUrlFor(input.tenantId);
     if (!linkBaseUrl) return false;
@@ -580,6 +578,9 @@ export function shouldSendInvite(
   if (session.activatedAt) return false;
   return (session.invitesSent ?? 0) < maxSends;
 }
+
+/** The owner's call: a template that cannot be sent is not replaced by the link as plain text. */
+const PLAIN_TEXT_FALLBACK_ENABLED: boolean = false;
 
 /** Per template: did the numbered or the named variable style work last? In memory only — a restart relearns it with one extra attempt. */
 const namedBodyStyle = new Map<string, boolean>();
