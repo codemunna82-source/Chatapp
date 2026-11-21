@@ -60,4 +60,17 @@ describe('buildAutoGuestLinkComponents', () => {
     expect(components).toHaveLength(1);
     expect(components).not.toContainEqual(expect.objectContaining({ type: 'body' }));
   });
+
+  it('names the body parameter when the template uses a named variable', () => {
+    const body = asComponents(buildAutoGuestLinkComponents('Priya', token, 'customer_name', true))[0]!;
+    expect(body).toEqual({
+      type: 'body',
+      parameters: [{ type: 'text', parameter_name: 'customer_name', text: 'Priya' }],
+    });
+  });
+
+  it('leaves the body parameter unnamed by default, as numbered templates require', () => {
+    const body = asComponents(buildAutoGuestLinkComponents('Priya', token, 'customer_name'))[0]!;
+    expect((body.parameters as Array<Record<string, unknown>>)[0]).not.toHaveProperty('parameter_name');
+  });
 });

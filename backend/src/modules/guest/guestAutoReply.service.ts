@@ -286,19 +286,44 @@ async function deliverGuestLinkInvitation(
       const contact = await findContactByIdAndTenant(input.contactId, input.tenantId);
       customerName = contact?.name?.trim() || null;
     }
-    const components = buildAutoGuestLinkComponents(customerName, token, config?.bodyVariable ?? 'none');
-
-    try {
-      await sendOutboundMessage({
+    const bodyVariable = config?.bodyVariable ?? 'none';
+    const sendTemplate = (namedBody: boolean) =>
+      sendOutboundMessage({
         tenantId: input.tenantId,
         conversationId: input.conversationId,
         type: 'template',
         templateName: config?.templateName ?? undefined,
         languageCode: config?.templateLanguage ?? undefined,
-        templateComponents: components,
+        templateComponents: buildAutoGuestLinkComponents(customerName, token, bodyVariable, namedBody),
         internal: true,
         exemptFromNudgeWording: true,
       });
+
+    try {
+      if (bodyVariable === 'customer_name') {
+        // Which way this template wants its name variable — numbered
+        // (`{{1}}`) or named (`{{customer_name}}`) — is only known to
+        // Meta, and a wrong guess is answered with an error. So it tries
+        // the way that last worked for this template (numbered, the
+        // original behaviour, the first time), tries the other way once if
+        // that is refused, and remembers whichever succeeds. A template
+        // that is wrong for some other reason fails both and still falls
+        // through to the plain-text invitation below.
+        const key = `${input.tenantId}:${config?.templateName}:${config?.templateLanguage}`;
+        const preferNamed = namedBodyStyle.get(key) ?? false;
+        try {
+          await sendTemplate(preferNamed);
+        } catch (firstErr) {
+          logger.info(
+            { tenantId: input.tenantId, template: config?.templateName, triedNamed: preferNamed, err: firstErr },
+            'Template send refused — trying the other variable style once',
+          );
+          await sendTemplate(!preferNamed);
+          namedBodyStyle.set(key, !preferNamed);
+        }
+      } else {
+        await sendTemplate(false);
+      }
     } catch (templateErr) {
       // A template belongs to a WhatsApp Business Account, not to this
       // workspace — while this setting is one per workspace. A workspace
@@ -556,6 +581,9 @@ export function shouldSendInvite(
   return (session.invitesSent ?? 0) < maxSends;
 }
 
+/** Per template: did the numbered or the named variable style work last? In memory only — a restart relearns it with one extra attempt. */
+const namedBodyStyle = new Map<string, boolean>();
+
 /**
  * The template's variable slots, filled.
  *
@@ -574,6 +602,13 @@ export function buildAutoGuestLinkComponents(
   customerName: string | null,
   token: string,
   bodyVariable: 'none' | 'customer_name',
+  /**
+   * The template's body variable is a NAMED one (`{{customer_name}}`, not
+   * `{{1}}`). Meta then wants the name on the parameter itself and answers
+   * a bare one with "(#100) Parameter name is missing or empty". The name
+   * is the setting's own: `customer_name`.
+   */
+  namedBody = false,
 ): unknown[] {
   const components: unknown[] = [];
 
@@ -582,7 +617,13 @@ export function buildAutoGuestLinkComponents(
     // is ordinary — most customers message before they are ever named.
     components.push({
       type: 'body',
-      parameters: [{ type: 'text', text: customerName || 'there' }],
+      parameters: [
+        {
+          type: 'text',
+          ...(namedBody ? { parameter_name: 'customer_name' } : {}),
+          text: customerName || 'there',
+        },
+      ],
     });
   }
 
