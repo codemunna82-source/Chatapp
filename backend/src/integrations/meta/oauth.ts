@@ -214,3 +214,31 @@ export async function debugToken(accessToken: string): Promise<TokenDiagnosis> {
     granted: d.granular_scopes?.map((g) => ({ scope: g.scope, targetIds: g.target_ids })),
   };
 }
+
+/**
+ * Asks Meta directly what this token can see, instead of inferring it from
+ * debug_token: the WhatsApp accounts assigned to the token's System User,
+ * and whether the one account in question can be read at all. Each answer
+ * is either Meta's data or Meta's own error text — both are the point.
+ */
+export async function probeWabaAccess(
+  accessToken: string,
+  systemUserId: string | undefined,
+  wabaId: string | undefined,
+): Promise<{ assignedWabas: unknown; wabaRead: unknown }> {
+  const ask = async (path: string, params: Record<string, string>) => {
+    try {
+      const res = await metaRequest<unknown>((client) =>
+        client.get(path, { ...authConfig(accessToken), params }),
+      );
+      return res;
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'unknown' };
+    }
+  };
+  const assignedWabas = systemUserId
+    ? await ask(`/${systemUserId}/assigned_whatsapp_business_accounts`, { fields: 'id,name' })
+    : { skipped: 'no system user id' };
+  const wabaRead = wabaId ? await ask(`/${wabaId}`, { fields: 'id,name' }) : { skipped: 'no waba id' };
+  return { assignedWabas, wabaRead };
+}

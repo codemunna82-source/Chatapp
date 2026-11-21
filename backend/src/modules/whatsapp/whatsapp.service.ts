@@ -14,7 +14,7 @@ import { describeNumberHealth, type NumberHealth } from './numberHealth';
 import { summariseHealthStatus, summariseWabaHealth } from './healthStatusSummary';
 import { fetchNumberHealthStatus } from '../../integrations/meta/phoneNumbers';
 import { blockNumberRemoval } from './removalGuards';
-import { debugToken, registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta/oauth';
+import { debugToken, probeWabaAccess, registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta/oauth';
 import { User } from '../users/user.model';
 import { Conversation } from '../conversations/conversation.model';
 import { Message } from '../messages/message.model';
@@ -911,8 +911,13 @@ async function logTokenDiagnosis(
     } catch (err) {
       meta = { debugTokenFailed: err instanceof Error ? err.message : 'unknown' };
     }
+    const probe = await probeWabaAccess(
+      accessToken,
+      (meta as { userId?: string } | undefined)?.userId,
+      wabaId,
+    ).catch(() => undefined);
     logger.warn(
-      { numberId: String(number._id), phoneNumberId: number.phoneNumberId, wabaId, tokenSource: source, meta },
+      { numberId: String(number._id), phoneNumberId: number.phoneNumberId, wabaId, tokenSource: source, meta, probe },
       'Meta token diagnosis — is wabaId inside any granted target_ids?',
     );
   } catch (err) {
