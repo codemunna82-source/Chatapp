@@ -159,3 +159,58 @@ export async function subscribeAppToWaba(accessToken: string, wabaId: string): P
     client.post(`/${wabaId}/subscribed_apps`, {}, authConfig(accessToken)),
   );
 }
+
+/**
+ * What Meta itself says about a token: whose it is, which app, which
+ * scopes, and — the part that decides "(#100) Need either permission on
+ * WhatsApp Business Account" — which WhatsApp accounts it was granted
+ * (`granular_scopes[].target_ids`). A token can be perfectly valid and
+ * still have been granted none of them.
+ *
+ * A token may inspect itself, so no separate app token is needed. Returns
+ * only what is safe to log: never the token.
+ */
+export interface TokenDiagnosis {
+  isValid?: boolean;
+  type?: string;
+  appId?: string;
+  application?: string;
+  userId?: string;
+  expiresAt?: number;
+  dataAccessExpiresAt?: number;
+  scopes?: string[];
+  /** Per scope, the asset ids it was granted on (e.g. WhatsApp account ids). */
+  granted?: Array<{ scope: string; targetIds?: string[] }>;
+}
+
+export async function debugToken(accessToken: string): Promise<TokenDiagnosis> {
+  const config: AxiosRequestConfig = {
+    ...authConfig(accessToken),
+    params: { input_token: accessToken },
+  };
+  const res = await metaRequest<{
+    data: {
+      is_valid?: boolean;
+      type?: string;
+      app_id?: string;
+      application?: string;
+      user_id?: string;
+      expires_at?: number;
+      data_access_expires_at?: number;
+      scopes?: string[];
+      granular_scopes?: Array<{ scope: string; target_ids?: string[] }>;
+    };
+  }>((client) => client.get('/debug_token', config));
+  const d = res.data;
+  return {
+    isValid: d.is_valid,
+    type: d.type,
+    appId: d.app_id,
+    application: d.application,
+    userId: d.user_id,
+    expiresAt: d.expires_at,
+    dataAccessExpiresAt: d.data_access_expires_at,
+    scopes: d.scopes,
+    granted: d.granular_scopes?.map((g) => ({ scope: g.scope, targetIds: g.target_ids })),
+  };
+}

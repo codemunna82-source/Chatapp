@@ -14,7 +14,7 @@ import { describeNumberHealth, type NumberHealth } from './numberHealth';
 import { summariseHealthStatus, summariseWabaHealth } from './healthStatusSummary';
 import { fetchNumberHealthStatus } from '../../integrations/meta/phoneNumbers';
 import { blockNumberRemoval } from './removalGuards';
-import { registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta/oauth';
+import { debugToken, registerPhoneNumber, subscribeAppToWaba } from '../../integrations/meta/oauth';
 import { User } from '../users/user.model';
 import { Conversation } from '../conversations/conversation.model';
 import { Message } from '../messages/message.model';
@@ -872,6 +872,54 @@ export async function removeNumberFromTenant(
  * treated as a failure — re-running this is how you recover from a partial
  * setup, and it has to be safe to repeat.
  */
+
+/**
+ * Writes down WHICH token a number is using and what Meta says that token
+ * can reach, when Meta has just refused it a permission.
+ *
+ * "(#100) Need either permission on WhatsApp Business Account" means the
+ * token was never granted that account. From the admin page the only
+ * visible cause is "token", and a token can be changed in three places
+ * (the number's own, its Business Manager's, the server default) with the
+ * strongest one winning silently — so replacing the wrong one changes
+ * nothing, which is exactly how this looks from outside. This line says
+ * which one is in use and what it was actually granted.
+ *
+ * Logs ids and scopes only — never the token. Never throws.
+ */
+async function logTokenDiagnosis(
+  tenantId: string,
+  number: { _id: unknown; phoneNumberId: string; whatsappAccountId: unknown },
+  accessToken: string,
+  wabaId: string | undefined,
+): Promise<void> {
+  try {
+    const account = await WhatsAppAccount.findOne({ _id: number.whatsappAccountId, tenantId })
+      .select('+accessTokenEnc metaAppId')
+      .lean();
+    const app = account?.metaAppId ? await MetaApp.findById(String(account.metaAppId)).select('name').lean() : null;
+    const ownToken = Boolean(account?.accessTokenEnc && isEncryptedEnvelope(account.accessTokenEnc));
+    const source = ownToken
+      ? 'the number\'s own account token (a Business Manager token is IGNORED while this is set)'
+      : app
+        ? `Business Manager "${app.name}"`
+        : 'the server default META_ACCESS_TOKEN';
+
+    let meta: unknown;
+    try {
+      meta = await debugToken(accessToken);
+    } catch (err) {
+      meta = { debugTokenFailed: err instanceof Error ? err.message : 'unknown' };
+    }
+    logger.warn(
+      { numberId: String(number._id), phoneNumberId: number.phoneNumberId, wabaId, tokenSource: source, meta },
+      'Meta token diagnosis — is wabaId inside any granted target_ids?',
+    );
+  } catch (err) {
+    logger.warn({ err }, 'Could not diagnose the token');
+  }
+}
+
 export async function registerNumberForCloudApi(
   tenantId: string,
   numberId: string,
@@ -929,6 +977,7 @@ export async function registerNumberForCloudApi(
       // Registration below is the more important half, and saying so in
       // the result beats failing the whole call.
       logger.warn({ err, wabaId: account.wabaId }, 'subscribed_apps failed during manual registration');
+      await logTokenDiagnosis(tenantId, number, credentials.accessToken, account.wabaId);
       subscriptionNote =
         ' Meta refused to subscribe this WhatsApp account to your app, so INBOUND MESSAGES WILL NOT ARRIVE. ' +
         'Usually the access token is missing whatsapp_business_management, or the System User does not have ' +
